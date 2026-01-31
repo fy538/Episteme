@@ -34,7 +34,9 @@ export class APIClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const token = this.getToken();
+    // Dev mode bypass: skip auth for local development
+    const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+    const token = isDevMode ? null : this.getToken();
     
     const headers: HeadersInit = {
       'Content-Type': 'application/json',

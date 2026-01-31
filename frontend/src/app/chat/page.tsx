@@ -5,16 +5,27 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { StructureSidebar } from '@/components/structure/StructureSidebar';
 import { chatAPI } from '@/lib/api/chat';
+import { authAPI } from '@/lib/api/auth';
 
 export default function ChatPage() {
+  const router = useRouter();
   const [threadId, setThreadId] = useState<string | null>(null);
   const [caseId, setCaseId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
   const [error, setError] = useState<string | null>(null);
+
+  // Check auth before loading
+  useEffect(() => {
+    const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+    if (!isDevMode && !authAPI.isAuthenticated()) {
+      router.push('/login');
+      return;
+    }
+  }, [router]);
 
   // Create or get thread on mount
   useEffect(() => {
