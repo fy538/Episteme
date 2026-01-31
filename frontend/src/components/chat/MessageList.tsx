@@ -9,9 +9,13 @@ import ReactMarkdown from 'react-markdown';
 export function MessageList({
   messages,
   isWaitingForResponse,
+  isStreaming,
+  ttft,
 }: {
   messages: Message[];
   isWaitingForResponse?: boolean;
+  isStreaming?: boolean;
+  ttft?: number | null;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -52,7 +56,7 @@ export function MessageList({
           </div>
         </div>
       ))}
-      {isWaitingForResponse && (
+      {isWaitingForResponse && !isStreaming && (
         <div className="flex justify-start">
           <div className="max-w-2xl rounded-lg px-4 py-3 bg-gray-100 text-gray-900">
             <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -61,9 +65,14 @@ export function MessageList({
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0.2s]" />
               </span>
-              <span>Assistant is typing...</span>
+              <span>Waiting for response...</span>
             </div>
           </div>
+        </div>
+      )}
+      {isStreaming && ttft !== null && (
+        <div className="text-xs text-gray-400 px-4 py-1">
+          Streaming (TTFT: {ttft}ms)
         </div>
       )}
       <div ref={bottomRef} />

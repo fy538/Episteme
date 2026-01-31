@@ -140,7 +140,8 @@ export class APIClient {
   async stream(
     endpoint: string,
     data: any,
-    onEvent: (event: { event: string; data: any }) => void
+    onEvent: (event: { event: string; data: any }) => void,
+    signal?: AbortSignal
   ): Promise<void> {
     const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
     const token = isDevMode ? null : this.getToken();
@@ -156,6 +157,7 @@ export class APIClient {
       headers,
       body: JSON.stringify(data),
       mode: 'cors',
+      signal, // Pass abort signal
     });
 
     if (!response.ok) {

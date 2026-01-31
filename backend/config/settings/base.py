@@ -141,6 +141,19 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
+# Celery Beat Schedule (periodic tasks)
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'consolidate-signals-daily': {
+        'task': 'apps.signals.tasks.schedule_signal_consolidation',
+        'schedule': crontab(hour=3, minute=0),  # 3 AM daily
+    },
+    'update-signal-temperatures-daily': {
+        'task': 'apps.signals.tasks.update_signal_temperatures',
+        'schedule': crontab(hour=4, minute=0),  # 4 AM daily
+    },
+}
+
 # Chat response behavior
 # When true, generate assistant responses inline (no Celery required).
 CHAT_SYNC_RESPONSES = env.bool('CHAT_SYNC_RESPONSES', default=False)

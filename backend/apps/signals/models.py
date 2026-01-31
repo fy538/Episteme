@@ -26,6 +26,13 @@ class SignalSourceType(models.TextChoices):
     ANALYSIS = 'analysis', 'Analysis'  # Future: derived from clustering, etc.
 
 
+class SignalTemperature(models.TextChoices):
+    """Memory tier - how readily accessible is this signal"""
+    HOT = 'hot', 'Hot (Always in Context)'
+    WARM = 'warm', 'Warm (Retrieved on Demand)'
+    COLD = 'cold', 'Cold (Archival)'
+
+
 class Signal(UUIDModel, TimestampedModel):
     """
     Atomic unit of meaning extracted from any source
@@ -80,6 +87,33 @@ class Signal(UUIDModel, TimestampedModel):
         null=True,
         blank=True,
         help_text="If user marked this signal as not relevant"
+    )
+    
+    # Memory tier (for retrieval optimization)
+    temperature = models.CharField(
+        max_length=10,
+        choices=SignalTemperature.choices,
+        default=SignalTemperature.WARM,
+        db_index=True,
+        help_text="Memory tier - hot=always loaded, warm=retrieved, cold=archival"
+    )
+    
+    # Access tracking (for adaptive temperature calculation)
+    access_count = models.IntegerField(
+        default=0,
+        help_text="How many times this signal was retrieved for context"
+    )
+    last_accessed = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time this signal was included in LLM context"
+    )
+    
+    # User can pin signals to hot tier
+    pinned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="User pinned this signal to always include in context"
     )
     
     # Semantic embedding (for similarity search and deduplication at read time)
@@ -156,7 +190,72 @@ class Signal(UUIDModel, TimestampedModel):
             models.Index(fields=['dedupe_key', 'case']),
             models.Index(fields=['inquiry', 'created_at']),  # Signals by inquiry
             models.Index(fields=['dismissed_at']),  # Filter dismissed signals
+            models.Index(fields=['temperature', 'case']),  # Memory tier queries
+            models.Index(fields=['thread', 'temperature']),  # Hot signals per thread
+            models.Index(fields=['access_count', 'last_accessed']),  # Frequently accessed
         ]
     
     def __str__(self):
         return f"{self.type}: {self.text[:50]}..."
+    
+    def calculate_temperature(self):
+        """
+        Adaptive temperature calculation (ARM-style).
+        
+        Hot if:
+        - User pinned
+        - Very recent (< 5 messages ago in thread)
+        - High access count (> 10 retrievals)
+        - High confidence + recently accessed
+        
+        Cold if:
+        - Dismissed
+        - Very old + low access
+        - Contradicted + low confidence
+        
+        Warm otherwise
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        # User override
+        if self.pinned_at:
+            return SignalTemperature.HOT
+        
+        # Dismissed/archived
+        if self.dismissed_at:
+            return SignalTemperature.COLD
+        
+        # Recent in thread (last 5 messages)
+        if self.thread:
+            from apps.chat.models import Message
+            recent_message_count = Message.objects.filter(
+                thread=self.thread
+            ).count()
+            
+            # If this signal is from one of the last 5 messages
+            if self.sequence_index >= max(0, recent_message_count - 5):
+                return SignalTemperature.HOT
+        
+        # Frequently accessed
+        if self.access_count >= 10:
+            return SignalTemperature.HOT
+        
+        # Old + rarely accessed
+        age_days = (timezone.now() - self.created_at).days
+        if age_days > 30 and self.access_count < 2:
+            return SignalTemperature.COLD
+        
+        # Contradicted + low confidence
+        if self.contradicted_by.exists() and self.confidence < 0.5:
+            return SignalTemperature.COLD
+        
+        # Default: warm (retrieved on-demand)
+        return SignalTemperature.WARM
+    
+    def mark_accessed(self):
+        """Mark this signal as accessed (for tracking)"""
+        from django.utils import timezone
+        self.access_count += 1
+        self.last_accessed = timezone.now()
+        self.save(update_fields=['access_count', 'last_accessed'])

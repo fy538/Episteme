@@ -48,6 +48,88 @@ class SignalExtractor:
         # 384 dimensions, fast, good quality
         # Alternative: 'all-mpnet-base-v2' (768 dim, slower, better quality)
     
+    async def extract_from_messages_batch(
+        self,
+        messages: List[Message],
+        thread = None
+    ) -> Dict[str, List[Signal]]:
+        """
+        Extract signals from multiple messages in a single LLM call.
+        
+        More efficient than extracting one-by-one:
+        - Single LLM call for batch
+        - Better context window utilization
+        - Amortize fixed prompt overhead
+        
+        Args:
+            messages: List of user messages to extract from
+            thread: ChatThread object for context
+            
+        Returns:
+            Dict mapping message_id -> list of Signal objects
+        """
+        if not messages:
+            return {}
+        
+        # Build batch extraction prompt
+        batch_prompt = self._build_batch_extraction_prompt(messages, thread)
+        
+        # Call LLM once for all messages
+        try:
+            result = await self._extraction_agent.run(batch_prompt)
+            extracted_signals = result.data.signals
+        except Exception:
+            logger.exception(
+                "batch_signal_extraction_failed",
+                extra={
+                    "thread_id": str(thread.id) if thread else None,
+                    "message_count": len(messages)
+                }
+            )
+            return {}
+        
+        if not extracted_signals:
+            return {}
+        
+        # Group signals by message (using span info)
+        signals_by_message = {}
+        for i, message in enumerate(messages):
+            message_signals = []
+            
+            for extraction in extracted_signals:
+                # Check if signal belongs to this message
+                # (extraction should include message_index in span)
+                if extraction.span and extraction.span.get('message_index') == i:
+                    signal = self._create_signal_from_extraction(
+                        extraction=extraction,
+                        message=message,
+                        sequence_index=i
+                    )
+                    if signal:
+                        message_signals.append(signal)
+            
+            signals_by_message[str(message.id)] = message_signals
+        
+        return signals_by_message
+    
+    def _build_batch_extraction_prompt(self, messages: List[Message], thread) -> str:
+        """Build prompt for batch extraction from multiple messages"""
+        from apps.signals.prompts import get_batch_signal_extraction_prompt
+        
+        # Format messages with indices
+        formatted_messages = []
+        for i, msg in enumerate(messages):
+            formatted_messages.append({
+                'index': i,
+                'content': msg.content,
+                'timestamp': msg.created_at.isoformat()
+            })
+        
+        return get_batch_signal_extraction_prompt(
+            messages=formatted_messages,
+            thread_context=thread.title if thread else ""
+        )
+    
     async def extract_from_message(
         self,
         message: Message,

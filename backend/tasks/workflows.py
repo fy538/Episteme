@@ -31,14 +31,62 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     thread = ChatThread.objects.get(id=thread_id)
     user_message = Message.objects.get(id=user_message_id)
     
-    # Generate assistant response (Phase 0: stub response)
+    # Generate assistant response (Phase 1: with memory integration)
     response = ChatService.generate_assistant_response(
         thread_id=thread.id,
         user_message_id=user_message.id
     )
     
-    # TODO: Phase 1 - Add signal extraction here
-    # Currently disabled to get basic chat working first
+    # Phase 1: Batched signal extraction with threshold
+    # Accumulate messages and extract when threshold is met
+    signals_extracted = 0
+    try:
+        from apps.signals.batch_extraction import (
+            should_trigger_batch_extraction,
+            get_unprocessed_messages,
+            extract_signals_from_batch
+        )
+        
+        # Accumulate message stats for batching
+        thread.accumulate_for_extraction(len(user_message.content))
+        
+        # Check if we should trigger batch extraction
+        if should_trigger_batch_extraction(thread, char_threshold=500, turn_threshold=5):
+            # Get all unprocessed messages since last extraction
+            unprocessed_messages = get_unprocessed_messages(thread)
+            
+            if unprocessed_messages:
+                # Extract from batch in single LLM call
+                signals_extracted = extract_signals_from_batch(
+                    thread=thread,
+                    messages=unprocessed_messages
+                )
+                
+                logger.info(
+                    "batch_signals_extracted",
+                    extra={
+                        "thread_id": str(thread.id),
+                        "messages_in_batch": len(unprocessed_messages),
+                        "signals_extracted": signals_extracted
+                    }
+                )
+        else:
+            logger.debug(
+                "batch_threshold_not_met",
+                extra={
+                    "thread_id": str(thread.id),
+                    "chars_accumulated": thread.chars_since_extraction,
+                    "turns_accumulated": thread.turns_since_extraction
+                }
+            )
+    except Exception:
+        logger.exception(
+            "batch_signal_extraction_failed",
+            extra={
+                "thread_id": str(thread.id),
+                "message_id": str(user_message.id)
+            }
+        )
 
     # Trigger async title generation (best-effort)
     try:
@@ -52,7 +100,7 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     return {
         'status': 'completed',
         'message_id': str(response.id),
-        'signals_extracted': 0,
+        'signals_extracted': signals_extracted,
     }
 
 

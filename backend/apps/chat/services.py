@@ -138,10 +138,9 @@ class ChatService:
         user_message_id: uuid.UUID
     ) -> Message:
         """
-        Generate assistant response to user message
+        Generate assistant response to user message with memory integration.
         
-        Phase 0: Simple stub response
-        Phase 1: Will call LLM and trigger signal extraction
+        Phase 1: Retrieves relevant signals from memory and includes in context
         
         Args:
             thread_id: Thread ID
@@ -150,7 +149,6 @@ class ChatService:
         Returns:
             Assistant Message
         """
-        # Phase 1: Call LLM for a real response
         thread = ChatThread.objects.get(id=thread_id)
         user_message = Message.objects.get(id=user_message_id)
 
@@ -162,19 +160,30 @@ class ChatService:
                 metadata={'stub': True, 'reason': 'missing_api_key'}
             )
 
+        # Get recent conversation context
         context_messages = ChatService._get_context_messages(thread)
         conversation_context = ChatService._format_conversation_context(context_messages)
-        prompt = get_assistant_response_prompt(
+        
+        # NEW: Retrieve relevant signals from memory
+        relevant_signals = ChatService._retrieve_relevant_signals(
+            thread=thread,
+            user_message=user_message.content
+        )
+        
+        # Build prompt with memory context
+        from apps.signals.prompts import get_assistant_response_prompt_with_memory
+        prompt = get_assistant_response_prompt_with_memory(
             user_message=user_message.content,
-            conversation_context=conversation_context
+            conversation_context=conversation_context,
+            signals=relevant_signals
         )
 
         model_key = settings.AI_MODELS.get('chat', settings.AI_MODELS['fast'])
         agent = Agent(
             get_model(model_key),
             system_prompt=(
-                "You are Episteme, a thoughtful assistant. "
-                "Be concise, ask clarifying questions when useful, and avoid generic advice."
+                "You are Episteme, a thoughtful assistant with memory. "
+                "Be concise, reference relevant past context, and ask clarifying questions when useful."
             )
         )
 
@@ -191,7 +200,11 @@ class ChatService:
         return ChatService.create_assistant_message(
             thread_id=thread_id,
             content=response_content,
-            metadata={'model': model_key, 'stub': False}
+            metadata={
+                'model': model_key,
+                'stub': False,
+                'signals_retrieved': len(relevant_signals)
+            }
         )
 
     @staticmethod
@@ -202,6 +215,38 @@ class ChatService:
         )
         return list(reversed(recent))
 
+    @staticmethod
+    def _retrieve_relevant_signals(thread, user_message: str):
+        """
+        Retrieve relevant signals from memory for chat context.
+        
+        Uses scope-aware retrieval strategy:
+        - Default: case-level scope (thread + related threads in same case)
+        - Hot + warm tiers (recent + semantically relevant)
+        
+        Args:
+            thread: ChatThread object
+            user_message: User's message for semantic search
+            
+        Returns:
+            List of Signal objects
+        """
+        from apps.signals.memory_retrieval import MemoryRetrievalService, MemoryRetrievalStrategy
+        
+        # Detect appropriate retrieval strategy based on message
+        strategy = MemoryRetrievalService.detect_retrieval_strategy(
+            thread=thread,
+            user_message=user_message
+        )
+        
+        # Retrieve signals
+        signals = MemoryRetrievalService.retrieve_signals(
+            user_message=user_message,
+            strategy=strategy
+        )
+        
+        return signals
+    
     @staticmethod
     def _format_conversation_context(messages: Optional[List[Message]]) -> str:
         if not messages:

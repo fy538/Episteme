@@ -160,6 +160,147 @@ Response:"""
     return prompt
 
 
+def get_assistant_response_prompt_with_memory(
+    user_message: str,
+    conversation_context: str = "",
+    signals: list = None,
+    user_profile: dict = None
+) -> str:
+    """
+    Build prompt with hierarchical memory (signals + user profile).
+    
+    Memory sections:
+    1. User Profile (patterns from past interactions)
+    2. Relevant Signals (epistemic context from past conversations)
+    3. Recent Conversation (always included)
+    
+    Args:
+        user_message: User's latest message
+        conversation_context: Formatted recent conversation
+        signals: List of Signal objects to include
+        user_profile: Dict with user patterns (optional, future)
+    
+    Returns:
+        Complete prompt with memory context
+    """
+    sections = []
+    
+    # 1. USER PROFILE SECTION (future enhancement)
+    if user_profile and user_profile.get('recurring_assumptions'):
+        profile_section = "User Profile (learned from past interactions):\n"
+        if user_profile.get('recurring_assumptions'):
+            assumptions = ', '.join(user_profile['recurring_assumptions'][:3])
+            profile_section += f"- Recurring assumptions: {assumptions}\n"
+        if user_profile.get('knowledge_gaps'):
+            gaps = ', '.join(user_profile['knowledge_gaps'][:2])
+            profile_section += f"- Known knowledge gaps: {gaps}\n"
+        sections.append(profile_section)
+    
+    # 2. RELEVANT SIGNALS SECTION
+    if signals:
+        signals_section = "Relevant context from past conversations:\n"
+        
+        # Group by type for better readability
+        from collections import defaultdict
+        signals_by_type = defaultdict(list)
+        for signal in signals[:8]:  # Limit to 8 most relevant
+            signals_by_type[signal.type].append(signal)
+        
+        # Format by type
+        for signal_type, typed_signals in signals_by_type.items():
+            if typed_signals:
+                signals_section += f"\n{signal_type}s:\n"
+                for signal in typed_signals[:3]:  # Max 3 per type
+                    confidence_indicator = "✓" if signal.confidence > 0.8 else "~"
+                    signals_section += f"  {confidence_indicator} {signal.text}\n"
+        
+        sections.append(signals_section)
+    
+    # 3. RECENT CONVERSATION
+    if conversation_context:
+        sections.append(f"Recent conversation:\n{conversation_context}")
+    
+    # Combine all sections
+    memory_context = "\n\n".join(sections)
+    
+    prompt = f"""{memory_context}
+
+User's latest message:
+{user_message}
+
+You are Episteme, a thoughtful assistant with memory of past interactions.
+
+Your role:
+- Reference relevant assumptions/questions from the user's history when helpful
+- Point out contradictions between current message and past beliefs
+- Ask clarifying questions to surface new assumptions
+- Help the user articulate constraints and goals
+- Challenge weak reasoning gently
+- Suggest alternative perspectives
+
+Respond conversationally. Keep responses concise (2-4 paragraphs max).
+
+Do not:
+- Make decisions for the user
+- Hallucinate signals or context not provided above
+- Be overly prescriptive
+- Give generic advice
+
+Response:"""
+    
+    return prompt
+
+
+def get_batch_signal_extraction_prompt(messages: list, thread_context: str = "") -> str:
+    """
+    Build prompt for batch extraction from multiple messages.
+    
+    More efficient than single-message extraction:
+    - One LLM call for multiple messages
+    - Better context utilization
+    - Lower per-message cost
+    
+    Args:
+        messages: List of dicts with 'index', 'content', 'timestamp'
+        thread_context: Thread title or context
+        
+    Returns:
+        Prompt for batch extraction
+    """
+    
+    # Format messages
+    messages_section = ""
+    for msg in messages:
+        messages_section += f"\nMessage {msg['index']}:\n{msg['content']}\n"
+    
+    context_section = ""
+    if thread_context:
+        context_section = f"Thread context: {thread_context}\n\n"
+    
+    prompt = f"""{context_section}Extract signals from the following user messages. For each signal, include the message_index in the span field to indicate which message it came from.
+
+{messages_section}
+
+Extract all epistemic signals:
+- Assumptions (things the user takes for granted)
+- Questions (open questions or uncertainties)
+- Constraints (limitations, requirements, boundaries)
+- Goals (desired outcomes, success criteria)
+- Decisions (choices made or to be made)
+- Claims (factual assertions)
+- Evidence Mentions (references to data, studies, sources)
+
+For each signal, provide:
+- type: One of the signal types above
+- text: The signal text (normalized to standalone statement)
+- confidence: 0.0-1.0 (how confident in the extraction)
+- span: Include 'message_index' to indicate which message this came from
+
+Extract comprehensively from all messages."""
+    
+    return prompt
+
+
 def get_evidence_extraction_prompt(chunk_text: str, document_title: str = "") -> str:
     """
     Extract evidence (facts, metrics, claims) from document chunks.

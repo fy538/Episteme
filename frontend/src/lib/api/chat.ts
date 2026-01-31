@@ -42,7 +42,8 @@ export const chatAPI = {
     threadId: string,
     content: string,
     onChunk: (delta: string) => void,
-    onDone: (messageId?: string) => void
+    onDone: (messageId?: string) => void,
+    signal?: AbortSignal
   ): Promise<void> {
     await apiClient.stream(
       `/chat/threads/${threadId}/messages/?stream=true`,
@@ -53,7 +54,8 @@ export const chatAPI = {
         } else if (event === 'done') {
           onDone(data?.message_id);
         }
-      }
+      },
+      signal
     );
   },
 

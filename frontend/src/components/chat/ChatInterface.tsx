@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, startTransition } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { chatAPI } from '@/lib/api/chat';
@@ -35,6 +35,8 @@ export function ChatInterface({
   const [isStreaming, setIsStreaming] = useState(false);
   const [pendingSince, setPendingSince] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [ttft, setTtft] = useState<number | null>(null);
 
   // Load messages on mount
   useEffect(() => {
@@ -53,11 +55,25 @@ export function ChatInterface({
 
   // Poll for new messages (assistant responses)
   useEffect(() => {
-    if (isStreaming) return;
+    // Pause polling during streaming or when loading (optimistic messages active)
+    if (isStreaming || isLoading) return;
+    
     const interval = setInterval(async () => {
       try {
         const msgs = await chatAPI.getMessages(threadId);
-        setMessages(msgs);
+        
+        // Deduplicate: only update if we got new messages
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const newMessages = msgs.filter(m => !existingIds.has(m.id));
+          
+          if (newMessages.length === 0 && prev.length === msgs.length) {
+            return prev; // No changes, skip update
+          }
+          
+          return msgs; // Full replace only if there are real changes
+        });
+        
         if (isWaitingForResponse && pendingSince) {
           const hasNewAssistant = msgs.some(
             msg =>
@@ -75,13 +91,20 @@ export function ChatInterface({
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(interval);
-  }, [threadId, isStreaming, isWaitingForResponse, pendingSince]);
+  }, [threadId, isStreaming, isLoading, isWaitingForResponse, pendingSince]);
 
   async function handleSendMessage(content: string) {
     setIsLoading(true);
     setIsWaitingForResponse(true);
-    setPendingSince(Date.now());
-    setError(null); // Clear previous errors
+    const requestStart = Date.now();
+    setPendingSince(requestStart);
+    setError(null);
+    setTtft(null);
+    
+    // Create AbortController for cancellation
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
       const now = new Date().toISOString();
       const tempUserId = `local-user-${Date.now()}`;
@@ -110,28 +133,66 @@ export function ChatInterface({
       setMessages(prev => [...prev, optimisticUserMessage, optimisticAssistantMessage]);
       setIsStreaming(true);
 
+      let firstTokenReceived = false;
+
       try {
         await chatAPI.sendMessageStream(
           threadId,
           content,
           (delta) => {
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === tempAssistantId
-                  ? { ...msg, content: `${msg.content}${delta}` }
-                  : msg
-              )
-            );
+            // Track TTFT (time to first token)
+            if (!firstTokenReceived) {
+              const ttftMs = Date.now() - requestStart;
+              setTtft(ttftMs);
+              console.log(`[Chat] TTFT: ${ttftMs}ms`);
+              firstTokenReceived = true;
+            }
+            
+            // Use startTransition to batch rapid token updates (non-urgent)
+            startTransition(() => {
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === tempAssistantId
+                    ? { ...msg, content: `${msg.content}${delta}` }
+                    : msg
+                )
+              );
+            });
           },
-          async () => {
+          async (messageId) => {
             setIsWaitingForResponse(false);
             setIsStreaming(false);
             setPendingSince(null);
-            const msgs = await chatAPI.getMessages(threadId);
-            setMessages(msgs);
-          }
+            
+            // Replace temp IDs with real message ID (no refetch needed)
+            if (messageId) {
+              setMessages(prev =>
+                prev.map(msg => {
+                  if (msg.id === tempAssistantId) {
+                    return { ...msg, id: messageId, metadata: { ...msg.metadata, streaming: false } };
+                  }
+                  if (msg.id === tempUserId) {
+                    // User message is already saved, just keep optimistic for now
+                    // Polling will eventually replace it with real ID
+                    return msg;
+                  }
+                  return msg;
+                })
+              );
+            }
+          },
+          controller.signal
         );
       } catch (streamError) {
+        // Check if aborted by user
+        if (streamError instanceof Error && streamError.name === 'AbortError') {
+          console.log('[Chat] Stream aborted by user');
+          setIsStreaming(false);
+          setIsWaitingForResponse(false);
+          setPendingSince(null);
+          return; // Don't fallback, user cancelled
+        }
+        
         // Fallback to non-streaming if stream isn't available
         console.warn('Streaming unavailable, falling back to polling.', streamError);
         setIsStreaming(false);
@@ -151,6 +212,23 @@ export function ChatInterface({
       setPendingSince(null);
     } finally {
       setIsLoading(false);
+      setAbortController(null);
+    }
+  }
+
+  function handleStopGeneration() {
+    if (abortController) {
+      console.log('[Chat] Aborting stream');
+      abortController.abort();
+      setAbortController(null);
+      setIsStreaming(false);
+      setIsWaitingForResponse(false);
+      setIsLoading(false);
+      
+      // Clean up optimistic assistant message
+      setMessages(prev =>
+        prev.filter(msg => msg.metadata?.streaming !== true)
+      );
     }
   }
 
@@ -211,8 +289,19 @@ export function ChatInterface({
           </div>
         </div>
       )}
-      <MessageList messages={messages} isWaitingForResponse={isWaitingForResponse} />
-      <MessageInput onSend={handleSendMessage} disabled={isLoading} isProcessing={isLoading || isWaitingForResponse} />
+      <MessageList 
+        messages={messages} 
+        isWaitingForResponse={isWaitingForResponse}
+        isStreaming={isStreaming}
+        ttft={ttft}
+      />
+      <MessageInput 
+        onSend={handleSendMessage} 
+        disabled={isLoading} 
+        isProcessing={isLoading || isWaitingForResponse}
+        isStreaming={isStreaming}
+        onStop={handleStopGeneration}
+      />
     </div>
   );
 }
