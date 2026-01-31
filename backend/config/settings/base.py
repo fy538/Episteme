@@ -145,6 +145,18 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
 # LLM API Keys (Phase 1 - Signal Extraction)
 OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+ANTHROPIC_API_KEY = env('ANTHROPIC_API_KEY', default='')
+GOOGLE_API_KEY = env('GOOGLE_API_KEY', default='')
+DEEPSEEK_API_KEY = env('DEEPSEEK_API_KEY', default='')
+GROQ_API_KEY = env('GROQ_API_KEY', default='')
+
+# AI Model Strategy (Solo Founder Mode)
+# Default models for different task types
+AI_MODELS = {
+    'reasoning': env('AI_MODEL_REASONING', default='openai:gpt-5-mini'),
+    'fast': env('AI_MODEL_FAST', default='openai:gpt-5-mini'),
+    'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-5-mini'),
+}
 
 # Embedding Backend (Phase 2)
 EMBEDDING_BACKEND = env('EMBEDDING_BACKEND', default='postgresql')
