@@ -22,6 +22,10 @@ RUN pip install --no-cache-dir -r requirements/${REQUIREMENTS_FILE}
 # Copy application code
 COPY backend /app/
 
+# Copy startup script (before changing user)
+COPY docker/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 # Create non-root user
 RUN useradd -m -u 1000 episteme && chown -R episteme:episteme /app
 USER episteme
@@ -31,10 +35,6 @@ EXPOSE 8000
 
 # Collect static files
 RUN python manage.py collectstatic --noinput || true
-
-# Copy startup script
-COPY docker/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
 
 # Default command for production
 CMD ["/app/start.sh"]
