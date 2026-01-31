@@ -79,8 +79,9 @@ class Event(models.Model):
     
     def save(self, *args, **kwargs):
         """Override save to prevent updates"""
-        if self.pk is not None:
-            # If pk exists, this is an update attempt
+        # Check if this is an update (object already exists in DB)
+        if not self._state.adding:
+            # This is an update attempt
             raise ValueError("Events are immutable. Cannot update existing events.")
         super().save(*args, **kwargs)
     
