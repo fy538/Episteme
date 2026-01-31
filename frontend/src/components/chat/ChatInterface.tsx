@@ -13,6 +13,7 @@ import type { Message } from '@/lib/types/chat';
 export function ChatInterface({ threadId }: { threadId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Load messages on mount
   useEffect(() => {
@@ -20,8 +21,10 @@ export function ChatInterface({ threadId }: { threadId: string }) {
       try {
         const msgs = await chatAPI.getMessages(threadId);
         setMessages(msgs);
+        setError(null); // Clear any previous errors
       } catch (error) {
         console.error('Failed to load messages:', error);
+        setError(error instanceof Error ? error.message : 'Failed to load messages');
       }
     }
     loadMessages();
@@ -43,6 +46,7 @@ export function ChatInterface({ threadId }: { threadId: string }) {
 
   async function handleSendMessage(content: string) {
     setIsLoading(true);
+    setError(null); // Clear previous errors
     try {
       // Send message
       const userMessage = await chatAPI.sendMessage(threadId, content);
@@ -53,6 +57,7 @@ export function ChatInterface({ threadId }: { threadId: string }) {
       // Assistant response will appear via polling
     } catch (error) {
       console.error('Failed to send message:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -63,6 +68,21 @@ export function ChatInterface({ threadId }: { threadId: string }) {
       <div className="border-b border-gray-200 p-4">
         <h1 className="text-lg font-semibold text-gray-900">Chat</h1>
       </div>
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-4">
+          <div className="flex">
+            <div className="flex-1">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="ml-4 text-red-700 hover:text-red-900"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       <MessageList messages={messages} />
       <MessageInput onSend={handleSendMessage} disabled={isLoading} />
     </div>
