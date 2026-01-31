@@ -1,0 +1,55 @@
+# Fly.io configuration for Episteme backend
+
+app = "episteme"
+primary_region = "sjc"  # San Jose (change to your preferred region)
+
+[build]
+  dockerfile = "docker/backend.Dockerfile"
+
+[env]
+  DJANGO_SETTINGS_MODULE = "config.settings.production"
+  PORT = "8000"
+  EMBEDDING_BACKEND = "postgresql"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"  # Stop when idle (save money)
+  auto_start_machines = true
+  min_machines_running = 0     # Can scale to zero (free tier friendly)
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/auth/token/"  # Health check endpoint
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8000
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "get"
+    path = "/"
+
+[mounts]
+  source = "episteme_data"
+  destination = "/data"
+
+# VM Resources (start small, upgrade if needed)
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512  # 512MB (can upgrade to 1024 if needed)

@@ -8,8 +8,19 @@ A rigorous "work state" layer between chat and outcomes—capturing intent, assu
 episteme/
 ├── backend/           # Django backend
 ├── frontend/          # Next.js frontend (coming soon)
-└── docker/            # Docker configurations
+├── docs/              # Documentation files
+├── docker/            # Docker configurations
+└── README.md          # Project overview
 ```
+
+## Documentation
+
+Comprehensive documentation is available in the [docs/](./docs/) directory:
+
+- **Guides**: [Quickstart](./docs/QUICKSTART.md), [Setup](./docs/SETUP.md), [Deployment](./docs/DEPLOYMENT_GUIDE.md)
+- **Status**: [Implementation Status](./docs/IMPLEMENTATION_STATUS.md), [Roadmap](./docs/IMPLEMENTATION_ROADMAP.md)
+- **Technical**: [API Reference](./docs/API.md), [Architecture Strategy](./docs/AI_STRATEGY_IMPLEMENTATION_SUMMARY.md)
+- **Sub-packages**: [Backend Docs](./docs/backend/), [Frontend Docs](./docs/frontend/)
 
 ## Quick Start
 
@@ -94,8 +105,10 @@ docker-compose exec backend python manage.py migrate
 
 1. **Event** - Append-only timestamped facts (source of truth)
 2. **Signal** - Atomic units of meaning extracted from events
-3. **Case** - Durable work object for investigations
-4. **WorkingView** - Materialized snapshots for fast rendering
+3. **Evidence** - Facts, metrics, and benchmarks extracted from documents
+4. **Case** - Durable work object for investigations
+5. **Artifact** - Block-based, version-controlled output (briefs, research)
+6. **WorkingView** - Materialized snapshots for fast rendering
 
 ### ✅ Phase 0 (Complete)
 
@@ -139,22 +152,28 @@ docker-compose exec backend python manage.py migrate
 
 ### ✅ Phase 2.1 (Complete - Research-Backed Chunking)
 
-- ✅ RecursiveTokenChunker (512 tokens, 15% overlap - research optimal)
-- ✅ Token counting with tiktoken (accurate token-based chunking)
+- ✅ RecursiveTokenChunker (512 tokens, 15% overlap)
+- ✅ Token counting with tiktoken
 - ✅ PostgreSQL embedding storage (28x faster than external DBs)
-- ✅ Context linking (prev/next chunks for quality retrieval)
-- ✅ EmbeddingService abstraction (supports PostgreSQL, pgvector, Pinecone)
-- ✅ Re-chunking management command
-- ✅ Comprehensive tests
+- ✅ Context linking (prev/next chunks)
+- ✅ EmbeddingService abstraction
 
-### Phase 3 (Next - Frontend & Analytics)
+### ✅ Phase 2.2 - 2.4 (Complete - Evidence, Graph, Artifacts)
 
-- [ ] Next.js frontend
-- [ ] Case workspace UI with chips
-- [ ] "What changed" diff visualization
-- [ ] Signal clustering (themes)
-- [ ] Timeline abstractions
-- [ ] Artifacts (user-created outputs)
+- ✅ **Evidence Model**: Facts, metrics, and credibility ratings
+- ✅ **Knowledge Graph**: Signal dependencies and contradictions
+- ✅ **Artifacts**: Block-based versioning and publishing
+- ✅ **Google ADK Agents**: Multi-agent research, critique, and brief generation
+
+### 🔄 Phase 3 (In Progress - Frontend)
+
+- ✅ Next.js 14 + TypeScript infrastructure
+- ✅ API Client (Chat, Cases, Signals, Documents)
+- ✅ Chat Interface (Threads, Messages)
+- ✅ Case Workspace (Basic view, Side panel)
+- [ ] Evidence UI (Ratings, Source linking)
+- [ ] Artifact Editor (Block-based editing, versioning)
+- [ ] ADK Agent Control Panel (Trigger research/critique)
 
 ## Tech Stack
 
@@ -166,14 +185,16 @@ docker-compose exec backend python manage.py migrate
 
 **AI Infrastructure**:
 - **PydanticAI**: Structured LLM outputs for one-off services (extraction, titles, summaries)
-- **Google ADK** (coming soon): Agentic workflows (research, debates, critiques)
+- **Google ADK**: Agentic workflows (research, debates, critiques)
 - **OpenAI GPT-4o-mini**: Fast extraction and classification
 - **Sentence Transformers**: Local semantic embeddings
 
-**Frontend** (coming soon):
+**Frontend**:
 - Next.js 14 + TypeScript
 - Tailwind CSS
 - React Query
+- Zustand (State Management)
+- Tiptap (Editor Foundation)
 
 ## AI Architecture Strategy
 
@@ -202,12 +223,12 @@ title = await generate_chat_title(messages)
 # Returns: "Database Architecture Decision"
 ```
 
-### Google ADK: Multi-Agent Workflows (Coming Soon)
+### Google ADK: Multi-Agent Workflows
 
 For complex, multi-step reasoning requiring agent coordination:
-- 🔄 Research generation (multi-source analysis)
-- 🔄 Multi-perspective debates (simulating stakeholders)
-- 🔄 Critique generation (devil's advocate)
+- ✅ Research generation (multi-source analysis)
+- ✅ Multi-perspective debates (simulating stakeholders)
+- ✅ Critique generation (devil's advocate)
 - 🔄 Background monitoring agents
 
 **Why ADK?**
@@ -215,7 +236,7 @@ For complex, multi-step reasoning requiring agent coordination:
 - Clean supervisor/worker patterns
 - Perfect for long-horizon tasks
 
-See `backend/PYDANTIC_AI_MIGRATION.md` for implementation details.
+See `docs/backend/PYDANTIC_AI_MIGRATION.md` for implementation details.
 
 ## Development Guidelines
 

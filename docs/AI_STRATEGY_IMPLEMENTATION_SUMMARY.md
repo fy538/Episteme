@@ -350,7 +350,7 @@ Using both gives you the best of both worlds.
 ### Internal Documentation
 - [`PYDANTIC_AI_MIGRATION.md`](backend/PYDANTIC_AI_MIGRATION.md) - Full migration guide
 - [`AI_SERVICES_QUICK_REFERENCE.md`](backend/AI_SERVICES_QUICK_REFERENCE.md) - Quick examples
-- [`examples/ai_services_demo.py`](backend/examples/ai_services_demo.py) - Working demos
+- [`examples/ai_services_demo.py`](../backend/examples/ai_services_demo.py) - Working demos
 
 ### External Links
 - [PydanticAI Docs](https://ai.pydantic.dev/)

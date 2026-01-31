@@ -36,7 +36,7 @@ Result: Signal (thought) + Evidence (receipt)
 
 ### 1. Evidence Model
 
-**File:** [`backend/apps/projects/models.py`](backend/apps/projects/models.py)
+**File:** [`backend/apps/projects/models.py`](../backend/apps/projects/models.py)
 
 ```python
 class Evidence:
@@ -58,8 +58,8 @@ class Evidence:
 ### 2. Evidence Extraction
 
 **Files:**
-- Prompt: [`backend/apps/signals/prompts.py`](backend/apps/signals/prompts.py) - `get_evidence_extraction_prompt()`
-- Extractor: [`backend/apps/projects/evidence_extractor.py`](backend/apps/projects/evidence_extractor.py)
+- Prompt: [`backend/apps/signals/prompts.py`](../backend/apps/signals/prompts.py) - `get_evidence_extraction_prompt()`
+- Extractor: [`backend/apps/projects/evidence_extractor.py`](../backend/apps/projects/evidence_extractor.py)
 
 **What it extracts:**
 - Metrics: "50,000 requests per second"
@@ -77,7 +77,7 @@ class Evidence:
 
 ### 3. Updated Document Processing
 
-**File:** [`backend/apps/projects/services.py`](backend/apps/projects/services.py)
+**File:** [`backend/apps/projects/services.py`](../backend/apps/projects/services.py)
 
 **New pipeline:**
 ```
@@ -95,7 +95,7 @@ class Evidence:
 
 ### 4. Evidence API
 
-**File:** [`backend/apps/projects/evidence_views.py`](backend/apps/projects/evidence_views.py)
+**File:** [`backend/apps/projects/evidence_views.py`](../backend/apps/projects/evidence_views.py)
 
 **Endpoints:**
 ```http
@@ -112,7 +112,7 @@ PATCH /api/evidence/{id}/rate/              # User rates credibility
 
 ### 5. Migration Command
 
-**File:** [`backend/apps/projects/management/commands/migrate_signals_to_evidence.py`](backend/apps/projects/management/commands/migrate_signals_to_evidence.py)
+**File:** [`backend/apps/projects/management/commands/migrate_signals_to_evidence.py`](../backend/apps/projects/management/commands/migrate_signals_to_evidence.py)
 
 **Usage:**
 ```bash
@@ -134,7 +134,7 @@ python manage.py migrate_signals_to_evidence
 ### 6. Comprehensive Tests
 
 **Files:**
-- [`backend/apps/projects/tests.py`](backend/apps/projects/tests.py) - Evidence extraction tests
+- [`backend/apps/projects/tests.py`](../backend/apps/projects/tests.py) - Evidence extraction tests
 
 **Test coverage:**
 - Evidence extraction from documents

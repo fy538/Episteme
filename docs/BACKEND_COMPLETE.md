@@ -12,7 +12,7 @@ All backend features (Phase 0 through Phase 2.4) are now implemented.
 - Signal: Added `depends_on` and `contradicts` M2M fields
 - Evidence: Added `supports_signals` and `contradicts_signals` M2M fields
 
-**Graph Utilities** ([`apps/common/graph_utils.py`](backend/apps/common/graph_utils.py)):
+**Graph Utilities** ([`apps/common/graph_utils.py`](../backend/apps/common/graph_utils.py)):
 - `get_signal_dependencies()` - Traverse dependency chains
 - `find_contradictions()` - Find conflicting signals
 - `get_supporting_evidence()` - Get receipts for assumptions
@@ -36,7 +36,7 @@ GET /api/evidence/{id}/related-signals/ # Get linked signals
 
 ### Phase 2.4: Block-Based Artifacts (COMPLETE)
 
-**New App:** [`apps/artifacts/`](backend/apps/artifacts/)
+**New App:** [`apps/artifacts/`](../backend/apps/artifacts/)
 
 **Models:**
 - `Artifact` - AI-generated or user-edited documents
@@ -48,12 +48,12 @@ GET /api/evidence/{id}/related-signals/ # Get linked signals
 - Provenance tracked (cites signals + evidence)
 - No signal extraction (artifacts are outputs, not inputs)
 
-**Google ADK Integration** ([`apps/agents/adk_agents.py`](backend/apps/agents/adk_agents.py)):
+**Google ADK Integration** ([`apps/agents/adk_agents.py`](../backend/apps/agents/adk_agents.py)):
 - Research agent (with web search)
 - Critique agent (red-team/devil's advocate)
 - Brief generator (synthesize position)
 
-**Generation Workflows** ([`apps/artifacts/workflows.py`](backend/apps/artifacts/workflows.py)):
+**Generation Workflows** ([`apps/artifacts/workflows.py`](../backend/apps/artifacts/workflows.py)):
 - `generate_research_artifact()` - Research reports
 - `generate_critique_artifact()` - Red-team analysis
 - `generate_brief_artifact()` - Decision briefs

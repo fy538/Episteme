@@ -160,7 +160,7 @@ PINECONE_API_KEY=your-key
 
 ### Chunking Parameters
 
-To adjust chunking, edit [`apps/projects/services.py`](backend/apps/projects/services.py):
+To adjust chunking, edit [`apps/projects/services.py`](../backend/apps/projects/services.py):
 
 ```python
 chunker = RecursiveTokenChunker(

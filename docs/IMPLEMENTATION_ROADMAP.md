@@ -44,13 +44,13 @@ Frontend scaffolding exists with some components, but needs updates for new feat
 **Infrastructure:**
 - ✅ Next.js 14 + TypeScript
 - ✅ Tailwind CSS
-- ✅ API client ([`src/lib/api/client.ts`](frontend/src/lib/api/client.ts))
+- ✅ API client ([`src/lib/api/client.ts`](../frontend/src/lib/api/client.ts))
 - ✅ React Query
 - ✅ Zustand (state management)
 
 **Pages:**
-- ✅ Chat page ([`src/app/chat/page.tsx`](frontend/src/app/chat/page.tsx))
-- ✅ Case page ([`src/app/cases/[caseId]/page.tsx`](frontend/src/app/cases/[caseId]/page.tsx))
+- ✅ Chat page ([`src/app/chat/page.tsx`](../frontend/src/app/chat/page.tsx))
+- ✅ Case page ([`src/app/cases/[caseId]/page.tsx`](../frontend/src/app/cases/[caseId]/page.tsx))
 - ✅ Document page
 
 **Components:**
@@ -97,7 +97,7 @@ Frontend scaffolding exists with some components, but needs updates for new feat
 
 **Create new API clients:**
 
-1. **evidenceAPI** ([`src/lib/api/evidence.ts`](frontend/src/lib/api/evidence.ts)):
+1. **evidenceAPI** ([`src/lib/api/evidence.ts`](../frontend/src/lib/api/evidence.ts)):
 ```typescript
 export const evidenceAPI = {
   list: (filters) => GET /api/evidence/,
@@ -108,7 +108,7 @@ export const evidenceAPI = {
 };
 ```
 
-2. **artifactsAPI** ([`src/lib/api/artifacts.ts`](frontend/src/lib/api/artifacts.ts)):
+2. **artifactsAPI** ([`src/lib/api/artifacts.ts`](../frontend/src/lib/api/artifacts.ts)):
 ```typescript
 export const artifactsAPI = {
   list: (caseId) => GET /api/artifacts/?case_id={caseId},
@@ -124,7 +124,7 @@ export const artifactsAPI = {
 };
 ```
 
-3. **graphAPI** ([`src/lib/api/graph.ts`](frontend/src/lib/api/graph.ts)):
+3. **graphAPI** ([`src/lib/api/graph.ts`](../frontend/src/lib/api/graph.ts)):
 ```typescript
 export const graphAPI = {
   signalDependencies: (id) => GET /api/signals/{id}/dependencies/,
@@ -140,19 +140,19 @@ export const graphAPI = {
 
 **Create components:**
 
-1. **EvidenceCard** ([`src/components/evidence/EvidenceCard.tsx`](frontend/src/components/evidence/EvidenceCard.tsx)):
+1. **EvidenceCard** ([`src/components/evidence/EvidenceCard.tsx`](../frontend/src/components/evidence/EvidenceCard.tsx)):
 - Display evidence text
 - Type badge (Metric, Benchmark, Fact)
 - Credibility rating (stars, editable)
 - "Show Source" → opens chunk preview
 - "Link to Signal" button
 
-2. **EvidenceList** ([`src/components/evidence/EvidenceList.tsx`](frontend/src/components/evidence/EvidenceList.tsx)):
+2. **EvidenceList** ([`src/components/evidence/EvidenceList.tsx`](../frontend/src/components/evidence/EvidenceList.tsx)):
 - List evidence for case
 - Filter by type, credibility
 - Group by document
 
-3. **ChunkPreview** ([`src/components/evidence/ChunkPreview.tsx`](frontend/src/components/evidence/ChunkPreview.tsx)):
+3. **ChunkPreview** ([`src/components/evidence/ChunkPreview.tsx`](../frontend/src/components/evidence/ChunkPreview.tsx)):
 - Modal showing source chunk
 - Highlight evidence text
 - Show context (prev/next chunks)
@@ -163,18 +163,18 @@ export const graphAPI = {
 
 **Create components:**
 
-1. **ArtifactViewer** ([`src/components/artifacts/ArtifactViewer.tsx`](frontend/src/components/artifacts/ArtifactViewer.tsx)):
+1. **ArtifactViewer** ([`src/components/artifacts/ArtifactViewer.tsx`](../frontend/src/components/artifacts/ArtifactViewer.tsx)):
 - Render blocks (heading, paragraph, list, quote)
 - Show citations (hover to see source)
 - Edit mode toggle
 - Version selector
 
-2. **BlockEditor** ([`src/components/artifacts/BlockEditor.tsx`](frontend/src/components/artifacts/BlockEditor.tsx)):
+2. **BlockEditor** ([`src/components/artifacts/BlockEditor.tsx`](../frontend/src/components/artifacts/BlockEditor.tsx)):
 - Inline editing for blocks
 - Save on blur → creates new version
 - Citation autocomplete
 
-3. **GenerationPanel** ([`src/components/artifacts/GenerationPanel.tsx`](frontend/src/components/artifacts/GenerationPanel.tsx)):
+3. **GenerationPanel** ([`src/components/artifacts/GenerationPanel.tsx`](../frontend/src/components/artifacts/GenerationPanel.tsx)):
 - "Generate Research" button with topic input
 - "Red-team This" button (select signal)
 - "Create Brief" button

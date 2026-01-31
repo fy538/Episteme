@@ -1,0 +1,22 @@
+# Fly.io configuration for Celery worker
+
+app = "episteme-celery"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "docker/backend.Dockerfile"
+
+[env]
+  DJANGO_SETTINGS_MODULE = "config.settings.production"
+
+# Override the default command to run Celery worker
+[processes]
+  worker = "celery -A tasks.celery worker --loglevel=info"
+
+# No HTTP service (Celery doesn't serve HTTP)
+
+# VM Resources (smaller for worker)
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256  # Celery worker can be smaller

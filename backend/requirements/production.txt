@@ -3,5 +3,11 @@
 # Production server
 gunicorn==21.2.0
 
+# Static files
+whitenoise==6.6.0
+
+# Production database
+psycopg2-binary==2.9.9
+
 # Monitoring (future)
 # sentry-sdk==1.40.0

@@ -39,19 +39,19 @@ Based on 2024 RAG research, we've implemented a production-ready document chunki
 
 ### New Files Created
 
-1. **[recursive_chunker.py](backend/apps/projects/recursive_chunker.py)** - Token-based recursive chunker
-2. **[token_utils.py](backend/apps/common/token_utils.py)** - Tiktoken utilities
-3. **[embedding_service.py](backend/apps/common/embedding_service.py)** - Multi-backend abstraction
-4. **[rechunk_documents.py](backend/apps/projects/management/commands/rechunk_documents.py)** - Migration command
-5. **[tests.py](backend/apps/projects/tests.py)** - Comprehensive tests
-6. **[tests_token_utils.py](backend/apps/common/tests_token_utils.py)** - Token utility tests
+1. **[recursive_chunker.py](../backend/apps/projects/recursive_chunker.py)** - Token-based recursive chunker
+2. **[token_utils.py](../backend/apps/common/token_utils.py)** - Tiktoken utilities
+3. **[embedding_service.py](../backend/apps/common/embedding_service.py)** - Multi-backend abstraction
+4. **[rechunk_documents.py](../backend/apps/projects/management/commands/rechunk_documents.py)** - Migration command
+5. **[tests.py](../backend/apps/projects/tests.py)** - Comprehensive tests
+6. **[tests_token_utils.py](../backend/apps/common/tests_token_utils.py)** - Token utility tests
 
 ### Files Modified
 
-1. **[models.py](backend/apps/projects/models.py)** - Enhanced DocumentChunk with embeddings, context linking
-2. **[services.py](backend/apps/projects/services.py)** - Updated process_document() to use new chunker
-3. **[requirements/base.txt](backend/requirements/base.txt)** - Added tiktoken, PyPDF2, python-docx
-4. **[settings/base.py](backend/config/settings/base.py)** - Added EMBEDDING_BACKEND config
+1. **[models.py](../backend/apps/projects/models.py)** - Enhanced DocumentChunk with embeddings, context linking
+2. **[services.py](../backend/apps/projects/services.py)** - Updated process_document() to use new chunker
+3. **[requirements/base.txt](../backend/requirements/base.txt)** - Added tiktoken, PyPDF2, python-docx
+4. **[settings/base.py](../backend/config/settings/base.py)** - Added EMBEDDING_BACKEND config
 5. **[.env.example](/.env.example)** - Added embedding backend settings
 
 ---

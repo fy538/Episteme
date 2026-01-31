@@ -8,7 +8,7 @@ The frontend shows "Loading..." because the backend requires authentication, but
 
 ### Option 1: Allow Anonymous Access (Fastest)
 
-Update [`backend/config/settings/development.py`](backend/config/settings/development.py):
+Update [`backend/config/settings/development.py`](../backend/config/settings/development.py):
 
 ```python
 # Add this to override base.py for development
