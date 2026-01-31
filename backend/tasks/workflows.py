@@ -15,88 +15,33 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     Phase 1: Assistant response + signal extraction
     
     Workflow:
-    1. Extract signals from user message (if warranted)
-    2. Generate assistant response
-    3. Link signals to case if case is open
+    1. Generate assistant response (always)
+    2. Extract signals from user message (Phase 1 - TODO)
     
     Args:
         thread_id: Chat thread ID
         user_message_id: User message that triggered this workflow
     """
-    import asyncio
     from apps.chat.models import Message, ChatThread
     from apps.chat.services import ChatService
-    from apps.signals.extractors import get_extractor
-    from apps.events.services import EventService
-    from apps.events.models import EventType, ActorType
     
+    # Get thread and message
     thread = ChatThread.objects.get(id=thread_id)
     user_message = Message.objects.get(id=user_message_id)
     
-    signals_created = 0
-    
-    # 1. Extract signals from user message
-    extractor = get_extractor()
-    
-    if extractor.should_extract(user_message):
-        # Get conversation context (last 5 messages before this one)
-        context_messages = list(
-            thread.messages
-            .order_by('created_at')
-            .filter(created_at__lt=user_message.created_at)
-        )
-        
-        # Calculate sequence index (position in thread)
-        sequence_index = thread.messages.filter(
-            created_at__lte=user_message.created_at
-        ).count() - 1
-        
-        # Extract signals (call async extractor from sync context)
-        try:
-            signals = asyncio.run(extractor.extract_from_message(
-                message=user_message,
-                context_messages=context_messages[-5:],  # Last 5 for context
-                sequence_index=sequence_index,
-            ))
-        except Exception as e:
-            print(f"Signal extraction failed: {e}")
-            signals = []
-        
-        # Save signals and emit events
-        for signal in signals:
-            # Create event first
-            event = EventService.append(
-                event_type=EventType.SIGNAL_EXTRACTED,
-                payload={
-                    'signal_type': signal.type,
-                    'text': signal.text,
-                    'confidence': signal.confidence,
-                    'sequence_index': signal.sequence_index,
-                },
-                actor_type=ActorType.SYSTEM,
-                thread_id=thread.id,
-                case_id=thread.primary_case_id if thread.primary_case else None,
-            )
-            
-            # Link signal to event and save
-            signal.event_id = event.id
-            if thread.primary_case:
-                signal.case = thread.primary_case
-            signal.save()
-            
-            signals_created += 1
-    
-    # 2. Generate assistant response
+    # Generate assistant response (Phase 0: stub response)
     response = ChatService.generate_assistant_response(
         thread_id=thread.id,
         user_message_id=user_message.id
     )
     
+    # TODO: Phase 1 - Add signal extraction here
+    # Currently disabled to get basic chat working first
+    
     return {
         'status': 'completed',
         'message_id': str(response.id),
-        'signals_extracted': signals_created,
-        'timestamp': timezone.now().isoformat(),
+        'signals_extracted': 0,
     }
 
 
