@@ -18,24 +18,6 @@ primary_region = "sjc"  # San Jose (change to your preferred region)
   auto_start_machines = true
   min_machines_running = 0
 
-[[services]]
-  protocol = "tcp"
-  internal_port = 8000
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  # Simple TCP health check (more reliable than HTTP during startup)
-  [[services.tcp_checks]]
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "30s"  # Give app time to start
-
 [mounts]
   source = "episteme_data"
   destination = "/data"
