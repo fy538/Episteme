@@ -3,10 +3,10 @@ Production settings for Fly.io deployment
 """
 from .base import *
 
-DEBUG = False
+DEBUG = env.bool('DEBUG', default=False)
 
 # Fly.io sets this, or you can override
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['episteme.fly.dev', '.fly.dev'])
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['episteme.fly.dev', '.fly.dev', 'localhost', '127.0.0.1'])
 
 # Security settings
 SECURE_SSL_REDIRECT = True
