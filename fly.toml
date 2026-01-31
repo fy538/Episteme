@@ -23,6 +23,10 @@ primary_region = "sjc"
     soft_limit = 200
     hard_limit = 250
 
+[mounts]
+  source = "episteme_data"
+  destination = "/data"
+
 [vm]
   cpu_kind = "shared"
   cpus = 1
