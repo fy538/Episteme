@@ -7,28 +7,43 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { ChatThread } from '@/lib/types/chat';
+import type { Project } from '@/lib/types/project';
 
 export function ConversationsSidebar({
+  projects,
   threads,
   selectedThreadId,
   isLoading,
   onSelect,
   onCreate,
   onRename,
+  onDelete,
+  onArchive,
+  searchTerm,
+  onSearchChange,
+  showArchived,
+  onToggleArchived,
 }: {
+  projects: Project[];
   threads: ChatThread[];
   selectedThreadId: string | null;
   isLoading?: boolean;
   onSelect: (threadId: string) => void;
   onCreate: () => void;
   onRename: (threadId: string, title: string) => Promise<void>;
+  onDelete: (threadId: string) => Promise<void>;
+  onArchive: (threadId: string, archived: boolean) => Promise<void>;
+  searchTerm: string;
+  onSearchChange: (value: string) => void;
+  showArchived: boolean;
+  onToggleArchived: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
 
   function startEditing(thread: ChatThread) {
     setEditingId(thread.id);
-    setTitleDraft(thread.title || 'Untitled Conversation');
+    setTitleDraft(thread.title || 'New Chat');
   }
 
   async function saveRename(threadId: string) {
@@ -37,6 +52,41 @@ export function ConversationsSidebar({
     await onRename(threadId, trimmed);
     setEditingId(null);
   }
+
+  async function handleDelete(thread: ChatThread) {
+    const ok = window.confirm(`Delete "${thread.title || 'New Chat'}"?`);
+    if (!ok) return;
+    await onDelete(thread.id);
+  }
+
+  async function handleArchive(thread: ChatThread) {
+    await onArchive(thread.id, !thread.archived);
+  }
+
+  const noProjectTitle = 'No Project';
+  const activeThreads = threads.filter(thread => !thread.archived);
+  const archivedThreads = threads.filter(thread => thread.archived);
+
+  const groupThreads = (list: ChatThread[]) => {
+    const grouped: { label: string; items: ChatThread[] }[] = [];
+
+    projects.forEach(project => {
+      const items = list.filter(t => t.project === project.id);
+      if (items.length > 0) {
+        grouped.push({ label: project.title, items });
+      }
+    });
+
+    const noProjectItems = list.filter(t => !t.project);
+    if (noProjectItems.length > 0) {
+      grouped.push({ label: noProjectTitle, items: noProjectItems });
+    }
+
+    return grouped;
+  };
+
+  const activeGroups = groupThreads(activeThreads);
+  const archivedGroups = groupThreads(archivedThreads);
 
   return (
     <div className="w-72 border-r border-gray-200 p-4 overflow-y-auto bg-gray-50">
@@ -47,6 +97,23 @@ export function ConversationsSidebar({
         </Button>
       </div>
 
+      <div className="mb-3 space-y-2">
+        <input
+          value={searchTerm}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search conversations..."
+          className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+        />
+        <label className="flex items-center gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={onToggleArchived}
+          />
+          Show archived
+        </label>
+      </div>
+
       {isLoading && (
         <p className="text-sm text-gray-500">Loading...</p>
       )}
@@ -55,61 +122,175 @@ export function ConversationsSidebar({
         <p className="text-sm text-gray-500">No conversations yet.</p>
       )}
 
-      <div className="space-y-2">
-        {threads.map(thread => {
-          const isSelected = thread.id === selectedThreadId;
-          const title = thread.title || 'Untitled Conversation';
-          const isEditing = editingId === thread.id;
+      <div className="space-y-4">
+        {activeGroups.map(group => (
+          <div key={group.label}>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              {group.label}
+            </h3>
+            <div className="space-y-2">
+              {group.items.map(thread => {
+                const isSelected = thread.id === selectedThreadId;
+                const title = thread.title || 'New Chat';
+                const isEditing = editingId === thread.id;
+                const isArchived = !!thread.archived;
 
-          return (
-            <div
-              key={thread.id}
-              className={`rounded border px-3 py-2 text-sm ${
-                isSelected ? 'border-blue-500 bg-white' : 'border-transparent bg-white/60'
-              }`}
-            >
-              {isEditing ? (
-                <div className="space-y-2">
-                  <input
-                    value={titleDraft}
-                    onChange={e => setTitleDraft(e.target.value)}
-                    className="w-full px-2 py-1 border border-gray-300 rounded"
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => saveRename(thread.id)}>
-                      Save
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditingId(null)}
-                    >
-                      Cancel
-                    </Button>
+                return (
+                  <div
+                    key={thread.id}
+                    className={`rounded border px-3 py-2 text-sm ${
+                      isSelected ? 'border-blue-500 bg-white' : 'border-transparent bg-white/60'
+                    }`}
+                  >
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <input
+                          value={titleDraft}
+                          onChange={e => setTitleDraft(e.target.value)}
+                          className="w-full px-2 py-1 border border-gray-300 rounded"
+                        />
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => saveRename(thread.id)}>
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => onSelect(thread.id)}
+                          className="text-left flex-1"
+                          title={title}
+                        >
+                          {title}
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => startEditing(thread)}
+                            className="text-xs text-gray-500 hover:text-gray-800"
+                            aria-label="Rename conversation"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            onClick={() => handleArchive(thread)}
+                            className="text-xs text-gray-500 hover:text-gray-800"
+                            aria-label="Archive conversation"
+                          >
+                            {isArchived ? 'Unarchive' : 'Archive'}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(thread)}
+                            className="text-xs text-red-600 hover:text-red-800"
+                            aria-label="Delete conversation"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => onSelect(thread.id)}
-                    className="text-left flex-1"
-                    title={title}
-                  >
-                    {title}
-                  </button>
-                  <button
-                    onClick={() => startEditing(thread)}
-                    className="text-xs text-gray-500 hover:text-gray-800"
-                    aria-label="Rename conversation"
-                  >
-                    Rename
-                  </button>
-                </div>
-              )}
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
+
+      {showArchived && (
+        <div className="mt-6">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Archived
+          </h3>
+          <div className="space-y-4">
+            {archivedGroups.map(group => (
+              <div key={group.label}>
+                <h4 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {group.label}
+                </h4>
+                <div className="space-y-2">
+                  {group.items.map(thread => {
+                    const isSelected = thread.id === selectedThreadId;
+                    const title = thread.title || 'New Chat';
+                    const isEditing = editingId === thread.id;
+
+                    return (
+                      <div
+                        key={thread.id}
+                        className={`rounded border px-3 py-2 text-sm ${
+                          isSelected ? 'border-blue-500 bg-white' : 'border-transparent bg-white/60'
+                        }`}
+                      >
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              value={titleDraft}
+                              onChange={e => setTitleDraft(e.target.value)}
+                              className="w-full px-2 py-1 border border-gray-300 rounded"
+                            />
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => saveRename(thread.id)}>
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              onClick={() => onSelect(thread.id)}
+                              className="text-left flex-1"
+                              title={title}
+                            >
+                              {title}
+                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => startEditing(thread)}
+                                className="text-xs text-gray-500 hover:text-gray-800"
+                                aria-label="Rename conversation"
+                              >
+                                Rename
+                              </button>
+                              <button
+                                onClick={() => handleArchive(thread)}
+                                className="text-xs text-gray-500 hover:text-gray-800"
+                                aria-label="Unarchive conversation"
+                              >
+                                Unarchive
+                              </button>
+                              <button
+                                onClick={() => handleDelete(thread)}
+                                className="text-xs text-red-600 hover:text-red-800"
+                                aria-label="Delete conversation"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

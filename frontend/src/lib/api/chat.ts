@@ -6,21 +6,32 @@ import { apiClient } from './client';
 import type { ChatThread, Message } from '../types/chat';
 
 export const chatAPI = {
-  async createThread(): Promise<ChatThread> {
-    return apiClient.post<ChatThread>('/chat/threads/', {});
+  async createThread(projectId?: string | null): Promise<ChatThread> {
+    return apiClient.post<ChatThread>('/chat/threads/', {
+      ...(projectId ? { project: projectId } : {}),
+    });
   },
 
   async getThread(threadId: string): Promise<ChatThread> {
     return apiClient.get<ChatThread>(`/chat/threads/${threadId}/`);
   },
 
-  async listThreads(): Promise<ChatThread[]> {
-    const response = await apiClient.get<{ results: ChatThread[] }>('/chat/threads/');
+  async listThreads(params?: { archived?: 'true' | 'false' | 'all'; q?: string; project_id?: string }): Promise<ChatThread[]> {
+    const query = new URLSearchParams();
+    if (params?.archived) query.set('archived', params.archived);
+    if (params?.q) query.set('q', params.q);
+    if (params?.project_id) query.set('project_id', params.project_id);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    const response = await apiClient.get<{ results: ChatThread[] }>(`/chat/threads/${suffix}`);
     return response.results || [];
   },
 
   async updateThread(threadId: string, data: Partial<ChatThread>): Promise<ChatThread> {
     return apiClient.patch<ChatThread>(`/chat/threads/${threadId}/`, data);
+  },
+
+  async deleteThread(threadId: string): Promise<void> {
+    await apiClient.delete(`/chat/threads/${threadId}/`);
   },
 
   async sendMessage(threadId: string, content: string): Promise<Message> {

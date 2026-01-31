@@ -25,7 +25,7 @@ class ChatService:
     """
     
     @staticmethod
-    def create_thread(user: User, title: str = "") -> ChatThread:
+    def create_thread(user: User, title: str = "New Chat") -> ChatThread:
         """
         Create a new chat thread
         

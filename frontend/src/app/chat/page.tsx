@@ -12,6 +12,8 @@ import { StructureSidebar } from '@/components/structure/StructureSidebar';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
 import type { ChatThread } from '@/lib/types/chat';
+import { projectsAPI } from '@/lib/api/projects';
+import type { Project } from '@/lib/types/project';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -22,6 +24,12 @@ export default function ChatPage() {
   const [authReady, setAuthReady] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [showConversations, setShowConversations] = useState(true);
+  const [showStructure, setShowStructure] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [threadProjectId, setThreadProjectId] = useState<string | null>(null);
 
   // Check auth before loading
   useEffect(() => {
@@ -49,7 +57,7 @@ export default function ChatPage() {
       if (!authReady) return;
       try {
         setIsLoadingThreads(true);
-        const list = await chatAPI.listThreads();
+        const list = await chatAPI.listThreads({ archived: showArchived ? 'all' : 'false' });
         setThreads(list);
 
         if (list.length === 0) {
@@ -57,6 +65,7 @@ export default function ChatPage() {
           setThreads([created]);
           setThreadId(created.id);
           setCaseId(created.primary_case || null);
+          setThreadProjectId(created.project || null);
         } else {
           setThreadId(list[0].id);
         }
@@ -69,6 +78,19 @@ export default function ChatPage() {
       }
     }
     initThread();
+  }, [authReady, showArchived]);
+
+  useEffect(() => {
+    async function loadProjects() {
+      if (!authReady) return;
+      try {
+        const list = await projectsAPI.listProjects();
+        setProjects(list.filter(p => !p.is_archived));
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
+    }
+    loadProjects();
   }, [authReady]);
 
   // Load thread details when selection changes
@@ -78,6 +100,7 @@ export default function ChatPage() {
       try {
         const thread = await chatAPI.getThread(threadId);
         setCaseId(thread.primary_case || null);
+        setThreadProjectId(thread.project || null);
       } catch (err) {
         console.error('Failed to load thread details:', err);
       }
@@ -87,12 +110,37 @@ export default function ChatPage() {
 
   async function handleCreateThread() {
     try {
-      const created = await chatAPI.createThread();
+      const created = await chatAPI.createThread(threadProjectId);
       setThreads(prev => [created, ...prev]);
       setThreadId(created.id);
       setCaseId(created.primary_case || null);
+      setThreadProjectId(created.project || null);
     } catch (err) {
       console.error('Failed to create thread:', err);
+    }
+  }
+
+  async function handleDeleteThread(threadIdToDelete: string) {
+    try {
+      await chatAPI.deleteThread(threadIdToDelete);
+      setThreads(prev => {
+        const remaining = prev.filter(t => t.id !== threadIdToDelete);
+        if (threadId === threadIdToDelete) {
+          if (remaining.length > 0) {
+            setThreadId(remaining[0].id);
+          } else {
+            void (async () => {
+              const created = await chatAPI.createThread();
+              setThreads([created]);
+              setThreadId(created.id);
+              setCaseId(created.primary_case || null);
+            })();
+          }
+        }
+        return remaining;
+      });
+    } catch (err) {
+      console.error('Failed to delete thread:', err);
     }
   }
 
@@ -104,6 +152,45 @@ export default function ChatPage() {
       );
     } catch (err) {
       console.error('Failed to rename thread:', err);
+    }
+  }
+
+  async function handleArchiveThread(threadIdToArchive: string, archived: boolean) {
+    try {
+      const updated = await chatAPI.updateThread(threadIdToArchive, { archived });
+      setThreads(prev => {
+        const next = prev.map(t => (t.id === updated.id ? updated : t));
+        if (!showArchived) {
+          return next.filter(t => !t.archived);
+        }
+        return next;
+      });
+      if (archived && !showArchived && threadId === threadIdToArchive) {
+        const remaining = threads.filter(t => t.id !== threadIdToArchive && !t.archived);
+        if (remaining.length > 0) {
+          setThreadId(remaining[0].id);
+        } else {
+          const created = await chatAPI.createThread();
+          setThreads([created]);
+          setThreadId(created.id);
+          setCaseId(created.primary_case || null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to archive thread:', err);
+    }
+  }
+
+  async function handleChangeThreadProject(nextProjectId: string | null) {
+    if (!threadId) return;
+    try {
+      const updated = await chatAPI.updateThread(threadId, { project: nextProjectId });
+      setThreadProjectId(updated.project || null);
+      setThreads(prev =>
+        prev.map(t => (t.id === updated.id ? updated : t))
+      );
+    } catch (err) {
+      console.error('Failed to update thread project:', err);
     }
   }
 
@@ -152,27 +239,51 @@ export default function ChatPage() {
     );
   }
 
+  const filteredThreads = threads.filter(thread =>
+    (thread.title || 'New Chat').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="flex h-screen overflow-hidden">
-      <ConversationsSidebar
-        threads={threads}
-        selectedThreadId={threadId}
-        isLoading={isLoadingThreads}
-        onSelect={(id) => setThreadId(id)}
-        onCreate={handleCreateThread}
-        onRename={handleRenameThread}
-      />
+      {showConversations && (
+        <ConversationsSidebar
+          projects={projects}
+          threads={filteredThreads}
+          selectedThreadId={threadId}
+          isLoading={isLoadingThreads}
+          onSelect={(id) => setThreadId(id)}
+          onCreate={handleCreateThread}
+          onRename={handleRenameThread}
+          onDelete={handleDeleteThread}
+          onArchive={handleArchiveThread}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          showArchived={showArchived}
+          onToggleArchived={() => setShowArchived(prev => !prev)}
+        />
+      )}
       {/* Main chat area */}
       <div className="flex-1 flex flex-col">
-        <ChatInterface threadId={threadId} />
+        <ChatInterface
+          threadId={threadId}
+          onToggleLeft={() => setShowConversations(prev => !prev)}
+          onToggleRight={() => setShowStructure(prev => !prev)}
+          leftCollapsed={!showConversations}
+          rightCollapsed={!showStructure}
+          projects={projects}
+          projectId={threadProjectId}
+          onProjectChange={handleChangeThreadProject}
+        />
       </div>
       
       {/* Structure sidebar */}
-      <StructureSidebar 
-        threadId={threadId} 
-        caseId={caseId || undefined}
-        onCaseCreated={(newCaseId) => setCaseId(newCaseId)}
-      />
+      {showStructure && (
+        <StructureSidebar 
+          threadId={threadId} 
+          caseId={caseId || undefined}
+          onCaseCreated={(newCaseId) => setCaseId(newCaseId)}
+        />
+      )}
     </div>
   );
 }

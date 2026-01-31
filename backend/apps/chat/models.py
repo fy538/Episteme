@@ -12,7 +12,7 @@ class ChatThread(UUIDModel, TimestampedModel):
     """
     A conversation thread
     """
-    title = models.CharField(max_length=500, blank=True)
+    title = models.CharField(max_length=500, blank=True, default='New Chat')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_threads')
     
     # Optional: link to a case if this thread is associated with one
@@ -24,6 +24,18 @@ class ChatThread(UUIDModel, TimestampedModel):
         blank=True,
         related_name='primary_thread'
     )
+
+    # Optional project association
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='chat_threads'
+    )
+
+    # Archive flag for hiding old conversations
+    archived = models.BooleanField(default=False)
     
     class Meta:
         ordering = ['-created_at']

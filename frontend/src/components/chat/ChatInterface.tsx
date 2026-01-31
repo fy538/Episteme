@@ -10,7 +10,25 @@ import { MessageInput } from './MessageInput';
 import { chatAPI } from '@/lib/api/chat';
 import type { Message } from '@/lib/types/chat';
 
-export function ChatInterface({ threadId }: { threadId: string }) {
+export function ChatInterface({
+  threadId,
+  onToggleLeft,
+  onToggleRight,
+  leftCollapsed,
+  rightCollapsed,
+  projects,
+  projectId,
+  onProjectChange,
+}: {
+  threadId: string;
+  onToggleLeft?: () => void;
+  onToggleRight?: () => void;
+  leftCollapsed?: boolean;
+  rightCollapsed?: boolean;
+  projects?: { id: string; title: string }[];
+  projectId?: string | null;
+  onProjectChange?: (projectId: string | null) => void;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
@@ -138,8 +156,45 @@ export function ChatInterface({ threadId }: { threadId: string }) {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <div className="border-b border-gray-200 p-4">
-        <h1 className="text-lg font-semibold text-gray-900">Chat</h1>
+      <div className="border-b border-gray-200 p-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold text-gray-900">Chat</h1>
+          {projects && onProjectChange && (
+            <label className="text-xs text-gray-600 flex items-center gap-2">
+              Project
+              <select
+                value={projectId || ''}
+                onChange={(e) => onProjectChange(e.target.value || null)}
+                className="text-xs border border-gray-300 rounded px-2 py-1"
+              >
+                <option value="">No Project</option>
+                {projects.map(project => (
+                  <option key={project.id} value={project.id}>
+                    {project.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {onToggleLeft && (
+            <button
+              onClick={onToggleLeft}
+              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+            >
+              {leftCollapsed ? 'Show Conversations' : 'Hide Conversations'}
+            </button>
+          )}
+          {onToggleRight && (
+            <button
+              onClick={onToggleRight}
+              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+            >
+              {rightCollapsed ? 'Show Structure' : 'Hide Structure'}
+            </button>
+          )}
+        </div>
       </div>
       {error && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-4">

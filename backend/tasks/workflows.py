@@ -39,12 +39,68 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     
     # TODO: Phase 1 - Add signal extraction here
     # Currently disabled to get basic chat working first
+
+    # Trigger async title generation (best-effort)
+    try:
+        generate_chat_title_workflow.delay(thread_id=str(thread.id))
+    except Exception:
+        logger.exception(
+            "chat_title_task_enqueue_failed",
+            extra={"thread_id": str(thread.id)},
+        )
     
     return {
         'status': 'completed',
         'message_id': str(response.id),
         'signals_extracted': 0,
     }
+
+
+@shared_task
+def generate_chat_title_workflow(thread_id: str):
+    """
+    Generate a concise title for a chat thread.
+
+    Trigger rules:
+    - After 2 user messages, OR
+    - After 1 user message if it's > 200 chars
+    - Only if title is blank or "New Chat"
+    """
+    from apps.chat.models import ChatThread, Message, MessageRole
+    from apps.common.ai_services import generate_chat_title
+    import asyncio
+
+    try:
+        thread = ChatThread.objects.get(id=thread_id)
+
+        if thread.title and thread.title != "New Chat":
+            return {"status": "skipped", "reason": "title_already_set"}
+
+        user_messages = Message.objects.filter(
+            thread=thread,
+            role=MessageRole.USER
+        ).order_by('created_at')
+
+        count = user_messages.count()
+        if count == 0:
+            return {"status": "skipped", "reason": "no_user_messages"}
+
+        first_msg = user_messages.first()
+        if count < 2 and len(first_msg.content) <= 200:
+            return {"status": "skipped", "reason": "threshold_not_met"}
+
+        messages_text = [msg.content for msg in user_messages[:5]]
+        title = asyncio.run(generate_chat_title(messages_text))
+
+        if title:
+            thread.title = title
+            thread.save(update_fields=['title'])
+            return {"status": "completed", "title": title}
+
+        return {"status": "skipped", "reason": "empty_title"}
+    except Exception:
+        logger.exception("generate_chat_title_failed", extra={"thread_id": thread_id})
+        return {"status": "failed"}
 
 
 @shared_task
