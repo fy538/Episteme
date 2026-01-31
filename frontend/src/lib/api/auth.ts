@@ -27,11 +27,23 @@ export const authAPI = {
    */
   async login(credentials: LoginCredentials): Promise<TokenResponse> {
     const response = await apiClient.post<TokenResponse>('/auth/token/', credentials);
+    
+    // Debug log
+    console.log('Login successful, tokens received:', {
+      hasAccess: !!response.access,
+      hasRefresh: !!response.refresh,
+    });
+    
     // Save the access token
     apiClient.setToken(response.access);
     // Save refresh token to localStorage
     if (typeof window !== 'undefined') {
       localStorage.setItem('refresh_token', response.refresh);
+      // Verify it was saved
+      console.log('Token saved to localStorage:', {
+        authToken: localStorage.getItem('auth_token')?.substring(0, 20) + '...',
+        refreshToken: localStorage.getItem('refresh_token')?.substring(0, 20) + '...',
+      });
     }
     return response;
   },
