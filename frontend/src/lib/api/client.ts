@@ -14,17 +14,23 @@ export class APIClient {
   }
 
   setToken(token: string) {
+    console.log('[APIClient] setToken called with:', token ? token.substring(0, 20) + '...' : 'EMPTY');
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', token);
+      console.log('[APIClient] Token saved to localStorage');
     }
   }
 
   getToken(): string | null {
-    if (this.token) return this.token;
+    if (this.token) {
+      console.log('[APIClient] Returning cached token:', this.token.substring(0, 20) + '...');
+      return this.token;
+    }
     
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('auth_token');
+      console.log('[APIClient] Loaded token from localStorage:', this.token ? this.token.substring(0, 20) + '...' : 'NULL');
     }
     
     return this.token;
