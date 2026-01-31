@@ -40,8 +40,8 @@ primary_region = "sjc"  # San Jose (change to your preferred region)
   source = "episteme_data"
   destination = "/data"
 
-# VM Resources (start small, upgrade if needed)
+# VM Resources
 [vm]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 512  # 512MB (can upgrade to 1024 if needed)
+  memory_mb = 1024  # 1GB - required for Django with all dependencies
