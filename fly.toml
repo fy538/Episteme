@@ -14,16 +14,9 @@ primary_region = "sjc"  # San Jose (change to your preferred region)
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "stop"  # Stop when idle (save money)
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0     # Can scale to zero (free tier friendly)
-
-  [[http_service.checks]]
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "10s"
-    method = "GET"
-    path = "/api/auth/token/"  # Health check endpoint
+  min_machines_running = 0
 
 [[services]]
   protocol = "tcp"
@@ -37,12 +30,11 @@ primary_region = "sjc"  # San Jose (change to your preferred region)
     port = 443
     handlers = ["tls", "http"]
 
-  [[services.http_checks]]
-    interval = "10s"
+  # Simple TCP health check (more reliable than HTTP during startup)
+  [[services.tcp_checks]]
+    interval = "15s"
     timeout = "2s"
-    grace_period = "5s"
-    method = "get"
-    path = "/"
+    grace_period = "30s"  # Give app time to start
 
 [mounts]
   source = "episteme_data"

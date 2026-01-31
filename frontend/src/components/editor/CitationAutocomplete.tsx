@@ -44,6 +44,7 @@ export function CitationAutocomplete({
     if (!editor) return;
 
     function handleUpdate() {
+      if (!editor) return;
       const { from } = editor.state.selection;
       const textBefore = editor.state.doc.textBetween(
         Math.max(0, from - 50),

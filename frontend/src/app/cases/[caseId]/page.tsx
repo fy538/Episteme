@@ -236,6 +236,7 @@ export default function CaseWorkspacePage({
               )}
             </div>
           )}
+        </div>
       </div>
     </div>
   );

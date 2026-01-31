@@ -31,6 +31,8 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        REQUIREMENTS_FILE: development.txt  # Use dev requirements locally
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
@@ -50,6 +52,8 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        REQUIREMENTS_FILE: development.txt  # Use dev requirements locally
     command: celery -A tasks.celery worker --loglevel=info
     volumes:
       - ./backend:/app
@@ -65,6 +69,8 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        REQUIREMENTS_FILE: development.txt  # Use dev requirements locally
     command: celery -A tasks.celery beat --loglevel=info
     volumes:
       - ./backend:/app

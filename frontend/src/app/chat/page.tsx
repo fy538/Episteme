@@ -92,7 +92,7 @@ export default function ChatPage() {
       {/* Structure sidebar */}
       <StructureSidebar 
         threadId={threadId} 
-        caseId={caseId}
+        caseId={caseId || undefined}
         onCaseCreated={(newCaseId) => setCaseId(newCaseId)}
       />
     </div>
