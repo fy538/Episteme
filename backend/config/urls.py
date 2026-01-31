@@ -19,9 +19,12 @@ urlpatterns = [
     path('api/artifacts/', include('apps.artifacts.urls')),  # Phase 2.4: artifacts
 ]
 
-# Debug toolbar
+# Debug toolbar (only in development)
 if settings.DEBUG:
-    import debug_toolbar
-    urlpatterns = [
-        path('__debug__/', include(debug_toolbar.urls)),
-    ] + urlpatterns
+    try:
+        import debug_toolbar
+        urlpatterns = [
+            path('__debug__/', include(debug_toolbar.urls)),
+        ] + urlpatterns
+    except ImportError:
+        pass  # debug_toolbar not installed
