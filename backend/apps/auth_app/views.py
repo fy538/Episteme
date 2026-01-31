@@ -10,30 +10,40 @@ from django.contrib.auth.models import User
 from .serializers import UserSerializer
 
 
-class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
+class EmailTokenObtainPairSerializer(serializers.Serializer):
     """Custom serializer that allows login with email instead of username"""
     email = serializers.EmailField(required=True)
-    username = None  # Remove username field
+    password = serializers.CharField(required=True, write_only=True)
     
     def validate(self, attrs):
-        # Get email from the request
+        from django.contrib.auth import authenticate
+        from rest_framework_simplejwt.tokens import RefreshToken
+        
         email = attrs.get('email')
         password = attrs.get('password')
         
-        # Find user by email and convert to username
+        # Find user by email
         try:
             user = User.objects.get(email=email)
-            # Replace email with username for the parent class
-            attrs['username'] = user.username
-            del attrs['email']  # Remove email so parent doesn't get confused
         except User.DoesNotExist:
-            # If user doesn't exist, set a dummy username so parent can handle the error properly
-            attrs['username'] = email
-            if 'email' in attrs:
-                del attrs['email']
+            raise serializers.ValidationError('No active account found with the given credentials')
         
-        # Call parent validation with username
-        return super().validate(attrs)
+        # Authenticate with username and password
+        user = authenticate(username=user.username, password=password)
+        
+        if user is None:
+            raise serializers.ValidationError('No active account found with the given credentials')
+        
+        if not user.is_active:
+            raise serializers.ValidationError('User account is disabled')
+        
+        # Generate tokens
+        refresh = RefreshToken.for_user(user)
+        
+        return {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }
 
 
 class EmailTokenObtainPairView(TokenObtainPairView):
