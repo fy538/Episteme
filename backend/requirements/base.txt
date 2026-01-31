@@ -1,0 +1,54 @@
+# Django Core
+Django==5.0.1
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+django-environ==0.11.2
+
+# Database
+psycopg2-binary==2.9.9
+dj-database-url==2.1.0
+
+# Celery & Redis
+celery==5.3.6
+redis==5.0.1
+
+# Authentication
+djangorestframework-simplejwt==5.3.1
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2024.1
+uuid==1.30
+
+# JSON & Data
+jsonschema==4.21.1
+
+# AI Frameworks
+pydantic-ai==0.0.18
+logfire>=0.1.0
+
+# Signal Extraction (Phase 1)
+sentence-transformers==2.5.1
+openai==1.12.0
+numpy==1.26.4
+torch==2.2.0
+
+# Token-based chunking (Phase 2)
+tiktoken==0.5.2
+
+# Document processing
+PyPDF2==3.0.1
+python-docx==1.1.0
+
+# Vector DB (Pinecone - legacy, will migrate to pgvector)
+pinecone-client==3.0.0
+
+# Google ADK (Phase 2.4 - AI agents)
+google-adk==0.5.0
+
+# Vector Database (Phase 2)
+pinecone-client==3.0.0
+
+# Document Processing (Phase 2)
+PyPDF2==3.0.1
+python-docx==1.1.0
