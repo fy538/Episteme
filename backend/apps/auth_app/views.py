@@ -12,22 +12,22 @@ from .serializers import UserSerializer
 
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Custom serializer that allows login with email instead of username"""
-    username_field = 'email'
     
     def validate(self, attrs):
-        # Get email from the request
+        # The frontend sends 'email', but the parent class expects 'username'
         email = attrs.get('email')
         password = attrs.get('password')
         
-        # Find user by email
-        try:
-            user = User.objects.get(email=email)
-            # Replace email with username for the parent class
-            attrs['username'] = user.username
-        except User.DoesNotExist:
-            pass  # Let the parent class handle the error
+        if email:
+            try:
+                user = User.objects.get(email=email)
+                # Replace 'email' with 'username' so authenticate() works
+                attrs[self.username_field] = user.username
+            except User.DoesNotExist:
+                # If email not found, let it proceed to fail naturally 
+                # so we don't leak information about which emails exist
+                pass
         
-        # Call parent validation with username
         return super().validate(attrs)
 
 
