@@ -15,8 +15,8 @@ primary_region = "sjc"
 
 # No HTTP service (Celery doesn't serve HTTP)
 
-# VM Resources (smaller for worker)
+# VM Resources
 [vm]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256  # Celery worker can be smaller
+  memory_mb = 2048  # Needs 2GB for Django + AI libraries
