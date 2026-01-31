@@ -60,10 +60,20 @@ export class APIClient {
       if (!response.ok) {
         let errorMessage = `API Error ${response.status}`;
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.error || errorMessage;
-        } catch {
-          errorMessage = await response.text() || errorMessage;
+          // Try to get the response body as text first
+          const responseText = await response.text();
+          if (responseText) {
+            try {
+              // Try to parse as JSON
+              const errorData = JSON.parse(responseText);
+              errorMessage = errorData.detail || errorData.error || JSON.stringify(errorData);
+            } catch {
+              // Not JSON, use the text directly
+              errorMessage = responseText;
+            }
+          }
+        } catch (err) {
+          console.error('Error reading response:', err);
         }
         throw new Error(errorMessage);
       }
