@@ -32,6 +32,9 @@ EXPOSE 8000
 # Collect static files
 RUN python manage.py collectstatic --noinput || true
 
-# Default command for production (gunicorn)
-# docker-compose overrides this with runserver for dev
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120"]
+# Copy startup script
+COPY docker/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Default command for production
+CMD ["/app/start.sh"]
