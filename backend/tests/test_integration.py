@@ -8,6 +8,7 @@ Tests the full dogfooding flow:
 4. Generate artifacts (research, critique, brief)
 5. Edit artifact → version created
 """
+import logging
 import pytest
 from django.contrib.auth.models import User
 from apps.chat.services import ChatService
@@ -17,6 +18,7 @@ from apps.signals.models import Signal
 from apps.projects.models import Evidence
 from apps.common.graph_utils import GraphUtils
 
+logger = logging.getLogger(__name__)
 
 @pytest.mark.django_db
 class TestCompleteWorkflow:
@@ -206,9 +208,12 @@ class TestCompleteWorkflow:
         assert artifact.input_signals.count() == 1
         assert artifact.input_evidence.count() == 1
         
-        print("✅ Complete integration test passed!")
-        print(f"   - Signals: {Signal.objects.filter(case=case).count()}")
-        print(f"   - Evidence: {Evidence.objects.filter(document__case=case).count()}")
-        print(f"   - Artifacts: {Artifact.objects.filter(case=case).count()}")
-        print(f"   - Artifact versions: {artifact.version_count}")
-        print(f"   - Graph links: {assumption.supported_by_evidence.count()} evidence supports")
+        logger.info("integration_test_complete")
+        logger.info("integration_test_signals", extra={"count": Signal.objects.filter(case=case).count()})
+        logger.info("integration_test_evidence", extra={"count": Evidence.objects.filter(document__case=case).count()})
+        logger.info("integration_test_artifacts", extra={"count": Artifact.objects.filter(case=case).count()})
+        logger.info("integration_test_versions", extra={"count": artifact.version_count})
+        logger.info(
+            "integration_test_graph_links",
+            extra={"support_count": assumption.supported_by_evidence.count()},
+        )

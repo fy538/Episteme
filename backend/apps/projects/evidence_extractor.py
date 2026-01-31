@@ -9,6 +9,7 @@ This is DIFFERENT from signal extraction:
 
 Evidence provides "receipts" that support or contradict user signals.
 """
+import logging
 from typing import List
 from sentence_transformers import SentenceTransformer
 
@@ -16,6 +17,7 @@ from apps.projects.models import Evidence, DocumentChunk, EvidenceType
 from apps.signals.prompts import get_evidence_extraction_prompt
 from apps.signals.extractors import SignalExtractor  # Reuse LLM calling logic
 
+logger = logging.getLogger(__name__)
 
 class EvidenceExtractor:
     """
@@ -89,8 +91,15 @@ class EvidenceExtractor:
                 
                 evidence_list.append(evidence)
                 
-            except Exception as e:
-                print(f"Failed to create evidence from {item}: {e}")
+            except Exception:
+                logger.exception(
+                    "evidence_creation_failed",
+                    extra={
+                        "document_id": str(chunk.document_id),
+                        "chunk_id": str(chunk.id),
+                        "evidence_type": item.get("type"),
+                    },
+                )
                 continue
         
         return evidence_list

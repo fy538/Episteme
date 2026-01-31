@@ -4,6 +4,7 @@ Demo: Using PydanticAI services in Episteme
 This file shows examples of how to use the new AI services.
 Run from Django shell: python manage.py shell < examples/ai_services_demo.py
 """
+import logging
 import asyncio
 from apps.common.ai_services import (
     generate_chat_title,
@@ -11,10 +12,11 @@ from apps.common.ai_services import (
     summarize_conversation
 )
 
+logger = logging.getLogger(__name__)
 
 async def demo_title_generation():
     """Example: Auto-generate chat titles"""
-    print("\n=== Chat Title Generation ===")
+    logger.info("demo_chat_title_generation_start")
     
     messages = [
         "I'm trying to decide between using Postgres or MongoDB for our event store",
@@ -24,23 +26,23 @@ async def demo_title_generation():
     ]
     
     title = await generate_chat_title(messages)
-    print(f"Generated title: '{title}'")
+    logger.info("demo_chat_title_generation_result", extra={"title": title})
 
 
 async def demo_case_title():
     """Example: Auto-generate case titles"""
-    print("\n=== Case Title Generation ===")
+    logger.info("demo_case_title_generation_start")
     
     position = "We should migrate from MongoDB to PostgreSQL for the event store"
     context = "Current MongoDB setup has consistency issues under high load"
     
     title = await generate_case_title(position, context)
-    print(f"Generated title: '{title}'")
+    logger.info("demo_case_title_generation_result", extra={"title": title})
 
 
 async def demo_summarization():
     """Example: Summarize conversations"""
-    print("\n=== Conversation Summarization ===")
+    logger.info("demo_conversation_summarization_start")
     
     messages = [
         "I'm evaluating database options for our new event-sourced system",
@@ -53,40 +55,39 @@ async def demo_summarization():
     
     result = await summarize_conversation(messages, focus="technical decisions")
     
-    print(f"\nSummary:\n{result['summary']}\n")
-    print("Key Points:")
+    logger.info("demo_summarization_summary", extra={"summary": result["summary"]})
+    logger.info("demo_summarization_key_points")
     for i, point in enumerate(result['key_points'], 1):
-        print(f"{i}. {point}")
+        logger.info("demo_summarization_key_point", extra={"index": i, "point": point})
 
 
 async def demo_signal_extraction():
     """Example: Extract signals from a message"""
-    print("\n=== Signal Extraction ===")
+    logger.info("demo_signal_extraction_start")
     
     # This would normally use a real Message object
     # Here we're just showing the concept
     from apps.signals.extractors import get_extractor
     
-    print("Signal extraction is now handled via PydanticAI")
-    print("See apps/signals/extractors.py for implementation")
-    print("\nExtractor is async and type-safe:")
-    print("  signals = await extractor.extract_from_message(message)")
+    logger.info("demo_signal_extraction_info", extra={"detail": "Signal extraction handled via PydanticAI"})
+    logger.info("demo_signal_extraction_info", extra={"detail": "See apps/signals/extractors.py for implementation"})
+    logger.info("demo_signal_extraction_info", extra={"detail": "Extractor is async and type-safe"})
+    logger.info(
+        "demo_signal_extraction_info",
+        extra={"detail": "signals = await extractor.extract_from_message(message)"},
+    )
 
 
 async def main():
     """Run all demos"""
-    print("=" * 60)
-    print("PydanticAI Services Demo")
-    print("=" * 60)
+    logger.info("demo_start")
     
     await demo_title_generation()
     await demo_case_title()
     await demo_summarization()
     await demo_signal_extraction()
     
-    print("\n" + "=" * 60)
-    print("Demo complete!")
-    print("=" * 60)
+    logger.info("demo_complete")
 
 
 if __name__ == "__main__":

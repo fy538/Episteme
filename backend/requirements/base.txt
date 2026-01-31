@@ -22,6 +22,8 @@ uuid==1.30
 
 # JSON & Data
 jsonschema==4.21.1
+python-json-logger==2.0.7
+sentry-sdk==1.40.0
 
 # AI Frameworks
 pydantic-ai==0.0.18
@@ -30,25 +32,18 @@ logfire>=0.1.0
 # Signal Extraction (Phase 1)
 sentence-transformers==2.5.1
 openai>=1.54.3  # Updated for pydantic-ai compatibility
-numpy==1.26.4
-torch==2.2.0
+numpy>=1.26.4  # Allow newer versions for Python 3.13+ compatibility
+torch>=2.6.0  # Use latest for Python 3.13 support
 
 # Token-based chunking (Phase 2)
-tiktoken==0.5.2
+tiktoken>=0.5.2  # Use latest with prebuilt wheels for Python 3.13
 
 # Document processing
 PyPDF2==3.0.1
 python-docx==1.1.0
 
-# Vector DB (Pinecone - legacy, will migrate to pgvector)
-pinecone-client==3.0.0
+# Vector DB (Pinecone)
+pinecone>=3.0.0
 
 # Google ADK (Phase 2.4 - AI agents)
 google-adk==0.5.0
-
-# Vector Database (Phase 2)
-pinecone-client==3.0.0
-
-# Document Processing (Phase 2)
-PyPDF2==3.0.1
-python-docx==1.1.0

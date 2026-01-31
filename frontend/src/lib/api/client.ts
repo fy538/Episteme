@@ -2,6 +2,8 @@
  * API Client for Django backend
  */
 
+import * as Sentry from '@sentry/nextjs';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 export class APIClient {
@@ -14,7 +16,6 @@ export class APIClient {
   }
 
   setToken(token: string) {
-    console.log('[APIClient] setToken called with:', token ? token.substring(0, 20) + '...' : 'EMPTY');
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', token);
@@ -24,13 +25,11 @@ export class APIClient {
 
   getToken(): string | null {
     if (this.token) {
-      console.log('[APIClient] Returning cached token:', this.token.substring(0, 20) + '...');
       return this.token;
     }
     
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('auth_token');
-      console.log('[APIClient] Loaded token from localStorage:', this.token ? this.token.substring(0, 20) + '...' : 'NULL');
     }
     
     return this.token;
@@ -57,6 +56,8 @@ export class APIClient {
         mode: 'cors',
       });
 
+      const correlationId = response.headers.get('X-Correlation-ID');
+
       if (!response.ok) {
         let errorMessage = `API Error ${response.status}`;
         try {
@@ -75,13 +76,38 @@ export class APIClient {
         } catch (err) {
           console.error('Error reading response:', err);
         }
-        throw new Error(errorMessage);
+        const error = new Error(errorMessage);
+        Sentry.captureException(error, {
+          tags: {
+            endpoint,
+            method: options.method || 'GET',
+          },
+          extra: {
+            status: response.status,
+            correlationId,
+          },
+        });
+        throw error;
       }
 
       return response.json();
     } catch (err) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
+        Sentry.captureException(err, {
+          tags: {
+            endpoint,
+            method: options.method || 'GET',
+          },
+        });
         throw new Error(`Cannot connect to backend at ${this.baseURL}. Please check if the backend is running and CORS is configured.`);
+      }
+      if (err instanceof Error) {
+        Sentry.captureException(err, {
+          tags: {
+            endpoint,
+            method: options.method || 'GET',
+          },
+        });
       }
       throw err;
     }

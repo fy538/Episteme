@@ -99,6 +99,14 @@ docker-compose up -d
 docker-compose exec backend python manage.py migrate
 ```
 
+## Logging & Observability
+
+- Backend logs to stdout; production uses JSON formatting.
+- Request logs include `X-Correlation-ID` for tracing.
+- Celery logs task start, completion, retries, and failures.
+- Backend Sentry config: `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE`.
+- Frontend Sentry config: `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_ENVIRONMENT`, `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`.
+
 ## Architecture Overview
 
 ### Core Primitives

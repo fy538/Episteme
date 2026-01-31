@@ -5,9 +5,11 @@ These are higher-level workflows that coordinate multiple tasks/services.
 Phase 0: Basic stubs
 Phase 1: Signal extraction workflows
 """
+import logging
 from celery import shared_task
 from django.utils import timezone
 
+logger = logging.getLogger(__name__)
 
 @shared_task
 def assistant_response_workflow(thread_id: str, user_message_id: str):
@@ -120,16 +122,22 @@ def process_document_workflow(document_id: str):
             'indexed_at': document.indexed_at.isoformat() if document.indexed_at else None,
         }
         
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "process_document_workflow_failed",
+            extra={"document_id": str(document_id)},
+        )
         # Update document status on failure
         try:
             document = Document.objects.get(id=document_id)
             document.processing_status = 'failed'
             document.save()
-        except:
-            pass
-        
-        raise e
+        except Exception:
+            logger.exception(
+                "process_document_workflow_status_update_failed",
+                extra={"document_id": str(document_id)},
+            )
+        raise
 
 
 @shared_task
@@ -200,16 +208,22 @@ def extract_document_signals_workflow(document_id: str):
             'signals_extracted': len(signals),
         }
         
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "extract_document_signals_workflow_failed",
+            extra={"document_id": str(document_id)},
+        )
         # Update document status
         try:
             document = Document.objects.get(id=document_id)
             document.processing_status = 'failed'
             document.save()
-        except:
-            pass
-        
-        raise e
+        except Exception:
+            logger.exception(
+                "extract_document_signals_workflow_status_update_failed",
+                extra={"document_id": str(document_id)},
+            )
+        raise
 
 
 @shared_task
@@ -264,6 +278,10 @@ def generate_research_workflow(inquiry_id: str, user_id: int):
             'document_type': research_doc.document_type
         }
     except Exception as e:
+        logger.exception(
+            "generate_research_workflow_failed",
+            extra={"inquiry_id": str(inquiry_id), "user_id": user_id},
+        )
         return {
             'status': 'failed',
             'error': str(e)
@@ -316,6 +334,10 @@ def generate_debate_workflow(inquiry_id: str, personas: list, user_id: int):
             'title': debate_doc.title
         }
     except Exception as e:
+        logger.exception(
+            "generate_debate_workflow_failed",
+            extra={"inquiry_id": str(inquiry_id), "user_id": user_id},
+        )
         return {
             'status': 'failed',
             'error': str(e)
@@ -366,6 +388,10 @@ def generate_critique_workflow(inquiry_id: str, user_id: int):
             'title': critique_doc.title
         }
     except Exception as e:
+        logger.exception(
+            "generate_critique_workflow_failed",
+            extra={"inquiry_id": str(inquiry_id), "user_id": user_id},
+        )
         return {
             'status': 'failed',
             'error': str(e)

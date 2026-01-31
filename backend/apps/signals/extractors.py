@@ -3,6 +3,7 @@ Signal extraction logic with LLM + embeddings
 
 Refactored to use PydanticAI for structured extraction.
 """
+import logging
 from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
 from django.conf import settings
@@ -13,6 +14,9 @@ from apps.signals.models import Signal, SignalType
 from apps.signals.prompts import get_signal_extraction_prompt
 from apps.common.utils import normalize_text, generate_dedupe_key
 from apps.common.ai_schemas import SignalExtractionResult
+from apps.common.ai_models import get_model
+
+logger = logging.getLogger(__name__)
 
 
 class SignalExtractor:
@@ -29,7 +33,7 @@ class SignalExtractor:
     
     # PydanticAI agent for signal extraction
     _extraction_agent = Agent(
-        'openai:gpt-4o-mini',
+        get_model(settings.AI_MODELS['extraction']),
         result_type=SignalExtractionResult,
         system_prompt=(
             "You are an epistemic analyst who extracts structured signals from technical conversations. "
@@ -73,8 +77,11 @@ class SignalExtractor:
         try:
             result = await self._extraction_agent.run(prompt)
             extracted_signals = result.data.signals
-        except Exception as e:
-            print(f"Signal extraction failed: {e}")
+        except Exception:
+            logger.exception(
+                "signal_extraction_failed",
+                extra={"message_id": str(message.id), "thread_id": str(message.thread_id)},
+            )
             return []
         
         if not extracted_signals:
@@ -86,7 +93,14 @@ class SignalExtractor:
             try:
                 # Validate signal type
                 if not self._is_valid_signal_type(extraction.type):
-                    print(f"Invalid signal type: {extraction.type}, skipping")
+                    logger.warning(
+                        "invalid_signal_type",
+                        extra={
+                            "signal_type": extraction.type,
+                            "message_id": str(message.id),
+                            "thread_id": str(message.thread_id),
+                        },
+                    )
                     continue
                 
                 # Generate embedding
@@ -130,9 +144,16 @@ class SignalExtractor:
                 )
                 signals.append(signal)
                 
-            except Exception as e:
+            except Exception:
                 # Log but don't fail the whole batch
-                print(f"Failed to create signal from {extraction}: {e}")
+                logger.exception(
+                    "signal_creation_failed",
+                    extra={
+                        "message_id": str(message.id),
+                        "thread_id": str(message.thread_id),
+                        "signal_type": getattr(extraction, "type", None),
+                    },
+                )
                 continue
         
         return signals

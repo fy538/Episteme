@@ -13,6 +13,7 @@ extract_document_signals_workflow.
 
 Extract signals from uploaded documents (PDFs, docs, text, etc.)
 """
+import logging
 import warnings
 from typing import List, Optional
 from sentence_transformers import SentenceTransformer
@@ -31,6 +32,7 @@ from apps.signals.prompts import get_signal_extraction_prompt
 from apps.signals.extractors import SignalExtractor
 from apps.common.utils import normalize_text, generate_dedupe_key
 
+logger = logging.getLogger(__name__)
 
 class DocumentSignalExtractor:
     """
@@ -210,8 +212,15 @@ class DocumentSignalExtractor:
                 )
                 signals.append(signal)
                 
-            except Exception as e:
-                print(f"Failed to create signal from {item}: {e}")
+            except Exception:
+                logger.exception(
+                    "document_signal_creation_failed",
+                    extra={
+                        "document_id": str(document.id),
+                        "chunk_index": chunk_index,
+                        "signal_type": item.get("type"),
+                    },
+                )
                 continue
         
         return signals

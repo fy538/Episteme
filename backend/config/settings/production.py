@@ -35,44 +35,18 @@ CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
 ])
 
 # Logging
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'apps': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-    },
-}
+LOGGING = LOGGING.copy()
+LOGGING['handlers']['console']['formatter'] = 'json'
 
-# TODO: Add Sentry for error tracking
-# import sentry_sdk
-# from sentry_sdk.integrations.django import DjangoIntegration
-# 
-# sentry_sdk.init(
-#     dsn=env('SENTRY_DSN'),
-#     integrations=[DjangoIntegration()],
-# )
+SENTRY_DSN = env('SENTRY_DSN', default='')
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        environment=env('SENTRY_ENVIRONMENT', default='production'),
+        traces_sample_rate=env.float('SENTRY_TRACES_SAMPLE_RATE', default=0.1),
+        send_default_pii=False,
+    )

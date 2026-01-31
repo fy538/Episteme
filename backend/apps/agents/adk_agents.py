@@ -11,15 +11,21 @@ Design philosophy: Keep it simple
 - Parse responses into blocks
 - Track provenance (signals + evidence)
 """
+import logging
 from typing import List, Dict, Any
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     from google.adk import Agent
     ADK_AVAILABLE = True
 except ImportError:
     ADK_AVAILABLE = False
-    print("Warning: Google ADK not installed. Install with: pip install google-adk")
+    logger.warning(
+        "google_adk_not_installed",
+        extra={"install_hint": "pip install google-adk"},
+    )
 
 
 class ADKResearchAgent:

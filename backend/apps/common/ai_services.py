@@ -4,16 +4,19 @@ General-purpose AI services using PydanticAI
 These are "one-off" LLM services for features like title generation,
 summarization, and other non-agentic tasks.
 """
+import logging
 from typing import List, Optional
 from pydantic_ai import Agent
 from django.conf import settings
 
 from .ai_schemas import TitleGeneration, SummaryGeneration
+from .ai_models import get_model
 
+logger = logging.getLogger(__name__)
 
 # Title Generation Agent
 title_agent = Agent(
-    'openai:gpt-4o-mini',
+    get_model(settings.AI_MODELS['fast']),
     result_type=TitleGeneration,
     system_prompt=(
         "You generate concise, descriptive titles for conversations and cases. "
@@ -25,7 +28,7 @@ title_agent = Agent(
 
 # Summary Agent
 summary_agent = Agent(
-    'openai:gpt-4o-mini',
+    get_model(settings.AI_MODELS['reasoning']),
     result_type=SummaryGeneration,
     system_prompt=(
         "You create clear, actionable summaries of technical conversations. "
@@ -68,8 +71,8 @@ Title should capture the main topic or decision being discussed."""
             title = title[:max_length-3] + "..."
         
         return title
-    except Exception as e:
-        print(f"Title generation failed: {e}")
+    except Exception:
+        logger.exception("title_generation_failed", extra={"message_count": len(messages)})
         return "Untitled Conversation"
 
 
@@ -100,8 +103,8 @@ Position: {position}
     try:
         result = await title_agent.run(prompt)
         return result.data.title
-    except Exception as e:
-        print(f"Case title generation failed: {e}")
+    except Exception:
+        logger.exception("case_title_generation_failed", extra={"position_length": len(position)})
         # Fallback: use first few words of position
         words = position.split()[:6]
         return " ".join(words) + ("..." if len(position.split()) > 6 else "")
@@ -143,8 +146,8 @@ async def summarize_conversation(
             "summary": result.data.summary,
             "key_points": result.data.key_points
         }
-    except Exception as e:
-        print(f"Summarization failed: {e}")
+    except Exception:
+        logger.exception("summarization_failed", extra={"message_count": len(messages)})
         return {
             "summary": "Summary generation failed",
             "key_points": []
