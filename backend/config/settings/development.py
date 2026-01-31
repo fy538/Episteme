@@ -39,6 +39,9 @@ INTERNAL_IPS = [
 # Disable HTTPS redirect in development
 SECURE_SSL_REDIRECT = False
 
+# Generate assistant responses inline for local dev
+CHAT_SYNC_RESPONSES = True
+
 # Logging
 LOGGING = LOGGING.copy()
 LOGGING['handlers']['console']['formatter'] = 'verbose'

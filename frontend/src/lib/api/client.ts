@@ -23,6 +23,15 @@ export class APIClient {
     }
   }
 
+  clearToken() {
+    this.token = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('refresh_token');
+      console.log('[APIClient] Tokens cleared from localStorage');
+    }
+  }
+
   getToken(): string | null {
     if (this.token) {
       return this.token;
@@ -76,6 +85,10 @@ export class APIClient {
         } catch (err) {
           console.error('Error reading response:', err);
         }
+        if (errorMessage.toLowerCase().includes('token not valid')) {
+          this.clearToken();
+        }
+
         const error = new Error(errorMessage);
         Sentry.captureException(error, {
           tags: {
@@ -122,6 +135,85 @@ export class APIClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async stream(
+    endpoint: string,
+    data: any,
+    onEvent: (event: { event: string; data: any }) => void
+  ): Promise<void> {
+    const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+    const token = isDevMode ? null : this.getToken();
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    };
+
+    const response = await fetch(`${this.baseURL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+      mode: 'cors',
+    });
+
+    if (!response.ok) {
+      let errorMessage = `API Error ${response.status}`;
+      try {
+        const responseText = await response.text();
+        if (responseText) {
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.detail || errorData.error || JSON.stringify(errorData);
+          } catch {
+            errorMessage = responseText;
+          }
+        }
+      } catch (err) {
+        console.error('Error reading response:', err);
+      }
+      if (errorMessage.toLowerCase().includes('token not valid')) {
+        this.clearToken();
+      }
+      throw new Error(errorMessage);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const raw of events) {
+        const lines = raw.split('\n');
+        let eventType = 'message';
+        let dataPayload = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) {
+            eventType = line.replace('event:', '').trim();
+          } else if (line.startsWith('data:')) {
+            dataPayload += line.replace('data:', '').trim();
+          }
+        }
+
+        if (!dataPayload) continue;
+        try {
+          onEvent({ event: eventType, data: JSON.parse(dataPayload) });
+        } catch {
+          onEvent({ event: eventType, data: dataPayload });
+        }
+      }
+    }
   }
 
   async put<T>(endpoint: string, data: any): Promise<T> {

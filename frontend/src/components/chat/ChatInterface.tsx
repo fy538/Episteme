@@ -13,6 +13,9 @@ import type { Message } from '@/lib/types/chat';
 export function ChatInterface({ threadId }: { threadId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Load messages on mount
@@ -32,32 +35,102 @@ export function ChatInterface({ threadId }: { threadId: string }) {
 
   // Poll for new messages (assistant responses)
   useEffect(() => {
+    if (isStreaming) return;
     const interval = setInterval(async () => {
       try {
         const msgs = await chatAPI.getMessages(threadId);
         setMessages(msgs);
+        if (isWaitingForResponse && pendingSince) {
+          const hasNewAssistant = msgs.some(
+            msg =>
+              msg.role === 'assistant' &&
+              new Date(msg.created_at).getTime() > pendingSince
+          );
+          if (hasNewAssistant) {
+            setIsWaitingForResponse(false);
+            setPendingSince(null);
+          }
+        }
       } catch (error) {
         console.error('Polling error:', error);
       }
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(interval);
-  }, [threadId]);
+  }, [threadId, isStreaming, isWaitingForResponse, pendingSince]);
 
   async function handleSendMessage(content: string) {
     setIsLoading(true);
+    setIsWaitingForResponse(true);
+    setPendingSince(Date.now());
     setError(null); // Clear previous errors
     try {
-      // Send message
-      const userMessage = await chatAPI.sendMessage(threadId, content);
-      
-      // Add to list immediately (optimistic update)
-      setMessages(prev => [...prev, userMessage]);
-      
-      // Assistant response will appear via polling
+      const now = new Date().toISOString();
+      const tempUserId = `local-user-${Date.now()}`;
+      const tempAssistantId = `local-assistant-${Date.now()}`;
+
+      const optimisticUserMessage: Message = {
+        id: tempUserId,
+        thread: threadId,
+        role: 'user',
+        content,
+        event_id: '',
+        metadata: {},
+        created_at: now,
+      };
+
+      const optimisticAssistantMessage: Message = {
+        id: tempAssistantId,
+        thread: threadId,
+        role: 'assistant',
+        content: '',
+        event_id: '',
+        metadata: { streaming: true },
+        created_at: now,
+      };
+
+      setMessages(prev => [...prev, optimisticUserMessage, optimisticAssistantMessage]);
+      setIsStreaming(true);
+
+      try {
+        await chatAPI.sendMessageStream(
+          threadId,
+          content,
+          (delta) => {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === tempAssistantId
+                  ? { ...msg, content: `${msg.content}${delta}` }
+                  : msg
+              )
+            );
+          },
+          async () => {
+            setIsWaitingForResponse(false);
+            setIsStreaming(false);
+            setPendingSince(null);
+            const msgs = await chatAPI.getMessages(threadId);
+            setMessages(msgs);
+          }
+        );
+      } catch (streamError) {
+        // Fallback to non-streaming if stream isn't available
+        console.warn('Streaming unavailable, falling back to polling.', streamError);
+        setIsStreaming(false);
+
+        setMessages(prev =>
+          prev.filter(msg => msg.id !== tempAssistantId && msg.id !== tempUserId)
+        );
+
+        const userMessage = await chatAPI.sendMessage(threadId, content);
+        setMessages(prev => [...prev, userMessage]);
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       setError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
+      setIsWaitingForResponse(false);
+      setIsStreaming(false);
+      setPendingSince(null);
     } finally {
       setIsLoading(false);
     }
@@ -83,8 +156,8 @@ export function ChatInterface({ threadId }: { threadId: string }) {
           </div>
         </div>
       )}
-      <MessageList messages={messages} />
-      <MessageInput onSend={handleSendMessage} disabled={isLoading} />
+      <MessageList messages={messages} isWaitingForResponse={isWaitingForResponse} />
+      <MessageInput onSend={handleSendMessage} disabled={isLoading} isProcessing={isLoading || isWaitingForResponse} />
     </div>
   );
 }

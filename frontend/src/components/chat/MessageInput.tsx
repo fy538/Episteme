@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 
 export function MessageInput({ 
   onSend, 
-  disabled 
+  disabled,
+  isProcessing
 }: { 
   onSend: (content: string) => void;
   disabled?: boolean;
+  isProcessing?: boolean;
 }) {
   const [input, setInput] = useState('');
 
@@ -43,7 +45,14 @@ export function MessageInput({
           className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
         />
         <Button type="submit" disabled={disabled || !input.trim()}>
-          Send
+          {isProcessing ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="w-4 h-4 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+              Sending
+            </span>
+          ) : (
+            'Send'
+          )}
         </Button>
       </div>
     </form>

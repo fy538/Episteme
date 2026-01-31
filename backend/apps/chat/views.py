@@ -1,10 +1,14 @@
 """
 Chat views
 """
+import json
+import time
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings
+from django.http import StreamingHttpResponse
 
 from .models import ChatThread, Message
 from .serializers import (
@@ -54,11 +58,43 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             user=request.user
         )
         
-        # Trigger assistant response workflow (async)
-        assistant_response_workflow.delay(
-            thread_id=str(thread.id),
-            user_message_id=str(message.id)
-        )
+        stream = request.query_params.get('stream') == 'true'
+
+        if stream:
+            # Generate response inline and stream chunks back to client
+            assistant_message = ChatService.generate_assistant_response(
+                thread_id=thread.id,
+                user_message_id=message.id
+            )
+
+            def event_stream():
+                content = assistant_message.content or ""
+                chunk_size = 24
+                for i in range(0, len(content), chunk_size):
+                    chunk = content[i:i + chunk_size]
+                    payload = json.dumps({"delta": chunk})
+                    yield f"event: chunk\ndata: {payload}\n\n"
+                    time.sleep(0.01)
+
+                done_payload = json.dumps({"message_id": str(assistant_message.id)})
+                yield f"event: done\ndata: {done_payload}\n\n"
+
+            response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+            response["Cache-Control"] = "no-cache"
+            response["X-Accel-Buffering"] = "no"
+            return response
+
+        if settings.CHAT_SYNC_RESPONSES:
+            assistant_response_workflow(
+                thread_id=str(thread.id),
+                user_message_id=str(message.id)
+            )
+        else:
+            # Trigger assistant response workflow (async)
+            assistant_response_workflow.delay(
+                thread_id=str(thread.id),
+                user_message_id=str(message.id)
+            )
         
         # Return the user message immediately
         return Response(

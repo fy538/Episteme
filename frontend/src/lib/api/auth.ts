@@ -76,6 +76,27 @@ export const authAPI = {
   },
 
   /**
+   * Ensure we have a valid access token (uses refresh if needed)
+   */
+  async ensureAuthenticated(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+
+    const token = localStorage.getItem('auth_token');
+    if (token) return true;
+
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return false;
+
+    try {
+      await this.refreshToken();
+      return true;
+    } catch {
+      this.logout();
+      return false;
+    }
+  },
+
+  /**
    * Refresh the access token
    */
   async refreshToken(): Promise<string> {

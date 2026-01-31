@@ -141,6 +141,10 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
+# Chat response behavior
+# When true, generate assistant responses inline (no Celery required).
+CHAT_SYNC_RESPONSES = env.bool('CHAT_SYNC_RESPONSES', default=False)
+
 # Logging (structured JSON available for production)
 LOGGING = {
     'version': 1,
@@ -201,6 +205,7 @@ AI_MODELS = {
     'reasoning': env('AI_MODEL_REASONING', default='openai:gpt-5-mini'),
     'fast': env('AI_MODEL_FAST', default='openai:gpt-5-mini'),
     'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-5-mini'),
+    'chat': env('AI_MODEL_CHAT', default='openai:gpt-5-mini'),
 }
 
 # Embedding Backend (Phase 2)

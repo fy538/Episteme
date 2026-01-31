@@ -7,9 +7,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
+import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
 import { StructureSidebar } from '@/components/structure/StructureSidebar';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
+import type { ChatThread } from '@/lib/types/chat';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -17,36 +19,93 @@ export default function ChatPage() {
   const [caseId, setCaseId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
 
   // Check auth before loading
   useEffect(() => {
-    const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-    if (!isDevMode && !authAPI.isAuthenticated()) {
-      router.push('/login');
-      return;
+    async function checkAuth() {
+      const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+      if (isDevMode) {
+        setAuthReady(true);
+        return;
+      }
+
+      const ok = await authAPI.ensureAuthenticated();
+      if (!ok) {
+        router.push('/login');
+        return;
+      }
+      setAuthReady(true);
     }
+
+    checkAuth();
   }, [router]);
 
-  // Create or get thread on mount
+  // Load threads on mount
   useEffect(() => {
     async function initThread() {
+      if (!authReady) return;
       try {
-        const thread = await chatAPI.createThread();
-        setThreadId(thread.id);
-        
-        // Check if thread has a case
-        if (thread.primary_case) {
-          setCaseId(thread.primary_case);
+        setIsLoadingThreads(true);
+        const list = await chatAPI.listThreads();
+        setThreads(list);
+
+        if (list.length === 0) {
+          const created = await chatAPI.createThread();
+          setThreads([created]);
+          setThreadId(created.id);
+          setCaseId(created.primary_case || null);
+        } else {
+          setThreadId(list[0].id);
         }
       } catch (err) {
         console.error('Failed to create thread:', err);
         setError(err instanceof Error ? err.message : 'Failed to connect to API');
       } finally {
+        setIsLoadingThreads(false);
         setIsLoading(false);
       }
     }
     initThread();
-  }, []);
+  }, [authReady]);
+
+  // Load thread details when selection changes
+  useEffect(() => {
+    async function loadThread() {
+      if (!threadId) return;
+      try {
+        const thread = await chatAPI.getThread(threadId);
+        setCaseId(thread.primary_case || null);
+      } catch (err) {
+        console.error('Failed to load thread details:', err);
+      }
+    }
+    loadThread();
+  }, [threadId]);
+
+  async function handleCreateThread() {
+    try {
+      const created = await chatAPI.createThread();
+      setThreads(prev => [created, ...prev]);
+      setThreadId(created.id);
+      setCaseId(created.primary_case || null);
+    } catch (err) {
+      console.error('Failed to create thread:', err);
+    }
+  }
+
+  async function handleRenameThread(threadIdToRename: string, title: string) {
+    try {
+      const updated = await chatAPI.updateThread(threadIdToRename, { title });
+      setThreads(prev =>
+        prev.map(t => (t.id === updated.id ? updated : t))
+      );
+    } catch (err) {
+      console.error('Failed to rename thread:', err);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -95,6 +154,14 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <ConversationsSidebar
+        threads={threads}
+        selectedThreadId={threadId}
+        isLoading={isLoadingThreads}
+        onSelect={(id) => setThreadId(id)}
+        onCreate={handleCreateThread}
+        onRename={handleRenameThread}
+      />
       {/* Main chat area */}
       <div className="flex-1 flex flex-col">
         <ChatInterface threadId={threadId} />
