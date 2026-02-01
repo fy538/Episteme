@@ -7,6 +7,16 @@ from .models import Case, WorkingView, CaseStatus, StakesLevel
 
 class CaseSerializer(serializers.ModelSerializer):
     """Serializer for Case model"""
+    based_on_skill_name = serializers.CharField(
+        source='based_on_skill.name',
+        read_only=True,
+        allow_null=True
+    )
+    became_skill_name = serializers.CharField(
+        source='became_skill.name',
+        read_only=True,
+        allow_null=True
+    )
     
     class Meta:
         model = Case
@@ -22,6 +32,13 @@ class CaseSerializer(serializers.ModelSerializer):
             'created_from_event_id',
             'created_at',
             'updated_at',
+            # Skill template fields
+            'is_skill_template',
+            'template_scope',
+            'based_on_skill',
+            'based_on_skill_name',
+            'became_skill',
+            'became_skill_name',
         ]
         read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at']
 

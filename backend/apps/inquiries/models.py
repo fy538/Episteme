@@ -46,6 +46,13 @@ class Inquiry(UUIDModel, TimestampedModel):
         help_text="Additional context about this inquiry"
     )
     
+    # Event tracking for provenance
+    created_from_event_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="Event that created this inquiry (for provenance)"
+    )
+    
     # Origin tracking (for inline-created inquiries)
     origin_text = models.TextField(
         null=True,

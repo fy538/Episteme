@@ -52,6 +52,29 @@ class ChatThread(UUIDModel, TimestampedModel):
         help_text="User message count since last extraction"
     )
     
+    # Agent routing state (mirrors signal extraction pattern)
+    last_agent_check_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time thread was analyzed for agent needs"
+    )
+    turns_since_agent_check = models.IntegerField(
+        default=0,
+        help_text="User message count since last agent check"
+    )
+    last_suggested_agent = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Last agent type suggested (research/critique/brief)"
+    )
+    
+    # Flexible metadata for agent state
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Flexible storage for pending agents, suggestions, etc."
+    )
+    
     class Meta:
         ordering = ['-updated_at']  # Sort by most recently active
         indexes = [

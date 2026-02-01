@@ -24,3 +24,26 @@ class UUIDModel(models.Model):
     
     class Meta:
         abstract = True
+
+
+class Organization(UUIDModel, TimestampedModel):
+    """Organization/team for multi-user collaboration"""
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(unique=True)
+    
+    # Settings
+    settings = models.JSONField(default=dict, blank=True)
+    
+    # Subscription/Plan (future)
+    plan = models.CharField(
+        max_length=50,
+        choices=[('free', 'Free'), ('team', 'Team'), ('enterprise', 'Enterprise')],
+        default='free'
+    )
+    
+    class Meta:
+        db_table = 'organizations'
+        ordering = ['name']
+    
+    def __str__(self):
+        return self.name

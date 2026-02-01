@@ -74,6 +74,14 @@ class Artifact(UUIDModel, TimestampedModel):
         help_text="Evidence that informed this artifact"
     )
     
+    # Skills used during generation
+    skills_used = models.ManyToManyField(
+        'skills.Skill',
+        blank=True,
+        related_name='used_in_artifacts',
+        help_text="Skills that were active during artifact generation"
+    )
+    
     # Generation metadata
     generated_by = models.CharField(
         max_length=50,

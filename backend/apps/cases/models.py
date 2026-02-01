@@ -103,6 +103,51 @@ class Case(UUIDModel, TimestampedModel):
         help_text="Event that triggered case creation"
     )
     
+    # Active skills for this case
+    active_skills = models.ManyToManyField(
+        'skills.Skill',
+        blank=True,
+        related_name='active_in_cases',
+        help_text="Skills activated for this case"
+    )
+    
+    # Skill template functionality
+    is_skill_template = models.BooleanField(
+        default=False,
+        help_text="Whether this case is being used as a skill template"
+    )
+    
+    template_scope = models.CharField(
+        max_length=20,
+        choices=[
+            ('personal', 'Personal'),
+            ('team', 'Team'),
+            ('organization', 'Organization')
+        ],
+        null=True,
+        blank=True,
+        help_text="Scope if this case is a skill template"
+    )
+    
+    # Bidirectional skill relationships
+    based_on_skill = models.ForeignKey(
+        'skills.Skill',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='spawned_cases',
+        help_text="Skill this case was created from"
+    )
+    
+    became_skill = models.OneToOneField(
+        'skills.Skill',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_case',
+        help_text="Skill created from this case"
+    )
+    
     class Meta:
         ordering = ['-updated_at']
         indexes = [

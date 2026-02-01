@@ -202,6 +202,176 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             MessageSerializer(message).data,
             status=status.HTTP_201_CREATED
         )
+    
+    @action(detail=True, methods=['post'])
+    async def analyze_for_case(self, request, pk=None):
+        """
+        Analyze conversation to extract case components for preview.
+        
+        POST /api/chat/threads/{id}/analyze_for_case/
+        Returns: AI analysis with title, position, questions, assumptions
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.events.services import EventService
+        from apps.events.models import EventType, ActorType
+        import uuid as uuid_module
+        import json
+        
+        thread = await sync_to_async(self.get_object)()
+        messages = await sync_to_async(lambda: list(
+            Message.objects.filter(thread=thread).order_by('created_at')
+        ))()
+        
+        # Get last 8 messages for context
+        recent_messages = messages[max(0, len(messages)-8):]
+        
+        # Build conversation context
+        conversation_text = "\n\n".join([
+            f"{m.role.upper()}: {m.content}"
+            for m in recent_messages
+        ])
+        
+        # AI analysis
+        provider = get_llm_provider('fast')
+        system_prompt = "You analyze conversations to extract decision components."
+        
+        user_prompt = f"""Analyze this conversation and extract decision-making components:
+
+{conversation_text}
+
+Extract:
+1. suggested_title: Short, clear decision question (under 60 chars)
+2. position_draft: 2-3 sentences summarizing user's current thinking
+3. key_questions: Array of 3-5 questions user should investigate
+4. assumptions: Array of 2-4 untested assumptions
+5. background_summary: 1-2 sentences of context
+6. confidence: 0.0-1.0 (how clear is the decision space?)
+
+Return ONLY valid JSON:
+{{"suggested_title": "...", "position_draft": "...", "key_questions": [...], "assumptions": [...], "background_summary": "...", "confidence": 0.75}}"""
+        
+        full_response = ""
+        async for chunk in provider.stream_chat(
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt
+        ):
+            full_response += chunk.content
+        
+        analysis = json.loads(full_response.strip())
+        
+        # Emit event for provenance
+        correlation_id = uuid_module.uuid4()
+        await sync_to_async(EventService.append)(
+            event_type=EventType.CONVERSATION_ANALYZED_FOR_CASE,
+            payload={
+                'thread_id': str(thread.id),
+                'message_ids': [str(m.id) for m in recent_messages],
+                'messages_count': len(recent_messages),
+                'analysis': analysis,
+                'model': 'claude-4.5-haiku',
+            },
+            actor_type=ActorType.ASSISTANT,
+            thread_id=thread.id,
+            correlation_id=correlation_id
+        )
+        
+        return Response({
+            **analysis,
+            'correlation_id': str(correlation_id),
+            'message_count': len(recent_messages)
+        })
+    
+    @action(detail=True, methods=['post'])
+    async def invoke_agent(self, request, pk=None):
+        """
+        Manually invoke an agent for this thread.
+        
+        POST /api/chat/threads/{id}/invoke_agent/
+        
+        Request body:
+        {
+            "agent_type": "research",  // "research" | "critique" | "brief"
+            "params": {
+                "topic": "FDA requirements",
+                "use_case_skills": true
+            }
+        }
+        
+        Returns: Agent execution info
+        """
+        from apps.agents.orchestrator import AgentOrchestrator
+        
+        thread = await sync_to_async(self.get_object)()
+        agent_type = request.data.get('agent_type')
+        params = request.data.get('params', {})
+        
+        if not agent_type:
+            return Response(
+                {'error': 'agent_type is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if agent_type not in ['research', 'critique', 'brief']:
+            return Response(
+                {'error': 'agent_type must be research, critique, or brief'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not thread.primary_case:
+            return Response(
+                {'error': 'Thread must have a linked case to run agents'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            result = await AgentOrchestrator.run_agent_in_chat(
+                thread=thread,
+                agent_type=agent_type,
+                user=request.user,
+                **params
+            )
+            
+            return Response(result, status=status.HTTP_202_ACCEPTED)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    async def create_case_from_analysis(self, request, pk=None):
+        """
+        Create case from conversation analysis with pre-filled content.
+        
+        POST /api/chat/threads/{id}/create_case_from_analysis/
+        Body: {analysis, correlation_id, user_edits}
+        """
+        from apps.cases.services import CaseService
+        from apps.cases.serializers import CaseSerializer, CaseDocumentSerializer
+        from apps.inquiries.serializers import InquirySerializer
+        import uuid as uuid_module
+        
+        thread = await sync_to_async(self.get_object)()
+        analysis = request.data['analysis']
+        correlation_id = uuid_module.UUID(request.data['correlation_id'])
+        user_edits = request.data.get('user_edits')
+        
+        case, brief, inquiries = await sync_to_async(
+            CaseService.create_case_from_analysis
+        )(
+            user=request.user,
+            analysis=analysis,
+            thread_id=thread.id,
+            correlation_id=correlation_id,
+            user_edits=user_edits
+        )
+        
+        return Response({
+            'case': await sync_to_async(lambda: CaseSerializer(case).data)(),
+            'brief': await sync_to_async(lambda: CaseDocumentSerializer(brief).data)(),
+            'inquiries': await sync_to_async(lambda: InquirySerializer(inquiries, many=True).data)(),
+            'correlation_id': str(correlation_id)
+        })
 
 
 class MessageViewSet(viewsets.ReadOnlyModelViewSet):

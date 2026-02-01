@@ -22,6 +22,35 @@ class EventType(models.TextChoices):
     CASE_PATCHED = 'CasePatched', 'Case Patched'
     CASE_LINKED_TO_THREAD = 'CaseLinkedToThread', 'Case Linked to Thread'
     
+    # Case creation from analysis (smart case creation)
+    CONVERSATION_ANALYZED_FOR_CASE = 'ConversationAnalyzedForCase', 'Conversation Analyzed for Case'
+    CASE_CREATED_FROM_ANALYSIS = 'CaseCreatedFromAnalysis', 'Case Created from Analysis'
+    INQUIRIES_AUTO_CREATED = 'InquiriesAutoCreated', 'Inquiries Auto-Created'
+    
+    # Inquiry lifecycle events
+    INQUIRY_CREATED = 'InquiryCreated', 'Inquiry Created'
+    INQUIRY_RESOLVED = 'InquiryResolved', 'Inquiry Resolved'
+    INQUIRY_REOPENED = 'InquiryReopened', 'Inquiry Reopened'
+    INQUIRY_PRIORITY_CHANGED = 'InquiryPriorityChanged', 'Inquiry Priority Changed'
+    
+    # Document lifecycle events
+    CASE_DOCUMENT_CREATED = 'CaseDocumentCreated', 'Case Document Created'
+    CASE_DOCUMENT_UPDATED = 'CaseDocumentUpdated', 'Case Document Updated'
+    CASE_DOCUMENT_DELETED = 'CaseDocumentDeleted', 'Case Document Deleted'
+    
+    # Evidence events
+    EVIDENCE_CREATED = 'EvidenceCreated', 'Evidence Created'
+    EVIDENCE_UPDATED = 'EvidenceUpdated', 'Evidence Updated'
+    
+    # Objection events
+    OBJECTION_CREATED = 'ObjectionCreated', 'Objection Created'
+    OBJECTION_ADDRESSED = 'ObjectionAddressed', 'Objection Addressed'
+    OBJECTION_DISMISSED = 'ObjectionDismissed', 'Objection Dismissed'
+    
+    # Citation events
+    CITATION_CREATED = 'CitationCreated', 'Citation Created'
+    CITATION_DELETED = 'CitationDeleted', 'Citation Deleted'
+    
     # Signal events (Phase 1)
     SIGNAL_EXTRACTED = 'SignalExtracted', 'Signal Extracted'
     SIGNALS_LINKED_TO_CASE = 'SignalsLinkedToCase', 'Signals Linked to Case'
@@ -34,6 +63,18 @@ class EventType(models.TextChoices):
     # Workflow events
     WORKFLOW_STARTED = 'WorkflowStarted', 'Workflow Started'
     WORKFLOW_COMPLETED = 'WorkflowCompleted', 'Workflow Completed'
+    
+    # Agent routing events (Intelligent orchestration)
+    CONVERSATION_ANALYZED_FOR_AGENT = 'ConversationAnalyzedForAgent', 'Conversation Analyzed for Agent'
+    AGENT_SUGGESTED = 'AgentSuggested', 'Agent Suggested'
+    AGENT_CONFIRMED = 'AgentConfirmed', 'Agent Confirmed by User'
+    AGENT_DECLINED = 'AgentDeclined', 'Agent Declined by User'
+    
+    # Agent execution events
+    AGENT_WORKFLOW_STARTED = 'AgentWorkflowStarted', 'Agent Workflow Started'
+    AGENT_PROGRESS = 'AgentProgress', 'Agent Progress Update'
+    AGENT_COMPLETED = 'AgentCompleted', 'Agent Workflow Completed'
+    AGENT_FAILED = 'AgentFailed', 'Agent Workflow Failed'
 
 
 class Event(models.Model):

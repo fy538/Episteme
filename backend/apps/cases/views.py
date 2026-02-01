@@ -110,6 +110,237 @@ class CaseViewSet(viewsets.ModelViewSet):
             WorkingViewSerializer(working_view).data,
             status=status.HTTP_201_CREATED
         )
+    
+    @action(detail=True, methods=['post'])
+    def activate_skills(self, request, pk=None):
+        """
+        Activate skills for this case
+        
+        POST /api/cases/{id}/activate_skills/
+        
+        Request body:
+        {
+            "skill_ids": ["uuid1", "uuid2", ...]
+        }
+        
+        Returns: Updated case with active skills
+        """
+        from apps.skills.models import Skill
+        from apps.skills.serializers import SkillListSerializer
+        
+        case = self.get_object()
+        skill_ids = request.data.get('skill_ids', [])
+        
+        # TODO: Filter by organization when org relationship exists
+        # For now, just validate that skills exist and are active
+        skills = Skill.objects.filter(
+            id__in=skill_ids,
+            status='active'
+        )
+        
+        # Set active skills for this case
+        case.active_skills.set(skills)
+        
+        return Response({
+            'case_id': str(case.id),
+            'active_skills': SkillListSerializer(skills, many=True).data
+        })
+    
+    @action(detail=True, methods=['get'])
+    def onboarding(self, request, pk=None):
+        """
+        Get onboarding data for newly created case
+        
+        GET /api/cases/{id}/onboarding/
+        
+        Shows what was auto-created and suggests next steps.
+        Core experience improvement - helps users understand what the system did for them.
+        """
+        from apps.inquiries.models import Inquiry
+        from apps.inquiries.serializers import InquiryListSerializer
+        
+        case = self.get_object()
+        
+        # Get auto-created items
+        inquiries = Inquiry.objects.filter(case=case).order_by('sequence_index')
+        brief = case.main_brief
+        
+        # Extract assumptions from brief if exists
+        assumptions = []
+        if brief and brief.ai_structure:
+            assumptions = brief.ai_structure.get('assumptions', [])
+        
+        # Determine next steps
+        next_steps = []
+        
+        # Step 1: Review assumptions
+        if assumptions:
+            next_steps.append({
+                'action': 'review_assumptions',
+                'title': 'Review untested assumptions',
+                'description': f'{len(assumptions)} assumptions were detected in your conversation',
+                'completed': False,
+                'priority': 1
+            })
+        
+        # Step 2: Start first inquiry
+        open_inquiries = inquiries.filter(status='OPEN')
+        if open_inquiries.exists():
+            first_inquiry = open_inquiries.first()
+            next_steps.append({
+                'action': 'start_first_inquiry',
+                'title': f'Investigate: {first_inquiry.title}',
+                'description': 'Begin your first investigation',
+                'inquiry_id': str(first_inquiry.id),
+                'completed': False,
+                'priority': 2
+            })
+        
+        # Step 3: Gather evidence
+        next_steps.append({
+            'action': 'gather_evidence',
+            'title': 'Upload relevant documents',
+            'description': 'Add documents to extract evidence from',
+            'completed': False,
+            'priority': 3
+        })
+        
+        # Calculate if user is new (first case)
+        user_case_count = Case.objects.filter(user=request.user).count()
+        is_first_case = user_case_count == 1
+        
+        return Response({
+            'auto_created': {
+                'inquiries': InquiryListSerializer(inquiries, many=True).data,
+                'assumptions': assumptions,
+                'brief_exists': brief is not None,
+                'brief_id': str(brief.id) if brief else None
+            },
+            'next_steps': next_steps,
+            'first_time_user': is_first_case,
+            'summary': {
+                'total_inquiries': inquiries.count(),
+                'assumptions_count': len(assumptions),
+                'from_conversation': case.linked_thread is not None
+            }
+        })
+    
+    @action(detail=True, methods=['get'])
+    def active_skills(self, request, pk=None):
+        """
+        Get active skills for this case
+        
+        GET /api/cases/{id}/active_skills/
+        
+        Returns: List of active skills
+        """
+        from apps.skills.serializers import SkillListSerializer
+        
+        case = self.get_object()
+        skills = case.active_skills.filter(status='active')
+        
+        return Response(SkillListSerializer(skills, many=True).data)
+    
+    @action(detail=True, methods=['post'])
+    def toggle_skill_mode(self, request, pk=None):
+        """
+        Toggle skill template mode for this case
+        
+        POST /api/cases/{id}/toggle_skill_mode/
+        
+        Request body:
+        {
+            "enable": true,
+            "scope": "personal"  # or "team", "organization"
+        }
+        
+        Returns: Case + skill preview
+        """
+        from apps.skills.preview import SkillPreviewService
+        
+        case = self.get_object()
+        enable = request.data.get('enable', True)
+        scope = request.data.get('scope', 'personal')
+        
+        case.is_skill_template = enable
+        if enable:
+            case.template_scope = scope
+        else:
+            case.template_scope = None
+        case.save()
+        
+        # Generate preview
+        preview = None
+        if enable:
+            preview = SkillPreviewService.analyze_case(case)
+        
+        return Response({
+            'case': CaseSerializer(case).data,
+            'skill_preview': preview
+        })
+    
+    @action(detail=True, methods=['post'])
+    def save_as_skill(self, request, pk=None):
+        """
+        Save this case as a skill
+        
+        POST /api/cases/{id}/save_as_skill/
+        
+        Request body:
+        {
+            "name": "Legal Framework",
+            "scope": "personal",
+            "description": "Optional custom description"
+        }
+        
+        Returns: Created skill
+        """
+        from apps.skills.conversion import CaseSkillConverter
+        from apps.skills.serializers import SkillSerializer
+        
+        case = self.get_object()
+        skill_name = request.data.get('name')
+        scope = request.data.get('scope', 'personal')
+        custom_description = request.data.get('description')
+        
+        if not skill_name:
+            return Response(
+                {'error': 'Skill name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Convert case to skill
+        skill = CaseSkillConverter.case_to_skill(
+            case=case,
+            skill_name=skill_name,
+            scope=scope,
+            user=request.user,
+            custom_description=custom_description
+        )
+        
+        return Response(
+            {
+                'skill': SkillSerializer(skill).data,
+                'case': CaseSerializer(case).data
+            },
+            status=status.HTTP_201_CREATED
+        )
+    
+    @action(detail=True, methods=['get'])
+    def skill_preview(self, request, pk=None):
+        """
+        Preview what skill would be created from this case
+        
+        GET /api/cases/{id}/skill_preview/
+        
+        Returns: Skill preview data
+        """
+        from apps.skills.preview import SkillPreviewService
+        
+        case = self.get_object()
+        preview = SkillPreviewService.analyze_case(case)
+        
+        return Response(preview)
 
 
 class WorkingViewViewSet(viewsets.ReadOnlyModelViewSet):

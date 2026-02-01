@@ -17,6 +17,7 @@ urlpatterns = [
     path('api/', include('apps.inquiries.urls')),  # Phase 2: inquiries
     path('api/', include('apps.projects.urls')),  # Phase 2: projects + documents + evidence
     path('api/artifacts/', include('apps.artifacts.urls')),  # Phase 2.4: artifacts
+    path('api/', include('apps.skills.urls')),  # Skills system
 ]
 
 # Debug toolbar (only in development)

@@ -9,12 +9,13 @@ class CaseDocumentSerializer(serializers.ModelSerializer):
     """
     Serializer for CaseDocument model.
     
-    Includes citation counts and edit permission checks.
+    Includes citation counts, edit permission checks, and assumption highlighting.
     """
     citation_count = serializers.SerializerMethodField()
     cites_count = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     inquiry_title = serializers.CharField(source='inquiry.title', read_only=True, allow_null=True)
+    highlighted_assumptions = serializers.SerializerMethodField()
     
     class Meta:
         model = CaseDocument
@@ -35,6 +36,7 @@ class CaseDocumentSerializer(serializers.ModelSerializer):
             'citation_count',
             'cites_count',
             'can_edit',
+            'highlighted_assumptions',
             'created_by',
             'created_at',
             'updated_at',
@@ -73,6 +75,46 @@ class CaseDocumentSerializer(serializers.ModelSerializer):
         
         # Readonly: no one can edit
         return False
+    
+    def get_highlighted_assumptions(self, obj):
+        """
+        Extract and enrich assumptions from ai_structure for highlighting.
+        
+        Returns assumptions with context about related inquiries and signals.
+        """
+        from apps.inquiries.models import Inquiry
+        from apps.signals.models import Signal
+        
+        if not obj.ai_structure or 'assumptions' not in obj.ai_structure:
+            return []
+        
+        assumptions = obj.ai_structure.get('assumptions', [])
+        enriched = []
+        
+        for assumption_text in assumptions:
+            # Check if there's a related inquiry
+            related_inquiry = Inquiry.objects.filter(
+                case=obj.case,
+                title__icontains=assumption_text[:40]  # Match on first 40 chars
+            ).first()
+            
+            # Count related signals
+            related_signals_count = Signal.objects.filter(
+                case=obj.case,
+                text__icontains=assumption_text[:30]  # Match on first 30 chars
+            ).count()
+            
+            enriched.append({
+                'text': assumption_text,
+                'has_inquiry': related_inquiry is not None,
+                'inquiry_id': str(related_inquiry.id) if related_inquiry else None,
+                'inquiry_title': related_inquiry.title if related_inquiry else None,
+                'inquiry_status': related_inquiry.status if related_inquiry else None,
+                'related_signals_count': related_signals_count,
+                'validated': related_inquiry.status == 'RESOLVED' if related_inquiry else False
+            })
+        
+        return enriched
 
 
 class CaseDocumentListSerializer(serializers.ModelSerializer):

@@ -197,3 +197,129 @@ class CaseService:
         )
         
         return working_view
+    
+    @classmethod
+    @transaction.atomic
+    def create_case_from_analysis(
+        cls,
+        user: User,
+        analysis: dict,
+        thread_id: uuid.UUID,
+        correlation_id: uuid.UUID,
+        user_edits: Optional[dict] = None
+    ) -> tuple[Case, 'CaseDocument', list]:
+        """
+        Create case with pre-populated content from conversation analysis.
+        Auto-creates inquiries from questions.
+        Emits events for full provenance chain.
+        
+        Args:
+            user: User creating the case
+            analysis: AI analysis from analyze_for_case
+            thread_id: Thread where conversation happened
+            correlation_id: Links to CONVERSATION_ANALYZED event
+            user_edits: Optional user overrides (title, etc.)
+        
+        Returns:
+            Tuple of (case, brief, inquiries)
+        """
+        from apps.cases.document_service import CaseDocumentService
+        from apps.inquiries.services import InquiryService
+        from apps.inquiries.models import ElevationReason
+        
+        # Apply user edits
+        title = user_edits.get('title') if user_edits else analysis['suggested_title']
+        position = analysis['position_draft']
+        
+        # Create case (emits CASE_CREATED event internally)
+        case, _ = cls.create_case(
+            user=user,
+            title=title,
+            position=position,
+            thread_id=thread_id
+        )
+        
+        # Emit analysis-based creation event
+        EventService.append(
+            event_type=EventType.CASE_CREATED_FROM_ANALYSIS,
+            payload={
+                'analysis': analysis,
+                'user_edits': user_edits or {},
+                'acceptance_metrics': {
+                    'title_accepted': title == analysis['suggested_title'],
+                    'questions_count': len(analysis.get('key_questions', [])),
+                    'assumptions_count': len(analysis.get('assumptions', []))
+                }
+            },
+            actor_type=ActorType.USER,
+            actor_id=user.id,
+            case_id=case.id,
+            thread_id=thread_id,
+            correlation_id=correlation_id
+        )
+        
+        # Pre-populate brief with analysis content
+        brief_content = f"""# {title}
+
+## Background
+{analysis.get('background_summary', '')}
+
+## Current Position
+{position}
+
+## Key Assumptions
+{chr(10).join(f"- {a}" for a in analysis.get('assumptions', []))}
+
+## Open Questions
+{chr(10).join(f"- {q}" for q in analysis.get('key_questions', []))}
+
+---
+*Auto-generated from conversation. Edit freely.*
+"""
+        
+        # Update the brief that was auto-created
+        brief = case.main_brief
+        if brief:
+            brief.content_markdown = brief_content
+            
+            # Store assumptions as metadata for highlighting
+            if analysis.get('assumptions'):
+                brief.ai_structure = {
+                    'assumptions': [
+                        {
+                            'text': a,
+                            'status': 'untested',
+                            'risk_level': 'medium',
+                            'source': 'conversation_analysis'
+                        }
+                        for a in analysis['assumptions']
+                    ]
+                }
+            brief.save()
+        
+        # Auto-create inquiries from questions
+        inquiries = []
+        for question in analysis.get('key_questions', []):
+            inquiry = InquiryService.create_inquiry(
+                case=case,
+                title=question,
+                elevation_reason=ElevationReason.USER_CREATED,
+                description="Auto-created from conversation analysis"
+            )
+            inquiries.append(inquiry)
+        
+        # Emit inquiry auto-creation event
+        if inquiries:
+            EventService.append(
+                event_type=EventType.INQUIRIES_AUTO_CREATED,
+                payload={
+                    'inquiry_ids': [str(i.id) for i in inquiries],
+                    'source': 'conversation_analysis',
+                    'questions': analysis.get('key_questions', [])
+                },
+                actor_type=ActorType.ASSISTANT,
+                case_id=case.id,
+                correlation_id=correlation_id
+            )
+        
+        return case, brief, inquiries

@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'apps.agents',  # Phase 2B
     'apps.projects',  # Phase 2
     'apps.artifacts',  # Phase 2.4
+    'apps.skills',  # Skills system
 ]
 
 MIDDLEWARE = [

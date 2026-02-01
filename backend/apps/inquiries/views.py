@@ -87,6 +87,76 @@ class InquiryViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
+    def start_investigation(self, request, pk=None):
+        """
+        Mark inquiry as investigating and return guided workflow steps.
+        
+        POST /api/inquiries/{id}/start_investigation/
+        
+        Core experience improvement - provides clear path to investigate.
+        """
+        inquiry = self.get_object()
+        
+        if inquiry.status != InquiryStatus.OPEN:
+            return Response(
+                {'error': 'Only open inquiries can start investigation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update status
+        inquiry.status = InquiryStatus.INVESTIGATING
+        inquiry.save()
+        
+        # Generate guided workflow steps
+        workflow_steps = [
+            {
+                'step': 1,
+                'action': 'review_inquiry',
+                'title': 'Review inquiry question',
+                'description': 'Ensure the question is clear and specific',
+                'completed': True  # They're starting, so this is implicitly done
+            },
+            {
+                'step': 2,
+                'action': 'search_documents',
+                'title': 'Search case documents for relevant evidence',
+                'description': 'Look for information in uploaded documents',
+                'endpoint': f'/api/projects/search/?case_id={inquiry.case_id}&query={inquiry.title}',
+                'completed': False
+            },
+            {
+                'step': 3,
+                'action': 'add_evidence',
+                'title': 'Add evidence from findings',
+                'description': 'Cite specific sources that support or contradict',
+                'endpoint': f'/api/evidence/?inquiry_id={inquiry.id}',
+                'completed': False
+            },
+            {
+                'step': 4,
+                'action': 'consider_objections',
+                'title': 'Consider alternative perspectives',
+                'description': 'What objections or counterarguments exist?',
+                'endpoint': f'/api/objections/?inquiry_id={inquiry.id}',
+                'completed': False
+            },
+            {
+                'step': 5,
+                'action': 'resolve',
+                'title': 'Write conclusion',
+                'description': 'Synthesize evidence into a clear answer',
+                'endpoint': f'/api/inquiries/{inquiry.id}/resolve/',
+                'completed': False
+            }
+        ]
+        
+        return Response({
+            'inquiry': self.get_serializer(inquiry).data,
+            'workflow_steps': workflow_steps,
+            'status': 'investigating'
+        })
+    
+    @action(detail=True, methods=['post'])
     def reopen(self, request, pk=None):
         """
         Reopen a resolved inquiry.
@@ -132,6 +202,174 @@ class InquiryViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def evidence_summary(self, request, pk=None):
+        """
+        Get aggregated evidence summary for inquiry.
+        
+        GET /api/inquiries/{id}/evidence_summary/
+        
+        Returns evidence grouped by direction with aggregate confidence.
+        Core experience improvement - helps users know if they're ready to resolve.
+        """
+        from django.db.models import Avg
+        
+        inquiry = self.get_object()
+        evidence = Evidence.objects.filter(inquiry=inquiry).select_related('document')
+        
+        # Group by direction
+        supporting = evidence.filter(direction='SUPPORTS')
+        contradicting = evidence.filter(direction='CONTRADICTS')
+        neutral = evidence.filter(direction='NEUTRAL')
+        
+        # Calculate aggregate confidence
+        total_count = evidence.count()
+        
+        if total_count > 0:
+            support_ratio = supporting.count() / total_count
+            contradict_ratio = contradicting.count() / total_count
+            
+            # Get average credibility from user ratings
+            avg_credibility = evidence.aggregate(
+                Avg('user_credibility_rating')
+            )['user_credibility_rating__avg'] or 0.0
+            
+            # Aggregate confidence formula:
+            # High if: many supporting, few contradicting, high credibility
+            # Weight support positively, contradiction negatively
+            aggregate_confidence = (
+                (support_ratio - contradict_ratio * 0.5) * (avg_credibility / 5.0)
+            )
+            aggregate_confidence = max(0.0, min(1.0, aggregate_confidence))  # Clamp 0-1
+            
+        else:
+            aggregate_confidence = 0.0
+            avg_credibility = 0.0
+        
+        # Determine strength category
+        if aggregate_confidence > 0.7:
+            strength = 'strong'
+        elif aggregate_confidence > 0.4:
+            strength = 'moderate'
+        else:
+            strength = 'weak'
+        
+        # Check if ready to resolve
+        ready_to_resolve = (
+            aggregate_confidence > 0.6 and
+            total_count >= 2 and
+            avg_credibility >= 3.0
+        )
+        
+        # Generate recommended conclusion if strong evidence
+        recommended_conclusion = None
+        if aggregate_confidence > 0.7 and total_count >= 3:
+            if support_ratio > 0.7:
+                recommended_conclusion = f"Evidence strongly supports investigating {inquiry.title}"
+            elif contradict_ratio > 0.7:
+                recommended_conclusion = f"Evidence suggests {inquiry.title} may not be the right approach"
+        
+        return Response({
+            'supporting': EvidenceSerializer(supporting, many=True).data,
+            'contradicting': EvidenceSerializer(contradicting, many=True).data,
+            'neutral': EvidenceSerializer(neutral, many=True).data,
+            'summary': {
+                'total_evidence': total_count,
+                'supporting_count': supporting.count(),
+                'contradicting_count': contradicting.count(),
+                'neutral_count': neutral.count(),
+                'avg_credibility': round(avg_credibility, 2),
+                'aggregate_confidence': round(aggregate_confidence, 2),
+                'strength': strength,
+                'ready_to_resolve': ready_to_resolve,
+                'recommended_conclusion': recommended_conclusion
+            }
+        })
+    
+    @action(detail=False, methods=['get'])
+    def dashboard(self, request):
+        """
+        Get inquiry dashboard with status summary and next actions.
+        
+        GET /inquiries/dashboard/?case_id={id}
+        
+        Returns organized view of all inquiries for a case with actionable insights.
+        """
+        from django.db.models import Count, Q
+        
+        case_id = request.query_params.get('case_id')
+        if not case_id:
+            return Response(
+                {'error': 'case_id parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get all inquiries for the case
+        inquiries = Inquiry.objects.filter(case_id=case_id).select_related('case')
+        
+        # Group by status
+        by_status = {
+            'open': InquiryListSerializer(
+                inquiries.filter(status=InquiryStatus.OPEN).order_by('-priority', 'sequence_index'),
+                many=True
+            ).data,
+            'investigating': InquiryListSerializer(
+                inquiries.filter(status=InquiryStatus.INVESTIGATING).order_by('-priority', 'sequence_index'),
+                many=True
+            ).data,
+            'resolved': InquiryListSerializer(
+                inquiries.filter(status=InquiryStatus.RESOLVED).order_by('-resolved_at'),
+                many=True
+            ).data,
+            'archived': InquiryListSerializer(
+                inquiries.filter(status=InquiryStatus.ARCHIVED),
+                many=True
+            ).data
+        }
+        
+        # Calculate summary stats
+        total = inquiries.count()
+        resolved = inquiries.filter(status=InquiryStatus.RESOLVED).count()
+        completion_rate = (resolved / total * 100) if total > 0 else 0
+        
+        # Suggest next actions
+        next_actions = []
+        
+        # Priority 1: Start investigating open inquiries
+        open_inquiries = inquiries.filter(status=InquiryStatus.OPEN).order_by('-priority')
+        if open_inquiries.exists():
+            first_open = open_inquiries.first()
+            next_actions.append({
+                'type': 'start_investigation',
+                'inquiry_id': str(first_open.id),
+                'title': f'Start investigating: {first_open.title}',
+                'priority': 1
+            })
+        
+        # Priority 2: Resolve investigating inquiries with evidence
+        investigating = inquiries.filter(status=InquiryStatus.INVESTIGATING)
+        for inq in investigating:
+            evidence_count = Evidence.objects.filter(inquiry=inq).count()
+            if evidence_count >= 2:  # Has enough evidence
+                next_actions.append({
+                    'type': 'resolve_inquiry',
+                    'inquiry_id': str(inq.id),
+                    'title': f'Ready to resolve: {inq.title}',
+                    'priority': 2
+                })
+        
+        return Response({
+            'by_status': by_status,
+            'summary': {
+                'total': total,
+                'open': inquiries.filter(status=InquiryStatus.OPEN).count(),
+                'investigating': inquiries.filter(status=InquiryStatus.INVESTIGATING).count(),
+                'resolved': resolved,
+                'completion_rate': round(completion_rate, 1)
+            },
+            'next_actions': next_actions[:5]  # Top 5 actions
+        })
     
     @action(detail=False, methods=['post'])
     def generate_title(self, request):
@@ -184,6 +422,89 @@ Return only the question, nothing else.
         title = asyncio.run(generate())
         
         return Response({'title': title})
+    
+    @action(detail=False, methods=['post'])
+    def create_from_assumption(self, request):
+        """
+        Quick action to create inquiry from a highlighted assumption.
+        
+        POST /api/inquiries/create_from_assumption/
+        
+        Body:
+        {
+            "case_id": "uuid",
+            "assumption_text": "Device is Class II",
+            "auto_generate_title": true  # Optional: use AI to create title
+        }
+        
+        Core experience improvement - one-click from assumption to inquiry.
+        """
+        from apps.inquiries.services import InquiryService
+        from apps.cases.models import Case
+        from apps.common.llm_providers import get_llm_provider
+        import asyncio
+        
+        case_id = request.data.get('case_id')
+        assumption_text = request.data.get('assumption_text')
+        auto_generate = request.data.get('auto_generate_title', True)
+        
+        if not case_id or not assumption_text:
+            return Response(
+                {'error': 'case_id and assumption_text are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            case = Case.objects.get(id=case_id)
+        except Case.DoesNotExist:
+            return Response(
+                {'error': 'Case not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Generate title if requested
+        if auto_generate:
+            provider = get_llm_provider('fast')
+            
+            async def generate_title():
+                prompt = f"""Convert this assumption into an investigation question:
+
+Assumption: "{assumption_text}"
+
+Generate a clear, specific question that would validate or invalidate this assumption.
+Keep it under 100 characters. Return only the question.
+
+Example:
+Assumption: "Device is Class II"
+Question: "What FDA classification applies to our device?"
+"""
+                full_response = ""
+                async for chunk in provider.stream_chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt="You generate investigation questions from assumptions."
+                ):
+                    full_response += chunk.content
+                return full_response.strip()
+            
+            title = asyncio.run(generate_title())
+        else:
+            # Use assumption text as title
+            title = assumption_text if len(assumption_text) <= 100 else assumption_text[:97] + "..."
+        
+        # Create inquiry
+        inquiry = InquiryService.create_inquiry(
+            case=case,
+            title=title,
+            description=f"Validating assumption: {assumption_text}",
+            user=request.user,
+            elevation_reason='USER_CREATED',
+            origin_text=assumption_text
+        )
+        
+        return Response(
+            self.get_serializer(inquiry).data,
+            status=status.HTTP_201_CREATED
+        )
     
     @action(detail=True, methods=['post'])
     def generate_brief_update(self, request, pk=None):
@@ -274,6 +595,60 @@ Return JSON:
         
         result = asyncio.run(generate())
         return Response(result)
+    
+    @action(detail=True, methods=['post'])
+    async def generate_investigation_plan(self, request, pk=None):
+        """
+        Generate AI investigation plan for inquiry.
+        
+        POST /api/inquiries/{id}/generate_investigation_plan/
+        Body: { brief_context: str }
+        Returns: { plan_markdown: str }
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from asgiref.sync import sync_to_async
+        
+        inquiry = await sync_to_async(self.get_object)()
+        brief_context = request.data.get('brief_context', '')
+        
+        # Get case for context
+        case = await sync_to_async(lambda: inquiry.case)()
+        
+        provider = get_llm_provider('fast')
+        system_prompt = "You create structured investigation plans for research questions."
+        
+        user_prompt = f"""Create an investigation plan for this research question:
+
+Question: {inquiry.title}
+{f'Context from brief: {brief_context}' if brief_context else ''}
+{f'Case background: {case.position}' if case.position else ''}
+
+Generate a structured investigation plan with these sections:
+
+## Hypothesis
+One clear sentence: What specific assumption or claim are we testing?
+
+## Research Approaches
+3-5 specific, actionable methods to investigate this question.
+Be concrete - name actual activities (e.g., "Survey 20 target users", not "do user research")
+
+## Evidence Needed
+Bulleted list of specific evidence types that would confirm or refute the hypothesis
+
+## Success Criteria
+1-2 sentences: What constitutes "resolved"? What confidence level or evidence threshold do we need?
+
+Return ONLY the markdown plan with these 4 sections. Be specific and actionable.
+"""
+        
+        full_response = ""
+        async for chunk in provider.stream_chat(
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt
+        ):
+            full_response += chunk.content
+        
+        return Response({'plan_markdown': full_response.strip()})
 
 
 class EvidenceViewSet(viewsets.ModelViewSet):

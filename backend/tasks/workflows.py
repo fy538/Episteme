@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 @shared_task
 def assistant_response_workflow(thread_id: str, user_message_id: str):
     """
-    Phase 1: Assistant response + signal extraction
+    Enhanced workflow with agent inflection detection
     
     Workflow:
-    1. Generate assistant response (always)
-    2. Extract signals from user message (Phase 1 - TODO)
+    1. Check for agent confirmation (if pending suggestion)
+    2. Analyze for agent inflection points (every N turns)
+    3. Generate assistant response OR spawn agent
+    4. Extract signals from user message (batched)
     
     Args:
         thread_id: Chat thread ID
@@ -26,12 +28,96 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     """
     from apps.chat.models import Message, ChatThread
     from apps.chat.services import ChatService
+    import asyncio
     
     # Get thread and message
     thread = ChatThread.objects.get(id=thread_id)
     user_message = Message.objects.get(id=user_message_id)
     
-    # Generate assistant response (Phase 1: with memory integration)
+    # STEP 1: Check for agent confirmation
+    # If there's a pending agent suggestion, check if user is confirming
+    if thread.metadata and thread.metadata.get('pending_agent_suggestion'):
+        from apps.agents.confirmation import check_for_agent_confirmation
+        from apps.agents.orchestrator import AgentOrchestrator
+        
+        confirmation = asyncio.run(check_for_agent_confirmation(thread, user_message))
+        
+        if confirmation and confirmation['confirmed']:
+            # User confirmed! Spawn agent
+            result = asyncio.run(AgentOrchestrator.run_agent_in_chat(
+                thread=thread,
+                agent_type=confirmation['agent_type'],
+                user=thread.user,
+                **confirmation['params']
+            ))
+            
+            # Clear pending suggestion
+            thread.metadata['pending_agent_suggestion'] = None
+            thread.save()
+            
+            # Agent is running - workflow complete
+            return {
+                'status': 'agent_spawned',
+                'agent_type': confirmation['agent_type'],
+                **result
+            }
+    
+    # STEP 2: Analyze for agent inflection points
+    # Increment counter and check threshold
+    thread.turns_since_agent_check = (thread.turns_since_agent_check or 0) + 1
+    
+    AGENT_CHECK_INTERVAL = 3  # Check every 3 turns
+    
+    should_check_agents = (
+        thread.turns_since_agent_check >= AGENT_CHECK_INTERVAL or
+        thread.last_agent_check_at is None
+    )
+    
+    if should_check_agents:
+        from apps.agents.inflection_detector import InflectionDetector
+        from apps.agents.messages import create_agent_suggestion_message
+        
+        # Analyze for inflection points
+        inflection = asyncio.run(InflectionDetector.analyze_for_agent_need(thread))
+        
+        # Emit event for tracking
+        from apps.events.services import EventService
+        from apps.events.models import ActorType
+        
+        EventService.append(
+            event_type='CONVERSATION_ANALYZED_FOR_AGENT',
+            payload=inflection,
+            actor_type=ActorType.SYSTEM,
+            thread_id=thread.id,
+            case_id=thread.primary_case.id if thread.primary_case else None
+        )
+        
+        # Reset counter
+        thread.turns_since_agent_check = 0
+        thread.last_agent_check_at = timezone.now()
+        thread.last_suggested_agent = inflection.get('suggested_agent', '')
+        
+        # If high confidence, create suggestion
+        if inflection['needs_agent'] and inflection['confidence'] > 0.75:
+            # Store pending suggestion
+            thread.metadata = thread.metadata or {}
+            thread.metadata['pending_agent_suggestion'] = inflection
+            
+            # Create suggestion message
+            asyncio.run(create_agent_suggestion_message(thread, inflection))
+            
+            thread.save()
+            
+            # Don't generate normal response - let user decide
+            return {
+                'status': 'agent_suggested',
+                'agent_type': inflection['suggested_agent'],
+                'confidence': inflection['confidence']
+            }
+        
+        thread.save()
+    
+    # STEP 3: Generate normal assistant response (Phase 1: with memory integration)
     response = ChatService.generate_assistant_response(
         thread_id=thread.id,
         user_message_id=user_message.id

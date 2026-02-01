@@ -59,3 +59,16 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         events = EventService.get_thread_timeline(thread_id)
         serializer = self.get_serializer(events, many=True)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='workflow/(?P<correlation_id>[^/.]+)')
+    def workflow_events(self, request, correlation_id=None):
+        """
+        Get all events for a workflow (agent execution, etc.)
+        
+        GET /api/events/workflow/{correlation_id}/
+        
+        Returns: Chronological list of events with same correlation_id
+        """
+        events = EventService.get_workflow_events(correlation_id)
+        serializer = self.get_serializer(events, many=True)
+        return Response(serializer.data)

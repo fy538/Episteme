@@ -1,0 +1,331 @@
+"""
+Agent orchestration service
+
+Manages agent execution with progress tracking and inline chat integration.
+"""
+import uuid as uuid_module
+from typing import Dict, Any, Optional
+from django.utils import timezone
+from asgiref.sync import sync_to_async
+
+from apps.chat.models import ChatThread, Message
+from apps.chat.services import ChatService
+from apps.events.services import EventService
+from apps.events.models import EventType, ActorType
+
+
+class AgentOrchestrator:
+    """
+    Orchestrate agent execution with progress tracking.
+    
+    Creates placeholder messages, emits progress events, and injects
+    results back into chat for seamless user experience.
+    """
+    
+    @staticmethod
+    async def run_agent_in_chat(
+        thread: ChatThread,
+        agent_type: str,
+        user,
+        **params
+    ) -> Dict[str, Any]:
+        """
+        Run an agent and stream results into chat
+        
+        Args:
+            thread: Chat thread
+            agent_type: 'research' | 'critique' | 'brief'
+            user: User requesting
+            **params: Agent-specific parameters (topic, target_signal_id, etc.)
+        
+        Returns:
+            {
+                'task_id': str,
+                'correlation_id': str,
+                'placeholder_message_id': str,
+                'status': 'running'
+            }
+        """
+        # Create correlation ID for this workflow
+        correlation_id = uuid_module.uuid4()
+        
+        # Get case context
+        case = thread.primary_case
+        if not case:
+            raise ValueError("Thread must have a linked case to run agents")
+        
+        # Load active skills for display
+        skills = await sync_to_async(lambda: list(
+            case.active_skills.filter(status='active')
+        ))()
+        skill_names = [s.name for s in skills]
+        
+        # Step 1: Create placeholder message in chat
+        placeholder_content = AgentOrchestrator._build_placeholder_content(
+            agent_type=agent_type,
+            params=params,
+            skill_names=skill_names
+        )
+        
+        placeholder = await ChatService.create_assistant_message(
+            thread=thread,
+            content=placeholder_content,
+            metadata={
+                'type': 'agent_placeholder',
+                'agent_type': agent_type,
+                'correlation_id': str(correlation_id),
+                'status': 'running',
+                'started_at': timezone.now().isoformat(),
+                'skills_loaded': skill_names
+            }
+        )
+        
+        # Step 2: Emit workflow start event
+        start_event = await sync_to_async(EventService.append)(
+            event_type='AGENT_WORKFLOW_STARTED',
+            payload={
+                'agent_type': agent_type,
+                'thread_id': str(thread.id),
+                'case_id': str(case.id),
+                'placeholder_message_id': str(placeholder.id),
+                'params': params,
+                'skills_loaded': skill_names
+            },
+            actor_type=ActorType.SYSTEM,
+            correlation_id=correlation_id,
+            thread_id=thread.id,
+            case_id=case.id
+        )
+        
+        # Step 3: Execute agent workflow (async Celery task)
+        from apps.artifacts.workflows import (
+            generate_research_artifact,
+            generate_critique_artifact,
+            generate_brief_artifact
+        )
+        
+        task = None
+        
+        if agent_type == 'research':
+            topic = params.get('topic', case.position)
+            task = generate_research_artifact.delay(
+                case_id=str(case.id),
+                topic=topic,
+                user_id=user.id,
+                correlation_id=str(correlation_id),
+                placeholder_message_id=str(placeholder.id)
+            )
+        
+        elif agent_type == 'critique':
+            target_signal_id = params.get('target_signal_id')
+            if not target_signal_id:
+                # Default to first signal
+                first_signal = await case.signals.afirst()
+                target_signal_id = str(first_signal.id) if first_signal else None
+            
+            if target_signal_id:
+                task = generate_critique_artifact.delay(
+                    case_id=str(case.id),
+                    target_signal_id=target_signal_id,
+                    user_id=user.id,
+                    correlation_id=str(correlation_id),
+                    placeholder_message_id=str(placeholder.id)
+                )
+        
+        elif agent_type == 'brief':
+            task = generate_brief_artifact.delay(
+                case_id=str(case.id),
+                user_id=user.id,
+                correlation_id=str(correlation_id),
+                placeholder_message_id=str(placeholder.id)
+            )
+        
+        if not task:
+            raise ValueError(f"Failed to start {agent_type} agent")
+        
+        # Step 4: Return immediately (workflow continues in background)
+        return {
+            'task_id': task.id,
+            'correlation_id': str(correlation_id),
+            'placeholder_message_id': str(placeholder.id),
+            'status': 'running',
+            'agent_type': agent_type
+        }
+    
+    @staticmethod
+    def _build_placeholder_content(
+        agent_type: str,
+        params: Dict,
+        skill_names: List[str]
+    ) -> str:
+        """Build content for placeholder message while agent runs"""
+        
+        agent_emoji = {
+            'research': '🔬',
+            'critique': '🎯',
+            'brief': '📋'
+        }
+        
+        agent_display = {
+            'research': 'Research Agent',
+            'critique': 'Critique Agent',
+            'brief': 'Brief Agent'
+        }
+        
+        content = f"{agent_emoji.get(agent_type, '🤖')} **{agent_display.get(agent_type, 'Agent')} Running**\n\n"
+        
+        # Add what it's working on
+        if agent_type == 'research' and params.get('topic'):
+            content += f"**Topic**: {params['topic']}\n\n"
+        elif agent_type == 'critique' and params.get('suggested_target'):
+            content += f"**Critiquing**: {params['suggested_target']}\n\n"
+        
+        # Add skills being used
+        if skill_names:
+            content += f"**Using skills**: {', '.join(skill_names)}\n\n"
+        
+        content += "**Status**: Initializing...\n\n"
+        content += "_This message will update with results when complete._"
+        
+        return content
+    
+    @staticmethod
+    async def update_progress(
+        correlation_id: str,
+        step: str,
+        message: str,
+        placeholder_message_id: Optional[str] = None
+    ):
+        """
+        Update agent progress (called from workflows)
+        
+        Args:
+            correlation_id: Workflow correlation ID
+            step: Progress step identifier
+            message: Human-readable progress message
+            placeholder_message_id: Optional message ID to update
+        """
+        # Emit progress event
+        await sync_to_async(EventService.append)(
+            event_type='AGENT_PROGRESS',
+            payload={
+                'step': step,
+                'message': message,
+                'timestamp': timezone.now().isoformat()
+            },
+            actor_type=ActorType.SYSTEM,
+            correlation_id=correlation_id
+        )
+        
+        # Update placeholder message if provided
+        if placeholder_message_id:
+            try:
+                placeholder = await Message.objects.aget(id=placeholder_message_id)
+                
+                # Update content to show progress
+                lines = placeholder.content.split('\n')
+                
+                # Replace status line
+                for i, line in enumerate(lines):
+                    if line.startswith('**Status**:'):
+                        lines[i] = f"**Status**: {message}"
+                        break
+                
+                placeholder.content = '\n'.join(lines)
+                await placeholder.asave()
+                
+            except Message.DoesNotExist:
+                pass
+    
+    @staticmethod
+    async def complete_agent(
+        correlation_id: str,
+        artifact_id: str,
+        placeholder_message_id: str,
+        blocks: List[Dict],
+        generation_time_ms: int
+    ):
+        """
+        Mark agent as complete and inject results into chat
+        
+        Args:
+            correlation_id: Workflow correlation ID
+            artifact_id: ID of created artifact
+            placeholder_message_id: Placeholder message to replace
+            blocks: Generated content blocks
+            generation_time_ms: Time taken
+        """
+        # Emit completion event
+        await sync_to_async(EventService.append)(
+            event_type='AGENT_COMPLETED',
+            payload={
+                'artifact_id': artifact_id,
+                'blocks_count': len(blocks),
+                'generation_time_ms': generation_time_ms,
+                'completed_at': timezone.now().isoformat()
+            },
+            actor_type=ActorType.SYSTEM,
+            correlation_id=correlation_id
+        )
+        
+        # Replace placeholder with results
+        try:
+            placeholder = await Message.objects.aget(id=placeholder_message_id)
+            
+            # Build result content
+            result_content = AgentOrchestrator._build_result_content(
+                artifact_id=artifact_id,
+                blocks=blocks,
+                generation_time_ms=generation_time_ms
+            )
+            
+            placeholder.content = result_content
+            placeholder.metadata['status'] = 'completed'
+            placeholder.metadata['completed_at'] = timezone.now().isoformat()
+            placeholder.metadata['artifact_id'] = artifact_id
+            
+            await placeholder.asave()
+            
+        except Message.DoesNotExist:
+            pass
+    
+    @staticmethod
+    def _build_result_content(
+        artifact_id: str,
+        blocks: List[Dict],
+        generation_time_ms: int
+    ) -> str:
+        """Build content for completed agent result"""
+        
+        content = "✓ **Agent Complete**\n\n"
+        
+        # Add summary of blocks
+        headings = [b for b in blocks if b.get('type') == 'heading']
+        if headings:
+            content += "**Sections**:\n"
+            for heading in headings[:5]:  # First 5 headings
+                content += f"- {heading.get('content', '')}\n"
+            if len(headings) > 5:
+                content += f"- ...and {len(headings) - 5} more\n"
+            content += "\n"
+        
+        # Add time
+        time_seconds = generation_time_ms / 1000
+        content += f"**Generated in**: {time_seconds:.1f}s\n\n"
+        
+        # Add link to artifact
+        content += f"[View full artifact](/artifacts/{artifact_id})\n\n"
+        
+        # Add first block as preview
+        if blocks:
+            first_content_block = next(
+                (b for b in blocks if b.get('type') == 'paragraph'),
+                None
+            )
+            if first_content_block:
+                preview = first_content_block.get('content', '')[:200]
+                if len(first_content_block.get('content', '')) > 200:
+                    preview += "..."
+                content += f"**Preview**:\n\n{preview}\n"
+        
+        return content
