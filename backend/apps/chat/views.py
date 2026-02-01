@@ -282,6 +282,30 @@ Return ONLY valid JSON:
         })
     
     @action(detail=True, methods=['post'])
+    def dismiss_structure_suggestion(self, request, pk=None):
+        """
+        Dismiss a pending structure suggestion.
+        
+        POST /api/chat/threads/{id}/dismiss_structure_suggestion/
+        
+        Tracks dismissal for sensitivity tuning.
+        """
+        from apps.agents.structure_detector import StructureReadinessDetector
+        
+        thread = self.get_object()
+        
+        # Track feedback
+        StructureReadinessDetector.track_suggestion_feedback(
+            thread=thread,
+            accepted=False
+        )
+        
+        return Response({
+            'status': 'dismissed',
+            'suggestion_hint': thread.metadata.get('sensitivity_suggestion'),
+        })
+    
+    @action(detail=True, methods=['post'])
     async def invoke_agent(self, request, pk=None):
         """
         Manually invoke an agent for this thread.

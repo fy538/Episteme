@@ -6,6 +6,9 @@ import { useEffect, useRef } from 'react';
 import type { Message } from '@/lib/types/chat';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
+import { SignalHighlighter, type HighlightedSignal } from './SignalHighlighter';
+import { useSignalsForMessage, useDismissSignal } from '@/hooks/useSignals';
+import { useUserPreferences } from '@/hooks/usePreferences';
 
 export function MessageList({
   messages,
@@ -23,6 +26,8 @@ export function MessageList({
   onCreateEvidence?: (content: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { data: userPreferences } = useUserPreferences();
+  const dismissSignal = useDismissSignal();
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -37,11 +42,54 @@ export function MessageList({
     );
   }
 
+  const handleConvertToInquiry = (signal: HighlightedSignal) => {
+    // TODO: Implement convert to inquiry logic
+    console.log('Convert to inquiry:', signal);
+  };
+
+  const handleDismissSignal = (signalId: string) => {
+    dismissSignal.mutate(signalId);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
       {messages.map(message => {
         const isStreamingMsg = message.metadata?.streaming === true;
         const showActions = message.role === 'assistant' && !isStreamingMsg && message.content.length > 20;
+        
+        // Fetch signals for this message
+        const { data: signals = [] } = useSignalsForMessage(
+          message.id,
+          message.role === 'assistant' && !isStreamingMsg
+        );
+
+        // Check if signal highlighting is enabled
+        const highlightSignals = 
+          message.role === 'assistant' &&
+          !isStreamingMsg &&
+          userPreferences && 
+          signals.length > 0 &&
+          (userPreferences.highlight_assumptions || 
+           userPreferences.highlight_questions || 
+           userPreferences.highlight_evidence);
+
+        // Filter signals based on user preferences
+        const filteredSignals = signals.filter(signal => {
+          if (signal.type === 'assumption') return userPreferences?.highlight_assumptions !== false;
+          if (signal.type === 'question') return userPreferences?.highlight_questions !== false;
+          if (signal.type === 'evidence') return userPreferences?.highlight_evidence !== false;
+          return true;
+        });
+
+        // Map signals to highlighter format
+        const highlightedSignals: HighlightedSignal[] = filteredSignals.map(signal => ({
+          id: signal.id,
+          type: signal.type,
+          start: signal.span?.start || 0,
+          end: signal.span?.end || 0,
+          text: signal.text,
+          confidence: signal.confidence
+        }));
         
         return (
           <div
@@ -64,6 +112,15 @@ export function MessageList({
                       <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                     </span>
                     <span>Thinking...</span>
+                  </div>
+                ) : highlightSignals ? (
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <SignalHighlighter
+                      content={message.content}
+                      signals={highlightedSignals}
+                      onConvertToInquiry={handleConvertToInquiry}
+                      onDismiss={handleDismissSignal}
+                    />
                   </div>
                 ) : (
                   <div className="prose prose-sm max-w-none dark:prose-invert">

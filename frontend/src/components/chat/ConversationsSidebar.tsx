@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import type { ChatThread } from '@/lib/types/chat';
 import type { Project } from '@/lib/types/project';
@@ -108,14 +109,12 @@ export function ConversationsSidebar({
           placeholder="Search conversations..."
           aria-label="Search conversations"
         />
-        <label className="flex items-center gap-2 text-xs text-neutral-600">
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={onToggleArchived}
-          />
-          Show archived
-        </label>
+        <Checkbox
+          checked={showArchived}
+          onChange={onToggleArchived}
+          label="Show archived"
+          className="text-xs"
+        />
       </div>
 
       {isLoading && (

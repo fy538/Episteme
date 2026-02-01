@@ -24,12 +24,12 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           // Focus styles
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
           // Default state
-          'border-primary-300 bg-white',
+          'border-primary-300 bg-white dark:border-neutral-700 dark:bg-primary-900 dark:text-primary-50',
           'focus-visible:ring-accent-500',
           // Error state
           error && 'border-error-500 focus-visible:ring-error-500',
           // Disabled state
-          'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-neutral-50',
+          'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-neutral-50 dark:disabled:bg-neutral-900',
           className
         )}
         ref={ref}

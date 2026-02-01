@@ -75,6 +75,38 @@ class UserPreferences(models.Model):
         help_text="Auto-run agents when confidence is very high (>0.95)"
     )
     
+    # Structure Discovery Configuration
+    structure_auto_detect = models.BooleanField(
+        default=True,
+        help_text="Auto-detect when structure (case/inquiries) would help"
+    )
+    
+    structure_sensitivity = models.IntegerField(
+        default=3,
+        help_text="How quickly to suggest structure (1=conservative, 5=proactive)"
+    )
+    
+    structure_auto_create = models.BooleanField(
+        default=False,
+        help_text="Auto-create case in background vs. show suggestion"
+    )
+    
+    # Signal highlighting preferences
+    highlight_assumptions = models.BooleanField(
+        default=True,
+        help_text="Highlight assumptions inline in chat"
+    )
+    
+    highlight_evidence = models.BooleanField(
+        default=True,
+        help_text="Highlight evidence inline in chat"
+    )
+    
+    highlight_questions = models.BooleanField(
+        default=True,
+        help_text="Highlight questions inline in chat"
+    )
+    
     # Evidence preferences
     evidence_min_credibility = models.IntegerField(
         default=3,

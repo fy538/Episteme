@@ -174,6 +174,71 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
             }
         )
 
+    # STEP 4: Check for structure readiness (progressive disclosure)
+    # Only check if user has this preference enabled and no case exists
+    try:
+        user_prefs = thread.user.preferences
+        
+        if user_prefs.structure_auto_detect and not thread.primary_case:
+            from apps.agents.structure_detector import StructureReadinessDetector
+            from apps.signals.models import Signal
+            
+            # Check if we should evaluate structure readiness
+            if StructureReadinessDetector.should_check_structure_readiness(
+                thread, 
+                sensitivity=user_prefs.structure_sensitivity
+            ):
+                # Get recent signals
+                recent_signals = list(Signal.objects.filter(
+                    thread=thread,
+                    dismissed_at__isnull=True
+                ).order_by('-sequence_index')[:20])
+                
+                # Fast threshold check first
+                if StructureReadinessDetector.check_fast_thresholds(
+                    thread, recent_signals, user_prefs.structure_sensitivity
+                ):
+                    # Run deep LLM analysis
+                    structure_analysis = asyncio.run(
+                        StructureReadinessDetector.analyze_structure_readiness(
+                            thread, recent_signals, user_prefs.structure_sensitivity
+                        )
+                    )
+                    
+                    # If high confidence, suggest structure
+                    if structure_analysis['ready'] and structure_analysis['confidence'] > 0.7:
+                        # Emit suggestion event
+                        from apps.events.services import EventService
+                        from apps.events.models import EventType, ActorType
+                        
+                        EventService.append(
+                            event_type=EventType.STRUCTURE_SUGGESTED,
+                            payload=structure_analysis,
+                            actor_type=ActorType.SYSTEM,
+                            thread_id=thread.id,
+                            case_id=thread.primary_case.id if thread.primary_case else None
+                        )
+                        
+                        # Store suggestion in thread metadata
+                        thread.metadata = thread.metadata or {}
+                        thread.metadata['pending_structure_suggestion'] = structure_analysis
+                        thread.metadata['last_structure_suggestion_at'] = timezone.now().isoformat()
+                        thread.save(update_fields=['metadata'])
+                        
+                        logger.info(
+                            "structure_suggested",
+                            extra={
+                                "thread_id": str(thread.id),
+                                "structure_type": structure_analysis['structure_type'],
+                                "confidence": structure_analysis['confidence']
+                            }
+                        )
+    except Exception:
+        logger.exception(
+            "structure_detection_failed",
+            extra={"thread_id": str(thread.id)},
+        )
+    
     # Trigger async title generation (best-effort)
     try:
         generate_chat_title_workflow.delay(thread_id=str(thread.id))

@@ -200,6 +200,136 @@ export function AITab({ preferences, onChange }: AITabProps) {
           </div>
         </div>
       </div>
+
+      {/* Structure Discovery */}
+      <div>
+        <Label className="text-base font-semibold">Structure Discovery</Label>
+        <p className="text-sm text-neutral-600 mb-3">
+          Control when and how the system suggests creating cases and inquiries
+        </p>
+        
+        <div className="space-y-4">
+          {/* Auto-detect toggle */}
+          <div className="p-3 border border-neutral-200 rounded-md">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={preferences.structure_auto_detect ?? true}
+                onChange={(e) => onChange({ structure_auto_detect: e.target.checked })}
+                className="rounded border-neutral-300 mt-0.5"
+              />
+              <div>
+                <span className="text-sm font-medium text-neutral-900">
+                  Auto-detect decision points
+                </span>
+                <p className="text-xs text-neutral-600 mt-1">
+                  AI will suggest creating structure when it detects decision-making conversations
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {/* Sensitivity Slider */}
+          {preferences.structure_auto_detect !== false && (
+            <div>
+              <Label htmlFor="structure-sensitivity">Suggestion Sensitivity</Label>
+              <p className="text-xs text-neutral-500 mb-2">
+                How quickly should structure suggestions appear?
+              </p>
+              <div className="space-y-2">
+                {[
+                  { value: 1, label: 'Conservative', description: 'Suggest only for clear decisions' },
+                  { value: 2, label: 'Relaxed', description: 'Less frequent suggestions' },
+                  { value: 3, label: 'Balanced', description: 'Standard detection' },
+                  { value: 4, label: 'Active', description: 'More frequent suggestions' },
+                  { value: 5, label: 'Proactive', description: 'Suggest early and often' },
+                ].map((option) => (
+                  <label
+                    key={option.value}
+                    className={`block p-3 border rounded-md cursor-pointer ${
+                      preferences.structure_sensitivity === option.value
+                        ? 'border-accent-500 bg-accent-50'
+                        : 'border-neutral-200 hover:bg-neutral-50'
+                    }`}
+                  >
+                    <div className="flex items-center">
+                      <input
+                        type="radio"
+                        name="structure_sensitivity"
+                        value={option.value}
+                        checked={preferences.structure_sensitivity === option.value}
+                        onChange={(e) => onChange({ structure_sensitivity: parseInt(e.target.value) })}
+                        className="mr-2"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-neutral-900">{option.label}</p>
+                        <p className="text-xs text-neutral-600">{option.description}</p>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Signal Highlighting */}
+          <div>
+            <Label>Inline Signal Highlighting</Label>
+            <p className="text-xs text-neutral-500 mb-2">
+              Highlight detected signals directly in chat messages
+            </p>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preferences.highlight_assumptions ?? true}
+                  onChange={(e) => onChange({ highlight_assumptions: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">⚠️ Assumptions</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preferences.highlight_questions ?? true}
+                  onChange={(e) => onChange({ highlight_questions: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">❓ Questions</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preferences.highlight_evidence ?? true}
+                  onChange={(e) => onChange({ highlight_evidence: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">📄 Evidence</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Auto-create (Advanced) */}
+          <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-md">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={preferences.structure_auto_create ?? false}
+                onChange={(e) => onChange({ structure_auto_create: e.target.checked })}
+                className="rounded border-neutral-300 mt-0.5"
+              />
+              <div>
+                <span className="text-sm font-medium text-neutral-900">
+                  Auto-create cases in background
+                </span>
+                <p className="text-xs text-neutral-600 mt-1">
+                  Instead of showing a suggestion, automatically create structure
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,8 @@ import { useState, useEffect, startTransition } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Select } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { chatAPI } from '@/lib/api/chat';
 import type { Message } from '@/lib/types/chat';
 
@@ -274,12 +276,15 @@ export function ChatInterface({
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {projects && onProjectChange && (
-              <label className="text-xs text-neutral-600 flex items-center gap-2">
-                Project
-                <select
+              <div className="flex items-center gap-2">
+                <Label htmlFor="project-select" className="text-xs text-neutral-600">
+                  Project
+                </Label>
+                <Select
+                  id="project-select"
                   value={projectId || ''}
                   onChange={(e) => onProjectChange(e.target.value || null)}
-                  className="text-xs border border-neutral-300 rounded px-2 py-1"
+                  className="h-8 text-xs w-48"
                 >
                   <option value="">No Project</option>
                   {projects.map(project => (
@@ -287,8 +292,8 @@ export function ChatInterface({
                       {project.title}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </div>
             )}
           </div>
           <div className="flex items-center gap-2">

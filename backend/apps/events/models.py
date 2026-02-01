@@ -75,6 +75,12 @@ class EventType(models.TextChoices):
     AGENT_PROGRESS = 'AgentProgress', 'Agent Progress Update'
     AGENT_COMPLETED = 'AgentCompleted', 'Agent Workflow Completed'
     AGENT_FAILED = 'AgentFailed', 'Agent Workflow Failed'
+    
+    # Structure discovery events (Progressive disclosure)
+    STRUCTURE_SUGGESTED = 'StructureSuggested', 'Structure Suggested'
+    STRUCTURE_ACCEPTED = 'StructureAccepted', 'Structure Accepted'
+    STRUCTURE_DISMISSED = 'StructureDismissed', 'Structure Dismissed'
+    STRUCTURE_IGNORED = 'StructureIgnored', 'Structure Ignored'
 
 
 class Event(models.Model):

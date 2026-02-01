@@ -21,11 +21,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           'disabled:pointer-events-none disabled:opacity-50',
           // Variant styles
           {
-            'bg-accent-600 text-white hover:bg-accent-700 shadow-sm': variant === 'default',
-            'border border-primary-300 bg-white text-primary-700 hover:bg-primary-50': variant === 'outline',
-            'text-primary-700 hover:bg-primary-100': variant === 'ghost',
-            'bg-error-600 text-white hover:bg-error-700 shadow-sm': variant === 'destructive',
-            'bg-success-600 text-white hover:bg-success-700 shadow-sm': variant === 'success',
+            'bg-accent-600 text-white hover:bg-accent-700 shadow-sm dark:bg-accent-700 dark:hover:bg-accent-800': variant === 'default',
+            'border border-primary-300 bg-white text-primary-700 hover:bg-primary-50 dark:border-neutral-700 dark:bg-primary-900 dark:text-primary-200 dark:hover:bg-primary-800': variant === 'outline',
+            'text-primary-700 hover:bg-primary-100 dark:text-primary-200 dark:hover:bg-primary-800': variant === 'ghost',
+            'bg-error-600 text-white hover:bg-error-700 shadow-sm dark:bg-error-700 dark:hover:bg-error-800': variant === 'destructive',
+            'bg-success-600 text-white hover:bg-success-700 shadow-sm dark:bg-success-700 dark:hover:bg-success-800': variant === 'success',
           },
           // Size styles
           {
