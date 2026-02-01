@@ -36,7 +36,7 @@ export function GlobalHeader({
           <div className="flex items-center justify-between">
             {/* Left: Logo & Nav */}
             <div className="flex items-center gap-8">
-              <Link href="/chat" className="flex items-center gap-2">
+              <Link href="/workspace" className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-gradient-to-br from-accent-600 to-accent-700 rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold text-lg">E</span>
                 </div>
@@ -58,7 +58,7 @@ export function GlobalHeader({
                     </Button>
                   </Link>
                   
-                  <Link href="/workspace/cases">
+                  <Link href="/workspace">
                     <Button
                       variant={isActive('/workspace') ? 'default' : 'ghost'}
                       size="sm"

@@ -10,6 +10,7 @@ import logging
 import asyncio
 from typing import List
 from django.db.models import Q
+from django.db import transaction
 
 from apps.chat.models import Message, MessageRole, ChatThread
 from apps.signals.extractors import get_signal_extractor
@@ -62,12 +63,15 @@ def get_unprocessed_messages(thread: ChatThread) -> List[Message]:
     return list(query.order_by('created_at'))
 
 
+@transaction.atomic
 async def extract_signals_from_batch_async(
     thread: ChatThread,
     messages: List[Message]
 ) -> int:
     """
     Extract signals from a batch of messages (async).
+    
+    Uses bulk_create for efficiency and wraps in transaction for atomicity.
     
     Args:
         thread: ChatThread containing the messages
@@ -87,13 +91,14 @@ async def extract_signals_from_batch_async(
         thread=thread
     )
     
-    total_signals = 0
+    # Collect all signals and create events in bulk
+    all_signals = []
+    event_signal_pairs = []
     
-    # Save signals with event sourcing
     for message_id, signals in signals_by_message.items():
         for signal in signals:
             try:
-                # Create event
+                # Create event (still individual for now, but in same transaction)
                 event = EventService.append(
                     event_type=EventType.SIGNAL_EXTRACTED,
                     payload={
@@ -107,26 +112,42 @@ async def extract_signals_from_batch_async(
                     case_id=thread.primary_case_id if thread.primary_case else None,
                 )
                 
-                # Link event and save signal
+                # Link event and case to signal
                 signal.event_id = event.id
                 signal.case_id = thread.primary_case_id if thread.primary_case else None
-                signal.save()
                 
-                total_signals += 1
+                all_signals.append(signal)
+                event_signal_pairs.append((event, signal))
                 
             except Exception:
                 logger.exception(
-                    "batch_signal_save_failed",
+                    "batch_signal_event_creation_failed",
                     extra={
                         "thread_id": str(thread.id),
                         "message_id": message_id,
                         "signal_type": signal.type
                     }
                 )
+                # Continue with other signals - transaction will roll back all on outer error
                 continue
     
-    # Reset extraction counters
+    # Bulk create all signals in one query
+    if all_signals:
+        from apps.signals.models import Signal
+        Signal.objects.bulk_create(all_signals)
+        
+        logger.info(
+            "batch_signals_created",
+            extra={
+                "thread_id": str(thread.id),
+                "signals_created": len(all_signals)
+            }
+        )
+    
+    # Reset extraction counters (inside transaction)
     thread.reset_extraction_counters()
+    
+    total_signals = len(all_signals)
     
     logger.info(
         "batch_signals_extracted",

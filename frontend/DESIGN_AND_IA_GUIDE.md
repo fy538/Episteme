@@ -81,7 +81,10 @@ const { theme, setTheme } = useTheme();
 ## Navigation
 
 ### Routes
-- `/chat` - Conversations
+- `/` - Landing page (redirects to `/workspace` if authenticated)
+- `/login` - Authentication (redirects to `/workspace` after login)
+- `/workspace` - Primary hub/dashboard
+- `/chat` - Conversations and chat interface
 - `/workspace/cases/[id]` - Case workspace (unified)
 - `/cases/[id]/documents/[docId]` - Documents
 

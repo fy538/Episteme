@@ -182,13 +182,24 @@ class MemoryRetrievalService:
         
         # Filter out signals already in hot tier
         warm_signals = [
-            r.signal for r in result.signals
-            if r.signal.id not in exclude_ids and not r.signal.dismissed_at
+            signal for signal in result.signals
+            if signal.id not in exclude_ids and not signal.dismissed_at
         ]
         
-        # Track access for adaptive temperature
-        for signal in warm_signals:
-            signal.mark_accessed()
+        # Track access for adaptive temperature (batch update for efficiency)
+        if warm_signals:
+            from django.utils import timezone
+            now = timezone.now()
+            for signal in warm_signals:
+                signal.access_count += 1
+                signal.last_accessed = now
+            
+            # Bulk update instead of individual saves
+            Signal.objects.bulk_update(
+                warm_signals,
+                ['access_count', 'last_accessed'],
+                batch_size=100
+            )
         
         return warm_signals
     

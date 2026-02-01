@@ -26,42 +26,37 @@ export default function Home() {
     setIsAuthenticated(false);
   }
 
+  // Redirect authenticated users to workspace
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/workspace');
+    }
+  }, [isAuthenticated, router]);
+
+  // Show landing page only for logged-out users
+  if (isAuthenticated) {
+    return null; // Will redirect
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-24">
       <div className="text-center">
-        <h1 className="text-4xl font-bold text-neutral-900 mb-4">
+        <h1 className="text-4xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">
           Episteme
         </h1>
-        <p className="text-xl text-neutral-600 mb-8">
+        <p className="text-xl text-neutral-600 dark:text-neutral-400 mb-8">
           Workspace for rigorous decision-making
         </p>
         
         <div className="flex gap-4 justify-center">
-          {isAuthenticated ? (
-            <>
-              <Link href="/chat">
-                <Button size="lg">Start Chatting</Button>
-              </Link>
-              {!isDevMode && (
-                <Button
-                  onClick={handleLogout}
-                  variant="outline"
-                  size="lg"
-                >
-                  Logout
-                </Button>
-              )}
-            </>
-          ) : (
-            <Link href="/login">
-              <Button size="lg">Sign In</Button>
-            </Link>
-          )}
+          <Link href="/login">
+            <Button size="lg">Sign In</Button>
+          </Link>
         </div>
 
         {isDevMode && (
-          <div className="mt-8 bg-warning-50 border border-warning-200 rounded-lg p-4 max-w-md mx-auto">
-            <p className="text-xs text-warning-800">
+          <div className="mt-8 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded-lg p-4 max-w-md mx-auto">
+            <p className="text-xs text-warning-800 dark:text-warning-200">
               <strong>🔧 Dev Mode Active</strong> - Authentication bypassed for local development
             </p>
           </div>

@@ -37,17 +37,15 @@ export function useSignals(threadId: string | undefined, enabled = true) {
 
 /**
  * Fetch signals for a specific message
+ * Now uses server-side filtering for efficiency
  */
 export function useSignalsForMessage(messageId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ['signals', 'message', messageId],
     queryFn: async () => {
-      const allSignals = await apiClient.get<Signal[]>(`/signals/`);
-      // Filter signals that belong to this message
-      return allSignals.filter(signal => 
-        signal.span?.message_id === messageId &&
-        !signal.dismissed_at
-      );
+      // Use server-side filtering with message_id parameter
+      const signals = await apiClient.get<Signal[]>(`/signals/?message_id=${messageId}`);
+      return signals;
     },
     enabled: enabled && !!messageId,
   });

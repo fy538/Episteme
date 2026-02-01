@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/components/ui/button';
 import type { ChatThread } from '@/lib/types/chat';
 
 interface Signal {
@@ -132,7 +132,7 @@ export function SmartActionBar({
               </p>
               <Button
                 onClick={action.action}
-                variant={action.priority === 'high' ? 'primary' : 'secondary'}
+                variant={action.priority === 'high' ? 'default' : 'outline'}
                 className="mt-3 w-full"
                 size="sm"
               >

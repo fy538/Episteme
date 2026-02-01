@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
 import { StructureSidebar } from '@/components/structure/StructureSidebar';
+import { GlobalHeader } from '@/components/layout/GlobalHeader';
 import { Button } from '@/components/ui/button';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
@@ -245,50 +246,56 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {showConversations && (
-        <ConversationsSidebar
-          projects={projects}
-          threads={filteredThreads}
-          selectedThreadId={threadId}
-          isLoading={isLoadingThreads}
-          onSelect={(id) => setThreadId(id)}
-          onCreate={handleCreateThread}
-          onRename={handleRenameThread}
-          onDelete={handleDeleteThread}
-          onArchive={handleArchiveThread}
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          showArchived={showArchived}
-          onToggleArchived={() => setShowArchived(prev => !prev)}
-        />
-      )}
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col">
-        <ChatInterface
-          threadId={threadId}
-          onToggleLeft={() => setShowConversations(prev => !prev)}
-          onToggleRight={() => setShowStructure(prev => !prev)}
-          leftCollapsed={!showConversations}
-          rightCollapsed={!showStructure}
-          projects={projects}
-          projectId={threadProjectId}
-          onProjectChange={handleChangeThreadProject}
-        />
+    <div className="flex flex-col h-screen">
+      <GlobalHeader 
+        breadcrumbs={[{ label: 'Chat' }]}
+        showNav={true}
+      />
+      <div className="flex flex-1 overflow-hidden">
+        {showConversations && (
+          <ConversationsSidebar
+            projects={projects}
+            threads={filteredThreads}
+            selectedThreadId={threadId}
+            isLoading={isLoadingThreads}
+            onSelect={(id) => setThreadId(id)}
+            onCreate={handleCreateThread}
+            onRename={handleRenameThread}
+            onDelete={handleDeleteThread}
+            onArchive={handleArchiveThread}
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            showArchived={showArchived}
+            onToggleArchived={() => setShowArchived(prev => !prev)}
+          />
+        )}
+        {/* Main chat area */}
+        <div className="flex-1 flex flex-col">
+          <ChatInterface
+            threadId={threadId}
+            onToggleLeft={() => setShowConversations(prev => !prev)}
+            onToggleRight={() => setShowStructure(prev => !prev)}
+            leftCollapsed={!showConversations}
+            rightCollapsed={!showStructure}
+            projects={projects}
+            projectId={threadProjectId}
+            onProjectChange={handleChangeThreadProject}
+          />
+        </div>
+        
+        {/* Structure sidebar */}
+        {showStructure && (
+          <StructureSidebar 
+            threadId={threadId} 
+            caseId={caseId || undefined}
+            onCaseCreated={(newCaseId) => {
+              setCaseId(newCaseId);
+              // Transition to workspace view
+              router.push(`/workspace/cases/${newCaseId}`);
+            }}
+          />
+        )}
       </div>
-      
-      {/* Structure sidebar */}
-      {showStructure && (
-        <StructureSidebar 
-          threadId={threadId} 
-          caseId={caseId || undefined}
-          onCaseCreated={(newCaseId) => {
-            setCaseId(newCaseId);
-            // Transition to workspace view
-            router.push(`/workspace/cases/${newCaseId}`);
-          }}
-        />
-      )}
     </div>
   );
 }

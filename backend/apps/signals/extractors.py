@@ -5,13 +5,13 @@ Refactored to use PydanticAI for structured extraction.
 """
 import logging
 from typing import List, Dict, Any, Optional
-from sentence_transformers import SentenceTransformer
 from django.conf import settings
 from pydantic_ai import Agent
 
 from apps.chat.models import Message
 from apps.signals.models import Signal, SignalType
 from apps.signals.prompts import get_signal_extraction_prompt
+from apps.signals.embedding_service import get_embedding_service
 from apps.common.utils import normalize_text, generate_dedupe_key
 from apps.common.ai_schemas import SignalExtractionResult
 from apps.common.ai_models import get_model
@@ -43,8 +43,8 @@ class SignalExtractor:
     )
     
     def __init__(self):
-        # Load embedding model once (cached singleton)
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Use shared embedding service (singleton)
+        self.embedding_service = get_embedding_service()
         # 384 dimensions, fast, good quality
         # Alternative: 'all-mpnet-base-v2' (768 dim, slower, better quality)
     
@@ -111,6 +111,89 @@ class SignalExtractor:
             signals_by_message[str(message.id)] = message_signals
         
         return signals_by_message
+    
+    def _create_signal_from_extraction(
+        self,
+        extraction,
+        message: Message,
+        sequence_index: int
+    ) -> Optional[Signal]:
+        """
+        Create a Signal object from an extraction result.
+        
+        Args:
+            extraction: Extraction result from LLM
+            message: Source message
+            sequence_index: Position in conversation
+            
+        Returns:
+            Signal object (not saved) or None if invalid
+        """
+        try:
+            # Validate signal type
+            if not self._is_valid_signal_type(extraction.type):
+                logger.warning(
+                    "invalid_signal_type",
+                    extra={
+                        "signal_type": extraction.type,
+                        "message_id": str(message.id),
+                        "thread_id": str(message.thread_id),
+                    },
+                )
+                return None
+            
+            # Generate embedding
+            embedding_vector = self.embedding_service.encode(
+                extraction.text,
+                convert_to_numpy=True
+            )
+            
+            # Create signal (not yet saved)
+            signal = Signal(
+                # Core fields
+                text=extraction.text,
+                type=extraction.type,
+                normalized_text=normalize_text(extraction.text),
+                confidence=extraction.confidence,
+                
+                # Positioning
+                sequence_index=sequence_index,
+                
+                # Embedding
+                embedding=embedding_vector.tolist(),  # Convert numpy to list
+                
+                # Deduplication (exact-match fast path)
+                dedupe_key=generate_dedupe_key(
+                    extraction.type,
+                    normalize_text(extraction.text),
+                    scope_hint=str(message.thread_id)
+                ),
+                
+                # Relationships
+                thread=message.thread,
+                # case linked later when case is opened
+                # event linked in the workflow after event is created
+                
+                # Span tracking
+                span={
+                    'message_id': str(message.id),
+                    'start': extraction.span.start if extraction.span else 0,
+                    'end': extraction.span.end if extraction.span else len(message.content),
+                },
+            )
+            return signal
+            
+        except Exception:
+            # Log but don't fail the whole batch
+            logger.exception(
+                "signal_creation_failed",
+                extra={
+                    "message_id": str(message.id),
+                    "thread_id": str(message.thread_id),
+                    "signal_type": getattr(extraction, "type", None),
+                },
+            )
+            return None
     
     def _build_batch_extraction_prompt(self, messages: List[Message], thread) -> str:
         """Build prompt for batch extraction from multiple messages"""
@@ -186,7 +269,7 @@ class SignalExtractor:
                     continue
                 
                 # Generate embedding
-                embedding_vector = self.embedding_model.encode(
+                embedding_vector = self.embedding_service.encode(
                     extraction.text,
                     convert_to_numpy=True
                 )

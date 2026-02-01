@@ -6,9 +6,9 @@
  */
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Card, CardHeader, CardContent, CardFooter, CardTitle } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Card, CardHeader, CardContent, CardFooter, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 interface StructureSuggestion {
   ready: boolean;
@@ -145,14 +145,14 @@ export function StructurePreview({
           <CardFooter className="flex gap-2 border-t border-neutral-200 dark:border-neutral-700 pt-4">
             <Button 
               onClick={onAccept}
-              variant="primary"
+              variant="default"
               className="flex-1"
             >
               Create Case
             </Button>
             <Button 
               onClick={onDismiss}
-              variant="secondary"
+              variant="outline"
             >
               Not Now
             </Button>

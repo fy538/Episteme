@@ -25,7 +25,17 @@ class SignalViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        queryset = Signal.objects.all()
+        # Optimize with select_related to avoid N+1 queries
+        queryset = Signal.objects.select_related(
+            'case',
+            'thread',
+            'event',
+            'inquiry',
+            'document'
+        ).prefetch_related(
+            'depends_on',
+            'contradicts'
+        ).all()
         
         # Filter by case
         case_id = self.request.query_params.get('case_id')
@@ -36,6 +46,11 @@ class SignalViewSet(viewsets.ModelViewSet):
         thread_id = self.request.query_params.get('thread_id')
         if thread_id:
             queryset = queryset.filter(thread_id=thread_id)
+        
+        # Filter by message_id (new - for frontend optimization)
+        message_id = self.request.query_params.get('message_id')
+        if message_id:
+            queryset = queryset.filter(span__message_id=message_id)
         
         # Filter by type
         signal_type = self.request.query_params.get('type')

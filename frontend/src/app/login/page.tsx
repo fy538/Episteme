@@ -26,8 +26,8 @@ export default function LoginPage() {
 
     try {
       await authAPI.login({ email, password });
-      // Redirect to chat on success
-      router.push('/chat');
+      // Redirect to workspace on success
+      router.push('/workspace');
     } catch (err) {
       console.error('Login failed:', err);
       setError(err instanceof Error ? err.message : 'Invalid email or password');

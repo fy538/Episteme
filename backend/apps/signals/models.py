@@ -193,6 +193,12 @@ class Signal(UUIDModel, TimestampedModel):
             models.Index(fields=['temperature', 'case']),  # Memory tier queries
             models.Index(fields=['thread', 'temperature']),  # Hot signals per thread
             models.Index(fields=['access_count', 'last_accessed']),  # Frequently accessed
+            
+            # New optimized composite indexes for common query patterns
+            models.Index(fields=['thread', 'dismissed_at', 'sequence_index']),  # Thread signal queries
+            models.Index(fields=['case', 'dismissed_at', 'created_at']),  # Case signal queries
+            models.Index(fields=['thread', 'dismissed_at', 'type']),  # Thread signals by type
+            models.Index(fields=['case', 'dismissed_at', 'type']),  # Case signals by type
         ]
     
     def __str__(self):

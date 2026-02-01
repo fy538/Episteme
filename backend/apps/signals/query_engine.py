@@ -15,7 +15,7 @@ import numpy as np
 
 from apps.signals.models import Signal, SignalType
 from apps.signals.similarity import cosine_similarity
-from sentence_transformers import SentenceTransformer
+from apps.signals.embedding_service import get_embedding_service
 
 
 @dataclass
@@ -80,8 +80,8 @@ class SignalQueryEngine:
     """
     
     def __init__(self):
-        # Load embedding model (same as extraction)
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Use shared embedding service (singleton)
+        self.embedding_service = get_embedding_service()
     
     def query(
         self,
@@ -107,7 +107,7 @@ class SignalQueryEngine:
             QueryResult with ranked signals
         """
         # 1. Embed query
-        query_embedding = self.embedding_model.encode(
+        query_embedding = self.embedding_service.encode(
             query_text,
             convert_to_numpy=True
         )

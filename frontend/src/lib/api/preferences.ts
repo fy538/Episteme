@@ -11,15 +11,23 @@ export interface UserPreferences {
   auto_create_inquiries: boolean;
   auto_detect_assumptions: boolean;
   auto_generate_titles: boolean;
+  structure_auto_detect?: boolean;
+  structure_sensitivity?: number;
+  structure_auto_create?: boolean;
   
   // AI/Agents
   chat_model: string;
   agent_check_interval: number;
   agent_min_confidence: number;
   agent_auto_run: boolean;
+  show_agent_reasoning?: boolean;
+  show_agent_confidence?: boolean;
   
   // Evidence
   evidence_min_credibility: number;
+  highlight_assumptions?: boolean;
+  highlight_questions?: boolean;
+  highlight_evidence?: boolean;
   
   // Appearance
   theme: 'light' | 'dark' | 'auto';
