@@ -28,6 +28,8 @@ export const inquiriesAPI = {
     case: string;
     title: string;
     description?: string;
+    origin_text?: string;
+    origin_document?: string;
     status: string;
   }): Promise<Inquiry> {
     return apiClient.post('/inquiries/', data);
@@ -59,6 +61,30 @@ export const inquiriesAPI = {
   }> {
     return apiClient.post(`/inquiries/${inquiryId}/generate_brief_update/`, {
       brief_id: briefId,
+    });
+  },
+
+  async getDashboard(caseId: string): Promise<any> {
+    return apiClient.get(`/inquiries/dashboard/?case_id=${caseId}`);
+  },
+
+  async getEvidenceSummary(inquiryId: string): Promise<any> {
+    return apiClient.get(`/inquiries/${inquiryId}/evidence_summary/`);
+  },
+
+  async startInvestigation(inquiryId: string): Promise<any> {
+    return apiClient.post(`/inquiries/${inquiryId}/start_investigation/`, {});
+  },
+
+  async createFromAssumption(params: {
+    caseId: string;
+    assumptionText: string;
+    autoGenerateTitle?: boolean;
+  }): Promise<Inquiry> {
+    return apiClient.post('/inquiries/create_from_assumption/', {
+      case_id: params.caseId,
+      assumption_text: params.assumptionText,
+      auto_generate_title: params.autoGenerateTitle ?? true,
     });
   },
 };

@@ -4,14 +4,14 @@
 
 @layer base {
   body {
-    @apply bg-white text-gray-900;
+    @apply bg-white text-neutral-900;
   }
 }
 
 @layer components {
   /* Markdown prose styles for chat messages */
   .prose {
-    @apply text-gray-900;
+    @apply text-neutral-900;
   }
   
   .prose p {
@@ -28,7 +28,7 @@
   
   /* Inline code */
   .prose code:not(pre code) {
-    @apply bg-gray-800 text-gray-100 px-1.5 py-0.5 rounded text-sm font-mono;
+    @apply bg-neutral-800 text-neutral-100 px-1.5 py-0.5 rounded text-sm font-mono;
   }
   
   /* Code blocks - support both custom and Shiki rendering */
@@ -59,7 +59,7 @@
   }
   
   .prose blockquote {
-    @apply border-l-4 border-gray-300 pl-4 italic my-3 text-gray-700;
+    @apply border-l-4 border-neutral-300 pl-4 italic my-3 text-neutral-700;
   }
   
   .prose h1, .prose h2, .prose h3, .prose h4 {
@@ -79,7 +79,7 @@
   }
   
   .prose a {
-    @apply text-blue-600 underline;
+    @apply text-accent-600 hover:text-accent-700 underline;
   }
   
   .prose strong {
@@ -95,11 +95,11 @@
   }
   
   .prose th, .prose td {
-    @apply border border-gray-300 px-3 py-2;
+    @apply border border-neutral-300 px-3 py-2;
   }
   
   .prose th {
-    @apply bg-gray-100 font-semibold;
+    @apply bg-neutral-100 font-semibold;
   }
 
   /* Workspace transitions */
@@ -141,29 +141,29 @@
   }
 
   .assumption-untested {
-    background-color: #fef3c7;
-    border-bottom: 2px dotted #f59e0b;
+    background-color: #fffbeb; /* amber-50 */
+    border-bottom: 2px dotted #fbbf24; /* amber-400 */
   }
 
   .assumption-untested:hover {
-    background-color: #fde68a;
+    background-color: #fef3c7; /* amber-100 */
   }
 
   .assumption-investigating {
-    background-color: #ddd6fe;
-    border-bottom: 2px dotted #8b5cf6;
+    background-color: #eef2ff; /* indigo-50 */
+    border-bottom: 2px dotted #818cf8; /* indigo-400 */
   }
 
   .assumption-investigating:hover {
-    background-color: #c4b5fd;
+    background-color: #e0e7ff; /* indigo-100 */
   }
 
   .assumption-validated {
-    background-color: #d1fae5;
-    border-bottom: 2px solid #10b981;
+    background-color: #ecfdf5; /* emerald-50 */
+    border-bottom: 2px solid #34d399; /* emerald-400 */
   }
 
   .assumption-validated:hover {
-    background-color: #a7f3d0;
+    background-color: #d1fae5; /* emerald-100 */
   }
 }

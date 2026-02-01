@@ -10,7 +10,7 @@ from .base import LLMProvider, StreamChunk
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude implementation of LLM provider"""
     
-    def __init__(self, api_key: str, model: str = "claude-4-5-haiku-20251022"):
+    def __init__(self, api_key: str, model: str = "claude-haiku-4-5"):
         super().__init__(api_key, model)
         self.client = AsyncAnthropic(api_key=api_key)
     

@@ -8,6 +8,9 @@
 
 import { useState } from 'react';
 import { artifactsAPI } from '@/lib/api/artifacts';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface GenerationPanelProps {
   caseId: string;
@@ -93,25 +96,27 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
       {/* Research */}
       <div className="mb-6">
         <h4 className="font-medium mb-2">Research Report</h4>
-        <p className="text-sm text-gray-600 mb-3">
+        <p className="text-sm text-neutral-600 mb-3">
           Generate comprehensive research on a topic (with web search)
         </p>
-        <div className="flex gap-2">
-          <input
+        <div className="space-y-1 mb-2">
+          <Label htmlFor="research-topic">Research Topic</Label>
+          <Input
+            id="research-topic"
             type="text"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             placeholder="Research topic..."
-            className="flex-1 border rounded px-3 py-2 text-sm"
             disabled={isGenerating}
           />
-          <button
+        </div>
+        <div className="flex gap-2">
+          <Button
             onClick={handleGenerateResearch}
             disabled={isGenerating || !topic.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGenerating && generationType === 'research' ? 'Generating...' : 'Research'}
-          </button>
+          </Button>
         </div>
       </div>
 

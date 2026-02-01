@@ -10,6 +10,7 @@ export interface Case {
   position: string;
   confidence?: number;
   main_brief?: string;
+  linked_thread?: string;
   user: string;
   project?: string;
   created_at: string;
@@ -42,6 +43,7 @@ export interface CaseDocument {
   content_markdown: string;
   edit_friction: 'low' | 'high' | 'readonly';
   ai_structure: Record<string, any>;
+  highlighted_assumptions?: any[];
   generated_by_ai: boolean;
   agent_type: string;
   times_cited: number;

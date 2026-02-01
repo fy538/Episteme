@@ -15,12 +15,33 @@ episteme/
 
 ## Documentation
 
-Comprehensive documentation is available in the [docs/](./docs/) directory:
+### User Guides
+- [Local Dev Runbook](./docs/LOCAL_DEV_RUNBOOK.md) - Daily development operations
+- [API Reference](./docs/API.md) - Complete REST API documentation
+- [Deployment Guide](./docs/DEPLOYMENT_GUIDE.md) - Production deployment
+- [Fly.io Deployment](./docs/FLY_IO_DEPLOYMENT.md) - Fly.io specific guide
 
-- **Guides**: [Quickstart](./docs/QUICKSTART.md), [Setup](./docs/SETUP.md), [Deployment](./docs/DEPLOYMENT_GUIDE.md)
-- **Status**: [Implementation Status](./docs/IMPLEMENTATION_STATUS.md), [Roadmap](./docs/IMPLEMENTATION_ROADMAP.md)
-- **Technical**: [API Reference](./docs/API.md), [Architecture Strategy](./docs/AI_STRATEGY_IMPLEMENTATION_SUMMARY.md)
-- **Sub-packages**: [Backend Docs](./docs/backend/), [Frontend Docs](./docs/frontend/)
+### Architecture & Design
+- [Product Vision & UX](./docs/PRODUCT_VISION_AND_UX.md) - Product strategy and vision
+- [Skill System Architecture](./docs/SKILL_SYSTEM_ARCHITECTURE.md) - Deep customization system
+- [Agent Orchestration](./docs/AGENT_ORCHESTRATION_DESIGN.md) - Multi-agent design
+- [Intelligent Agent Routing](./docs/INTELLIGENT_AGENT_ROUTING.md) - Agent selection logic
+- [Evidence vs Signals](./docs/EVIDENCE_VS_SIGNALS.md) - Core conceptual model
+- [Memory Integration](./docs/MEMORY_INTEGRATION.md) - Long-term memory system
+
+### Backend Documentation
+- [AI Services Quick Reference](./docs/backend/AI_SERVICES_QUICK_REFERENCE.md) - Using PydanticAI
+- [PydanticAI Migration](./docs/backend/PYDANTIC_AI_MIGRATION.md) - Migration guide
+- [Document System Quickstart](./docs/backend/QUICKSTART_DOCUMENT_SYSTEM.md) - Document processing
+
+### Frontend Documentation
+- [Frontend README](./frontend/README.md) - Frontend overview
+- [Design System](./frontend/DESIGN_SYSTEM.md) - UI components and tokens
+- [Testing Guide](./frontend/TESTING_GUIDE.md) - Testing practices
+
+### Strategic Documentation
+- [Solo Founder AI Strategy](./docs/SOLO_FOUNDER_AI_STRATEGY.md) - Cost-optimized model selection
+- [Getting Started with AI](./docs/GETTING_STARTED_WITH_AI.md) - 5-minute AI setup
 
 ## Quick Start
 
@@ -245,6 +266,40 @@ For complex, multi-step reasoning requiring agent coordination:
 - Perfect for long-horizon tasks
 
 See `docs/backend/PYDANTIC_AI_MIGRATION.md` for implementation details.
+
+## Documentation Strategy
+
+We maintain a **lean, useful documentation set** focused on helping developers, not preserving AI session transcripts.
+
+### Documentation Rules
+
+**Never Create:**
+- Completion status files (`*_COMPLETE.md`, `*_SUMMARY.md`, `*_IMPLEMENTATION.md`)
+- Session notes or implementation logs
+- Multiple versions of the same content
+- Temporary migration guides that outlive their purpose
+
+**Always Maintain:**
+- User-facing guides (setup, deployment, API reference)
+- Architecture decision records for significant design choices
+- Product vision and strategy documents
+
+**Monthly Cleanup:**
+- Delete any `*_COMPLETE.md` or `*_FIX.md` files
+- Consolidate duplicate content
+- Remove outdated migration guides
+- Keep total docs under 25 files
+
+### Documentation Tiers
+
+**Tier 1 (Always Update):**
+- README.md, LOCAL_DEV_RUNBOOK.md, API.md, DEPLOYMENT_GUIDE.md
+
+**Tier 2 (Update When Changed):**
+- Architecture docs, product vision, design documents
+
+**Tier 3 (Ephemeral - Delete After Use):**
+- Migration guides, troubleshooting notes, session summaries
 
 ## Development Guidelines
 

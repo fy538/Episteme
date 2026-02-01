@@ -216,12 +216,12 @@ GROQ_API_KEY = env('GROQ_API_KEY', default='')
 
 # AI Model Strategy (Solo Founder Mode)
 # Default models for different task types
-# Format: "provider:model-name" (e.g., "openai:gpt-4o-mini", "anthropic:claude-4-5-haiku-20251022")
+# Format: "provider:model-name" (e.g., "openai:gpt-4o-mini", "anthropic:claude-haiku-4-5")
 AI_MODELS = {
-    'reasoning': env('AI_MODEL_REASONING', default='openai:gpt-5-mini'),
-    'fast': env('AI_MODEL_FAST', default='openai:gpt-5-mini'),
-    'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-5-mini'),
-    'chat': env('AI_MODEL_CHAT', default='anthropic:claude-4-5-haiku-20251022'),  # Fast streaming model
+    'chat': env('AI_MODEL_CHAT', default='anthropic:claude-haiku-4-5'),  # Default chat model
+    'reasoning': env('AI_MODEL_REASONING', default='openai:gpt-4o-mini'),
+    'fast': env('AI_MODEL_FAST', default='anthropic:claude-haiku-4-5'),
+    'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-4o-mini'),
 }
 
 # Embedding Backend (Phase 2)

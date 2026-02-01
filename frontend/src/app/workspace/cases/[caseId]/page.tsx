@@ -12,18 +12,21 @@ import { ModeHeader } from '@/components/workspace/ModeHeader';
 import { CaseNavigation } from '@/components/workspace/CaseNavigation';
 import { CaseBriefView } from '@/components/workspace/CaseBriefView';
 import { InquiryWorkspaceView } from '@/components/workspace/InquiryWorkspaceView';
+import { InquiryDashboard } from '@/components/inquiries/InquiryDashboard';
 import { ChatPanel } from '@/components/workspace/ChatPanel';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { CommandPalette, useCommandPalette, type Command } from '@/components/ui/CommandPalette';
 import { DiffViewer } from '@/components/ui/DiffViewer';
+import { Button } from '@/components/ui/button';
 import { casesAPI } from '@/lib/api/cases';
 import { inquiriesAPI } from '@/lib/api/inquiries';
 import { documentsAPI } from '@/lib/api/documents';
 import { chatAPI } from '@/lib/api/chat';
+import { projectsAPI } from '@/lib/api/projects';
 import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
 import type { Project } from '@/lib/types/project';
 
-type ViewMode = 'brief' | 'inquiry' | 'document';
+type ViewMode = 'brief' | 'inquiry' | 'inquiry-dashboard' | 'document';
 
 export default function CaseWorkspacePage({
   params,
@@ -259,8 +262,39 @@ export default function CaseWorkspacePage({
               inquiries={inquiries}
               onStartInquiry={handleStartInquiry}
               onOpenInquiry={handleOpenInquiry}
+              onViewDashboard={() => setViewMode('inquiry-dashboard')}
               onRefresh={loadWorkspace}
             />
+          ) : viewMode === 'inquiry-dashboard' ? (
+            <div className="max-w-4xl mx-auto p-8">
+              <div className="mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-semibold text-neutral-900 mb-2">
+                      Investigation Dashboard
+                    </h1>
+                    <p className="text-neutral-600">
+                      Overview of all inquiries and investigation progress
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={handleBackToBrief}>
+                    Back to Brief
+                  </Button>
+                </div>
+              </div>
+              
+              <InquiryDashboard
+                caseId={params.caseId}
+                onStartInquiry={(inquiryId) => {
+                  setActiveInquiryId(inquiryId);
+                  setViewMode('inquiry');
+                }}
+                onViewInquiry={(inquiryId) => {
+                  setActiveInquiryId(inquiryId);
+                  setViewMode('inquiry');
+                }}
+              />
+            </div>
           ) : activeInquiry ? (
             <InquiryWorkspaceView
               caseId={params.caseId}

@@ -56,7 +56,7 @@ class UserPreferences(models.Model):
     # AI/Agent preferences
     chat_model = models.CharField(
         max_length=100,
-        default='anthropic:claude-4-5-haiku-20251022',
+        default='anthropic:claude-haiku-4-5',
         help_text="Preferred model for chat conversations"
     )
     
@@ -105,7 +105,7 @@ class UserPreferences(models.Model):
     )
     
     density = models.CharField(
-        max_length=10,
+        max_length=15,  # 'comfortable' is 11 chars
         choices=[
             ('compact', 'Compact'),
             ('comfortable', 'Comfortable'),

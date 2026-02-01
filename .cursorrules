@@ -1,0 +1,22 @@
+# Cursor Rules for Episteme
+
+## Documentation Policy
+
+- **DO NOT** create documentation files (*.md) unless explicitly requested by the user
+- **DO NOT** create README files proactively
+- **DO NOT** create multiple similar documentation files (summaries, guides, checklists)
+- **If documentation is needed**, consolidate into a SINGLE file with clear sections
+- **Update existing docs** rather than creating new ones
+
+## Code Quality
+
+- Prioritize working code over documentation
+- Use inline comments sparingly and only when complex logic requires explanation
+- Let the code be self-documenting through good naming
+- TypeScript types are better than JSDoc comments
+
+## Preferences
+
+- Focus on implementation, not documentation
+- Ask before creating any *.md file
+- When changes are complete, provide a brief summary in chat - don't write it to a file

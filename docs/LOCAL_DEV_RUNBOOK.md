@@ -14,8 +14,11 @@ This is a quick, practical guide to start, stop, and restart the local stack.
 - Install Python deps:
   - `cd backend`
   - `./venv/bin/python -m pip install -r requirements/development.txt`
+- Ensure Docker Postgres uses port 5433 (avoids local Postgres on 5432):
+  - `docker compose up -d db`
+  - Add to `.env`: `DATABASE_URL=postgresql://episteme:episteme@127.0.0.1:5433/episteme`
 - Create DB tables:
-  - `./venv/bin/python manage.py migrate --run-syncdb`
+  - `./venv/bin/python manage.py migrate`
 - Create local superuser:
   - `./venv/bin/python manage.py createsuperuser`
 
@@ -66,7 +69,8 @@ This is a quick, practical guide to start, stop, and restart the local stack.
 
 ## Common issues
 - "connection to server at localhost:5432 failed"
-  - Postgres is not running. Start with `docker compose up -d db`.
+  - If you have a local Postgres on 5432, use Docker on 5433 and set `DATABASE_URL` to `postgresql://episteme:episteme@127.0.0.1:5433/episteme`.
+  - Otherwise, start Postgres with `docker compose up -d db`.
 - "Authentication credentials were not provided"
   - Log in or use a valid JWT.
 - "Celery tasks not running"

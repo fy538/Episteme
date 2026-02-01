@@ -8,6 +8,8 @@
 import { useState, useEffect, useRef, startTransition } from 'react';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
+import { CaseCreationPreview } from '@/components/cases/CaseCreationPreview';
+import { CaseAssemblyAnimation } from '@/components/cases/CaseAssemblyAnimation';
 import { chatAPI } from '@/lib/api/chat';
 import { signalsAPI } from '@/lib/api/signals';
 import type { Message } from '@/lib/types/chat';
@@ -43,6 +45,10 @@ export function ChatPanel({
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [ttft, setTtft] = useState<number | null>(null);
   const [showCaseSuggestion, setShowCaseSuggestion] = useState(false);
+  const [caseAnalysis, setCaseAnalysis] = useState<any>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [creatingCase, setCreatingCase] = useState(false);
+  const [showAssembly, setShowAssembly] = useState(false);
   const conversationTurns = useRef(0);
 
   // Load messages
@@ -145,9 +151,22 @@ export function ChatPanel({
             // Track conversation turns for case suggestion
             conversationTurns.current += 1;
             
-            // Suggest case creation after 4 turns (user has sent 4 messages)
-            if (conversationTurns.current >= 4 && onCreateCase && !showCaseSuggestion) {
-              setShowCaseSuggestion(true);
+            // Trigger analysis after 4 turns
+            if (conversationTurns.current >= 4 && onCreateCase && !showCaseSuggestion && !analyzing) {
+              triggerCaseAnalysis();
+            }
+            
+            async function triggerCaseAnalysis() {
+              setAnalyzing(true);
+              try {
+                const analysis = await chatAPI.analyzeForCase(threadId);
+                setCaseAnalysis(analysis);
+                setShowCaseSuggestion(true);
+              } catch (error) {
+                console.error('Failed to analyze for case:', error);
+              } finally {
+                setAnalyzing(false);
+              }
             }
             
             if (messageId) {
@@ -219,13 +238,13 @@ export function ChatPanel({
 
   if (isCollapsed && !hideCollapse) {
     return (
-      <div className="w-16 flex flex-col items-center py-4 bg-gray-50 border-l border-gray-200">
+      <div className="w-16 flex flex-col items-center py-4 bg-neutral-50 border-l border-neutral-200">
         <button
           onClick={() => setIsCollapsed(false)}
-          className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+          className="p-2 hover:bg-neutral-200 rounded-lg transition-colors"
           aria-label="Expand chat"
         >
-          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
@@ -242,15 +261,15 @@ export function ChatPanel({
   return (
     <div className="w-96 flex flex-col h-full bg-white">
       {/* Chat Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-        <h3 className="text-sm font-medium text-gray-900">{contextLabel}</h3>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200">
+        <h3 className="text-sm font-medium text-neutral-900">{contextLabel}</h3>
         {!hideCollapse && (
           <button
             onClick={() => setIsCollapsed(true)}
-            className="p-1 hover:bg-gray-100 rounded transition-colors"
+            className="p-1 hover:bg-neutral-100 rounded transition-colors"
             aria-label="Collapse chat"
           >
-            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </button>
@@ -270,30 +289,43 @@ export function ChatPanel({
           />
         </div>
 
-        {/* Case suggestion prompt */}
-        {showCaseSuggestion && onCreateCase && (
-          <div className="mx-4 mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-900 mb-3">
-              It seems you're exploring something substantial. Would you like to create a Case to organize your thinking?
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  onCreateCase();
-                  setShowCaseSuggestion(false);
-                }}
-                className="px-3 py-1 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors"
-              >
-                Create Case
-              </button>
-              <button
-                onClick={() => setShowCaseSuggestion(false)}
-                className="px-3 py-1 text-blue-700 text-sm hover:bg-blue-100 rounded transition-colors"
-              >
-                Not now
-              </button>
-            </div>
-          </div>
+        {/* Smart case suggestion with preview */}
+        {showCaseSuggestion && caseAnalysis && (
+          <CaseCreationPreview
+            analysis={caseAnalysis}
+            onConfirm={async (edits) => {
+              setCreatingCase(true);
+              try {
+                const result = await chatAPI.createCaseFromAnalysis(
+                  threadId,
+                  caseAnalysis,
+                  edits
+                );
+                
+                setShowCaseSuggestion(false);
+                setShowAssembly(true);
+                
+                // After assembly animation, navigate
+                setTimeout(() => {
+                  window.location.href = `/workspace/cases/${result.case.id}`;
+                }, 3000);
+              } catch (error) {
+                console.error('Failed to create case:', error);
+                setCreatingCase(false);
+              }
+            }}
+            onDismiss={() => setShowCaseSuggestion(false)}
+            isCreating={creatingCase}
+          />
+        )}
+        
+        {/* Assembly animation */}
+        {showAssembly && (
+          <CaseAssemblyAnimation
+            onComplete={() => {
+              // Animation completes, navigation happens via setTimeout above
+            }}
+          />
         )}
       </div>
 
@@ -308,10 +340,10 @@ export function ChatPanel({
 
       {/* Collapsible Signals */}
       {signals.length > 0 && (
-        <div className="border-t border-gray-200">
+        <div className="border-t border-neutral-200">
           <button
             onClick={() => setSignalsExpanded(!signalsExpanded)}
-            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
           >
             <span>Signals ({signals.length})</span>
             <svg
@@ -325,12 +357,12 @@ export function ChatPanel({
           </button>
           
           {signalsExpanded && (
-            <div className="px-4 py-3 max-h-48 overflow-y-auto bg-gray-50">
+            <div className="px-4 py-3 max-h-48 overflow-y-auto bg-neutral-50">
               <div className="space-y-2">
                 {signals.map(signal => (
-                  <div key={signal.id} className="text-xs p-2 bg-white border border-gray-200 rounded">
-                    <span className="font-medium text-gray-700">{signal.signal_type}:</span>
-                    <span className="text-gray-600 ml-1">{signal.content}</span>
+                  <div key={signal.id} className="text-xs p-2 bg-white border border-neutral-200 rounded">
+                    <span className="font-medium text-neutral-700">{signal.signal_type}:</span>
+                    <span className="text-neutral-600 ml-1">{signal.content}</span>
                   </div>
                 ))}
               </div>

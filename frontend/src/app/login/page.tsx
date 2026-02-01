@@ -7,6 +7,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { authAPI } from '@/lib/api/auth';
 
 export default function LoginPage() {
@@ -34,13 +37,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-neutral-900 mb-2">
             Welcome to Episteme
           </h1>
-          <p className="text-gray-600">
+          <p className="text-neutral-600">
             Sign in to access your workspace
           </p>
         </div>
@@ -48,53 +51,47 @@ export default function LoginPage() {
         <div className="bg-white rounded-lg shadow-md p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              <div className="bg-error-50 border border-error-200 text-error-700 px-4 py-3 rounded">
                 {error}
               </div>
             )}
 
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email
-              </label>
-              <input
+            <div className="space-y-1">
+              <Label htmlFor="email" required>Email</Label>
+              <Input
                 id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoFocus
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="you@example.com"
               />
             </div>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
+            <div className="space-y-1">
+              <Label htmlFor="password" required>Password</Label>
+              <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="••••••••"
               />
             </div>
 
-            <button
+            <Button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full"
             >
               {loading ? 'Signing in...' : 'Sign In'}
-            </button>
+            </Button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-gray-600">
-            <Link href="/" className="text-blue-600 hover:text-blue-700">
+          <div className="mt-6 text-center text-sm text-neutral-600">
+            <Link href="/" className="text-accent-600 hover:text-accent-700">
               ← Back to home
             </Link>
           </div>
@@ -102,9 +99,9 @@ export default function LoginPage() {
 
         {/* Dev mode notice */}
         {process.env.NODE_ENV === 'development' && (
-          <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p className="text-xs text-yellow-800">
-              <strong>Dev Mode:</strong> Add <code className="bg-yellow-100 px-1 rounded">NEXT_PUBLIC_DEV_MODE=true</code> to <code className="bg-yellow-100 px-1 rounded">.env.local</code> to bypass login locally.
+          <div className="mt-4 bg-warning-50 border border-warning-200 rounded-lg p-4">
+            <p className="text-xs text-warning-800">
+              <strong>Dev Mode:</strong> Add <code className="bg-warning-100 px-1 rounded">NEXT_PUBLIC_DEV_MODE=true</code> to <code className="bg-warning-100 px-1 rounded">.env.local</code> to bypass login locally.
             </p>
           </div>
         )}

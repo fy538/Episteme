@@ -65,4 +65,34 @@ export const chatAPI = {
     );
     return response.results || [];
   },
+
+  async analyzeForCase(threadId: string): Promise<{
+    suggested_title: string;
+    position_draft: string;
+    key_questions: string[];
+    assumptions: string[];
+    background_summary: string;
+    confidence: number;
+    correlation_id: string;
+    message_count: number;
+  }> {
+    return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
+  },
+
+  async createCaseFromAnalysis(
+    threadId: string,
+    analysis: any,
+    userEdits?: any
+  ): Promise<{
+    case: any;
+    brief: any;
+    inquiries: any[];
+    correlation_id: string;
+  }> {
+    return apiClient.post(`/chat/threads/${threadId}/create_case_from_analysis/`, {
+      analysis,
+      correlation_id: analysis.correlation_id,
+      user_edits: userEdits,
+    });
+  },
 };

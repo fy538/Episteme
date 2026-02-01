@@ -10,6 +10,15 @@ export interface AssumptionAttributes {
   riskLevel: 'low' | 'medium' | 'high';
 }
 
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    assumption: {
+      setAssumption: (attributes: AssumptionAttributes) => ReturnType;
+      unsetAssumption: () => ReturnType;
+    };
+  }
+}
+
 export const AssumptionMark = Mark.create({
   name: 'assumption',
 

@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import { type Artifact, type Block } from '@/lib/api/artifacts';
+import { Textarea } from '@/components/ui/textarea';
 import ReactMarkdown from 'react-markdown';
 
 interface ArtifactViewerProps {
@@ -47,10 +48,11 @@ export function ArtifactViewer({ artifact, onEdit, isEditing = false }: Artifact
           {isCurrentlyEditing ? (
             /* Edit mode */
             <div>
-              <textarea
+              <Textarea
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
-                className="w-full border rounded p-2 min-h-[100px] font-mono text-sm"
+                aria-label="Edit artifact content"
+                className="min-h-[100px] font-mono text-sm"
                 autoFocus
               />
               <div className="flex gap-2 mt-2">

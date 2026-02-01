@@ -14,8 +14,10 @@ export type SignalType =
 export interface Signal {
   id: string;
   type: SignalType;
+  signal_type?: string;
   status: 'suggested' | 'confirmed' | 'rejected';
   text: string;
+  content?: string;
   normalized_text: string;
   confidence: number;
   case?: string;

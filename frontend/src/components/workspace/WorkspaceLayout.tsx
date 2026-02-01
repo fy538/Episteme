@@ -24,14 +24,14 @@ export function WorkspaceLayout({
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Header: Breadcrumb + Mode Badge */}
-      <div className="border-b border-gray-200 bg-white">
+      <div className="border-b border-neutral-200 bg-white">
         {header}
       </div>
 
       {/* Main workspace area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Cases & Projects Navigation */}
-        <div className="w-64 border-r border-gray-200 bg-gray-50 overflow-y-auto flex flex-col">
+        <div className="w-64 border-r border-neutral-200 bg-neutral-50 overflow-y-auto flex flex-col">
           {leftPanel}
         </div>
 
@@ -41,7 +41,7 @@ export function WorkspaceLayout({
         </div>
 
         {/* Right: AI Chat Panel (Cursor-style, collapsible) */}
-        <div className="border-l border-gray-200 bg-white">
+        <div className="border-l border-neutral-200 bg-white">
           {rightPanel}
         </div>
       </div>

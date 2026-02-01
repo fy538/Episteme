@@ -144,7 +144,7 @@ class Case(UUIDModel, TimestampedModel):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='source_case',
+        related_name='originating_case',  # Changed to avoid clash
         help_text="Skill created from this case"
     )
     

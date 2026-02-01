@@ -31,7 +31,7 @@ export function MessageList({
 
   if (messages.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
+      <div className="flex-1 flex items-center justify-center text-neutral-500">
         <p>Start a conversation...</p>
       </div>
     );
@@ -51,17 +51,17 @@ export function MessageList({
             <div
               className={`max-w-2xl rounded-lg px-4 py-3 ${
                 message.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-900'
+                  ? 'bg-accent-600 text-white'
+                  : 'bg-neutral-100 text-neutral-900'
               }`}
             >
               {message.role === 'assistant' ? (
                 message.content.trim() === '' && isStreamingMsg ? (
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <div className="flex items-center gap-2 text-sm text-neutral-600">
                     <span className="inline-flex gap-1">
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                      <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
+                      <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" />
+                      <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                     </span>
                     <span>Thinking...</span>
                   </div>
@@ -95,14 +95,14 @@ export function MessageList({
                   {onCreateEvidence && (
                     <button
                       onClick={() => onCreateEvidence(message.content)}
-                      className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors"
+                      className="text-xs px-2 py-1 bg-success-50 text-success-700 rounded hover:bg-success-100 transition-colors"
                     >
                       Create Evidence
                     </button>
                   )}
                   <button
                     onClick={() => navigator.clipboard.writeText(message.content)}
-                    className="text-xs px-2 py-1 bg-gray-50 text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                    className="text-xs px-2 py-1 bg-neutral-50 text-neutral-700 rounded hover:bg-neutral-100 transition-colors"
                   >
                     Copy
                   </button>
@@ -114,12 +114,12 @@ export function MessageList({
       })}
       {isWaitingForResponse && !isStreaming && (
         <div className="flex justify-start">
-          <div className="max-w-2xl rounded-lg px-4 py-3 bg-gray-100 text-gray-900">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
+          <div className="max-w-2xl rounded-lg px-4 py-3 bg-neutral-100 text-neutral-900">
+            <div className="flex items-center gap-2 text-sm text-neutral-600">
               <span className="inline-flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
+                <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" />
+                <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
               </span>
               <span>Waiting for response...</span>
             </div>
@@ -127,7 +127,7 @@ export function MessageList({
         </div>
       )}
       {isStreaming && ttft !== null && (
-        <div className="text-xs text-gray-400 px-4 py-1">
+        <div className="text-xs text-neutral-400 px-4 py-1">
           Streaming (TTFT: {ttft}ms)
         </div>
       )}

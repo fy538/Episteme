@@ -7,6 +7,7 @@
 import { useState, useEffect, startTransition } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { chatAPI } from '@/lib/api/chat';
 import type { Message } from '@/lib/types/chat';
 
@@ -267,55 +268,58 @@ export function ChatInterface({
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <div className="border-b border-gray-200 p-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold text-gray-900">Chat</h1>
-          {projects && onProjectChange && (
-            <label className="text-xs text-gray-600 flex items-center gap-2">
-              Project
-              <select
-                value={projectId || ''}
-                onChange={(e) => onProjectChange(e.target.value || null)}
-                className="text-xs border border-gray-300 rounded px-2 py-1"
+      <div className="border-b border-neutral-200 p-4 space-y-3">
+        <Breadcrumbs items={[{ label: 'Chat' }]} />
+        
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {projects && onProjectChange && (
+              <label className="text-xs text-neutral-600 flex items-center gap-2">
+                Project
+                <select
+                  value={projectId || ''}
+                  onChange={(e) => onProjectChange(e.target.value || null)}
+                  className="text-xs border border-neutral-300 rounded px-2 py-1"
+                >
+                  <option value="">No Project</option>
+                  {projects.map(project => (
+                    <option key={project.id} value={project.id}>
+                      {project.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {onToggleLeft && (
+              <button
+                onClick={onToggleLeft}
+                className="text-xs px-2 py-1 border rounded hover:bg-neutral-50"
               >
-                <option value="">No Project</option>
-                {projects.map(project => (
-                  <option key={project.id} value={project.id}>
-                    {project.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {onToggleLeft && (
-            <button
-              onClick={onToggleLeft}
-              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-            >
-              {leftCollapsed ? 'Show Conversations' : 'Hide Conversations'}
-            </button>
-          )}
-          {onToggleRight && (
-            <button
-              onClick={onToggleRight}
-              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-            >
-              {rightCollapsed ? 'Show Structure' : 'Hide Structure'}
-            </button>
-          )}
+                {leftCollapsed ? 'Show Conversations' : 'Hide Conversations'}
+              </button>
+            )}
+            {onToggleRight && (
+              <button
+                onClick={onToggleRight}
+                className="text-xs px-2 py-1 border rounded hover:bg-neutral-50"
+              >
+                {rightCollapsed ? 'Show Structure' : 'Hide Structure'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-4">
+        <div className="bg-error-50 border-l-4 border-error-500 p-4 mx-4 mt-4">
           <div className="flex">
             <div className="flex-1">
-              <p className="text-sm text-red-700">{error}</p>
+              <p className="text-sm text-error-700">{error}</p>
             </div>
             <button
               onClick={() => setError(null)}
-              className="ml-4 text-red-700 hover:text-red-900"
+              className="ml-4 text-error-700 hover:text-error-900"
             >
               ✕
             </button>

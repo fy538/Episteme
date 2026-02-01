@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { signalsAPI } from '@/lib/api/signals';
+import { Textarea } from '@/components/ui/textarea';
 import type { Signal } from '@/lib/types/signal';
 
 const SIGNAL_COLORS: Record<string, string> = {
@@ -121,10 +122,11 @@ export function SignalsList({
 
               {isEditing ? (
                 <div>
-                  <textarea
+                  <Textarea
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
-                    className="w-full border rounded px-2 py-1 text-sm mb-2"
+                    aria-label="Edit signal text"
+                    className="mb-2"
                     rows={3}
                   />
                   <div className="flex gap-2">

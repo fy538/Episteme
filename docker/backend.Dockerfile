@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY backend/requirements/base.txt /app/requirements/base.txt
+COPY backend/requirements/development.txt /app/requirements/development.txt
 COPY backend/requirements/production.txt /app/requirements/production.txt
 
 # Use production requirements for deployments

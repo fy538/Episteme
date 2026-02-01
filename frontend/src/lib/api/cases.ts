@@ -42,4 +42,8 @@ export const casesAPI = {
     );
     return response.results || [];
   },
+
+  async getOnboarding(caseId: string): Promise<any> {
+    return apiClient.get(`/cases/${caseId}/onboarding/`);
+  },
 };

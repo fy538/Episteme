@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { diffLines, Change } from 'diff';
 import { Button } from './button';
+import { Textarea } from './textarea';
 
 interface DiffViewerProps {
   original: string;
@@ -34,30 +35,32 @@ export function DiffViewer({
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-          <button
+        <div className="flex items-center justify-between p-6 border-b border-neutral-200">
+          <h2 className="text-xl font-semibold text-neutral-900">{title}</h2>
+          <Button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            variant="ghost"
+            size="icon"
             aria-label="Close"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
+          </Button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {isEditing ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="diff-edit" className="block text-sm font-medium text-neutral-700 mb-2">
                 Edit the proposed changes:
               </label>
-              <textarea
+              <Textarea
+                id="diff-edit"
                 value={editedContent}
                 onChange={(e) => setEditedContent(e.target.value)}
-                className="w-full min-h-[400px] px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                className="min-h-[400px] font-mono text-sm"
               />
             </div>
           ) : (

@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
 import { StructureSidebar } from '@/components/structure/StructureSidebar';
+import { Button } from '@/components/ui/button';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
 import type { ChatThread } from '@/lib/types/chat';
@@ -198,8 +199,8 @@ export default function ChatPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-500">Connecting to backend...</p>
-          <p className="text-xs text-gray-400 mt-2">Make sure Django is running on localhost:8000</p>
+          <p className="text-neutral-500">Connecting to backend...</p>
+          <p className="text-xs text-neutral-400 mt-2">Make sure Django is running on localhost:8000</p>
         </div>
       </div>
     );
@@ -209,23 +210,23 @@ export default function ChatPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center max-w-md">
-          <p className="text-red-600 font-semibold mb-2">Connection Error</p>
-          <p className="text-sm text-gray-600 mb-4">{error}</p>
-          <div className="text-left bg-gray-50 p-4 rounded border border-gray-200">
-            <p className="text-xs font-semibold text-gray-700 mb-2">Troubleshooting:</p>
-            <ol className="text-xs text-gray-600 space-y-1 list-decimal list-inside">
-              <li>Ensure Django is running: <code className="bg-gray-200 px-1">python manage.py runserver</code></li>
+          <p className="text-error-600 font-semibold mb-2">Connection Error</p>
+          <p className="text-sm text-neutral-600 mb-4">{error}</p>
+          <div className="text-left bg-neutral-50 p-4 rounded border border-neutral-200">
+            <p className="text-xs font-semibold text-neutral-700 mb-2">Troubleshooting:</p>
+            <ol className="text-xs text-neutral-600 space-y-1 list-decimal list-inside">
+              <li>Ensure Django is running: <code className="bg-neutral-200 px-1">python manage.py runserver</code></li>
               <li>Check backend is on localhost:8000</li>
               <li>Check CORS settings in Django</li>
               <li>Check browser console for details</li>
             </ol>
           </div>
-          <button 
+          <Button 
             onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="mt-4"
           >
             Retry
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -234,7 +235,7 @@ export default function ChatPage() {
   if (!threadId) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <p className="text-gray-500">Initializing...</p>
+        <p className="text-neutral-500">Initializing...</p>
       </div>
     );
   }

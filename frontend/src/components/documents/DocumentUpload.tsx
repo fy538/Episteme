@@ -7,6 +7,10 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { documentsAPI } from '@/lib/api/documents';
 
 interface DocumentUploadProps {
@@ -78,71 +82,80 @@ export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUpload
       <h3 className="font-semibold mb-4">Upload Document</h3>
 
       <div className="flex gap-2 mb-4">
-        <button
+        <Button
           onClick={() => setPasteMode(false)}
-          className={`px-3 py-1 rounded text-sm ${
-            !pasteMode
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
+          variant={!pasteMode ? 'default' : 'outline'}
+          size="sm"
         >
           Upload File
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => setPasteMode(true)}
-          className={`px-3 py-1 rounded text-sm ${
-            pasteMode
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
+          variant={pasteMode ? 'default' : 'outline'}
+          size="sm"
         >
           Paste Text
-        </button>
+        </Button>
       </div>
 
       {!pasteMode ? (
-        <div>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Document title (optional)"
-            className="w-full border rounded px-3 py-2 mb-3 text-sm"
-          />
-          <input
-            type="file"
-            accept=".pdf,.docx,.txt,.md"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleFileUpload(file);
-            }}
-            disabled={uploading}
-            className="w-full text-sm"
-          />
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="doc-title-upload">Document Title (optional)</Label>
+            <Input
+              id="doc-title-upload"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter document title..."
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="doc-file">Select File</Label>
+            <input
+              id="doc-file"
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileUpload(file);
+              }}
+              disabled={uploading}
+              className="w-full text-sm"
+              aria-label="Select document file"
+            />
+          </div>
         </div>
       ) : (
-        <div>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Document title (required)"
-            className="w-full border rounded px-3 py-2 mb-3 text-sm"
-            required
-          />
-          <textarea
-            value={pastedText}
-            onChange={(e) => setPastedText(e.target.value)}
-            placeholder="Paste document content here..."
-            className="w-full border rounded px-3 py-2 mb-3 text-sm h-32"
-          />
-          <button
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="doc-title-paste" required>Document Title</Label>
+            <Input
+              id="doc-title-paste"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter document title..."
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="doc-content">Document Content</Label>
+            <Textarea
+              id="doc-content"
+              value={pastedText}
+              onChange={(e) => setPastedText(e.target.value)}
+              placeholder="Paste document content here..."
+              rows={6}
+            />
+          </div>
+          <Button
             onClick={handlePaste}
             disabled={uploading || !title.trim() || !pastedText.trim()}
-            className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full"
           >
             {uploading ? 'Uploading...' : 'Upload Document'}
-          </button>
+          </Button>
         </div>
       )}
 

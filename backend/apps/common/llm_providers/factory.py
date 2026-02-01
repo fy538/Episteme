@@ -30,7 +30,7 @@ def get_llm_provider(model_key: str = None) -> LLMProvider:
     if model_key is None:
         model_key = 'chat'
     
-    # Get model identifier from settings (e.g., "anthropic:claude-4-5-haiku-20251022")
+    # Get model identifier from settings (e.g., "anthropic:claude-haiku-4-5")
     model_identifier = settings.AI_MODELS.get(model_key, settings.AI_MODELS['fast'])
     
     # Parse provider and model
