@@ -270,7 +270,7 @@ class MemoryRetrievalService:
                 max_cold=10 if include_cold else 0
             )
         elif scope_level == 'case':
-            case_id = thread.case_id if thread.case else None
+            case_id = thread.primary_case_id if thread.primary_case else None
             return MemoryRetrievalStrategy(
                 case_id=case_id,
                 include_hot=True,
@@ -281,7 +281,7 @@ class MemoryRetrievalService:
                 max_cold=10 if include_cold else 0
             )
         else:  # project
-            project_id = thread.case.project_id if thread.case else thread.project_id
+            project_id = thread.primary_case.project_id if thread.primary_case else thread.project_id
             return MemoryRetrievalStrategy(
                 project_id=project_id,
                 include_hot=True,

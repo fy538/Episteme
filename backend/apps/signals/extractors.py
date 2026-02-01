@@ -271,6 +271,9 @@ class SignalExtractor:
         """
         valid_types = [choice[0] for choice in SignalType.choices]
         return signal_type in valid_types
+
+
+        return signal_type in valid_types
     
     def should_extract(self, message: Message) -> bool:
         """
@@ -326,3 +329,7 @@ def get_extractor() -> SignalExtractor:
     if _extractor_instance is None:
         _extractor_instance = SignalExtractor()
     return _extractor_instance
+
+
+# Alias for consistency with other modules
+get_signal_extractor = get_extractor

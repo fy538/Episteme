@@ -104,12 +104,12 @@ async def extract_signals_from_batch_async(
                         'batch_extraction': True,
                     },
                     actor_type=ActorType.SYSTEM,
-                    case_id=thread.case_id if thread.case else None,
+                    case_id=thread.primary_case_id if thread.primary_case else None,
                 )
                 
                 # Link event and save signal
                 signal.event_id = event.id
-                signal.case_id = thread.case_id if thread.case else None
+                signal.case_id = thread.primary_case_id if thread.primary_case else None
                 signal.save()
                 
                 total_signals += 1

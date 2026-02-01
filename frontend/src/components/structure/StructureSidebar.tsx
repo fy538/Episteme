@@ -26,7 +26,7 @@ export function StructureSidebar({
   const [suggestions, setSuggestions] = useState<InquirySuggestion[]>([]);
   const [creatingCase, setCreatingCase] = useState(false);
 
-  // Poll for signals
+  // Poll for signals with smart backoff
   const loadSignals = async () => {
     if (threadId) {
       try {
@@ -39,10 +39,48 @@ export function StructureSidebar({
   };
 
   useEffect(() => {
-    loadSignals();
-    const interval = setInterval(loadSignals, 3000);
+    loadSignals(); // Initial load
+    
+    let pollCount = 0;
+    let interval: NodeJS.Timeout;
+    
+    const startPolling = () => {
+      // Smart polling with exponential backoff
+      const getPollInterval = () => {
+        if (signals.length === 0) {
+          // No signals yet - poll more frequently (first 5 attempts)
+          if (pollCount < 5) return 3000;   // 3s for first 15s
+          if (pollCount < 10) return 5000;  // 5s for next 25s
+          return 10000; // 10s after 40s
+        } else {
+          // Have signals - poll less frequently
+          return 15000; // 15s when signals exist
+        }
+      };
+      
+      const poll = async () => {
+        await loadSignals();
+        pollCount++;
+        
+        // Stop polling after 20 attempts with no signals (1 minute)
+        if (signals.length === 0 && pollCount > 20) {
+          console.log('[Signals] No signals after 20 polls, stopping');
+          clearInterval(interval);
+          return;
+        }
+        
+        // Restart with new interval
+        clearInterval(interval);
+        interval = setInterval(poll, getPollInterval());
+      };
+      
+      interval = setInterval(poll, getPollInterval());
+    };
+    
+    startPolling();
+    
     return () => clearInterval(interval);
-  }, [threadId]);
+  }, [threadId, signals.length]);
 
   // Poll for inquiry suggestions
   useEffect(() => {

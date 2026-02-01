@@ -69,7 +69,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Project does not belong to user.")
         serializer.save()
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], renderer_classes=[])
     def messages(self, request, pk=None):
         """
         Create a new message in this thread
@@ -78,6 +78,8 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         {
             "content": "Hello, world!"
         }
+        
+        Supports streaming with ?stream=true query parameter
         """
         thread = self.get_object()
         serializer = CreateMessageSerializer(data=request.data)
@@ -93,6 +95,8 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         stream = request.query_params.get('stream') == 'true'
 
         if stream:
+            # Bypass DRF content negotiation for SSE streaming
+            # DRF's renderer classes can interfere with text/event-stream
             # Stream tokens from OpenAI when available; fallback to chunked response
             def event_stream():
                 if not settings.OPENAI_API_KEY:
