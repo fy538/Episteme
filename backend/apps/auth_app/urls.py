@@ -13,4 +13,7 @@ urlpatterns = [
     
     # User profile
     path('me/', views.CurrentUserView.as_view(), name='current_user'),
+    
+    # User preferences
+    path('preferences/', views.UserPreferencesView.as_view(), name='user_preferences'),
 ]

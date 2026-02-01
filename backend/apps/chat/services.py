@@ -178,7 +178,23 @@ class ChatService:
             signals=relevant_signals
         )
 
+        # Get user's preferred model (from preferences or fallback to settings)
         model_key = settings.AI_MODELS.get('chat', settings.AI_MODELS['fast'])
+        
+        # Check if user has custom model preference
+        try:
+            if hasattr(thread.user, 'preferences'):
+                user_model = thread.user.preferences.chat_model
+                if user_model:
+                    model_key = user_model
+                    logger.info(
+                        "using_user_preferred_model",
+                        extra={"user_id": str(thread.user.id), "model": user_model}
+                    )
+        except Exception as e:
+            # Fallback to settings if preferences not available
+            logger.debug(f"Could not load user model preference: {e}")
+        
         agent = Agent(
             get_model(model_key),
             system_prompt=(

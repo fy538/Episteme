@@ -1,13 +1,15 @@
 """
 Authentication views
 """
-from rest_framework import generics, serializers
+from rest_framework import generics, serializers, status
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth.models import User
 
-from .serializers import UserSerializer
+from .models import UserPreferences
+from .serializers import UserSerializer, UserPreferencesSerializer, UserWithPreferencesSerializer
 
 
 class EmailTokenObtainPairSerializer(serializers.Serializer):
@@ -52,9 +54,31 @@ class EmailTokenObtainPairView(TokenObtainPairView):
 
 
 class CurrentUserView(generics.RetrieveAPIView):
-    """Get current user profile"""
-    serializer_class = UserSerializer
+    """Get current user profile with preferences"""
+    serializer_class = UserWithPreferencesSerializer
     permission_classes = [IsAuthenticated]
     
     def get_object(self):
         return self.request.user
+
+
+class UserPreferencesView(generics.RetrieveUpdateAPIView):
+    """
+    Get and update user preferences
+    
+    GET /api/auth/preferences/ - Get current user preferences
+    PATCH /api/auth/preferences/ - Update preferences
+    """
+    serializer_class = UserPreferencesSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        """Get or create preferences for current user"""
+        preferences, created = UserPreferences.objects.get_or_create(
+            user=self.request.user
+        )
+        return preferences
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Allow partial updates (PATCH)"""
+        return super().update(request, *args, **kwargs, partial=True)
