@@ -4,14 +4,16 @@ Chat views
 import json
 import time
 import logging
+import asyncio
+from asgiref.sync import sync_to_async
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.renderers import BaseRenderer
 from django.conf import settings
 from django.http import StreamingHttpResponse
-from openai import OpenAI
 
 from .models import ChatThread, Message
 from .serializers import (
@@ -27,10 +29,26 @@ from apps.signals.prompts import get_assistant_response_prompt
 logger = logging.getLogger(__name__)
 
 
+class StreamingRenderer(BaseRenderer):
+    """Renderer for Server-Sent Events streaming responses."""
+    media_type = "text/event-stream"
+    format = "stream"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        # StreamingHttpResponse handles rendering; return as-is.
+        return data
+
+
 class ChatThreadViewSet(viewsets.ModelViewSet):
     """ViewSet for chat threads"""
     
     permission_classes = [IsAuthenticated]
+
+    def get_renderers(self):
+        """Select renderers based on streaming mode."""
+        if self.action == "messages" and self.request.query_params.get("stream") == "true":
+            return [StreamingRenderer()]
+        return super().get_renderers()
     
     def get_queryset(self):
         queryset = ChatThread.objects.filter(user=self.request.user)
@@ -69,7 +87,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Project does not belong to user.")
         serializer.save()
     
-    @action(detail=True, methods=['post'], renderer_classes=[])
+    @action(detail=True, methods=['post'])
     def messages(self, request, pk=None):
         """
         Create a new message in this thread
@@ -95,36 +113,22 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         stream = request.query_params.get('stream') == 'true'
 
         if stream:
-            # Bypass DRF content negotiation for SSE streaming
-            # DRF's renderer classes can interfere with text/event-stream
             # Stream tokens from OpenAI when available; fallback to chunked response
-            def event_stream():
+            async def event_stream():
                 if not settings.OPENAI_API_KEY:
                     payload = json.dumps({"delta": "OpenAI API key not configured locally."})
                     yield f"event: chunk\ndata: {payload}\n\n"
                     yield f"event: done\ndata: {json.dumps({'message_id': None})}\n\n"
                     return
 
+                # Use modular LLM provider (supports OpenAI, Anthropic, etc.)
+                from apps.common.llm_providers import get_llm_provider
+                
                 model_key = settings.AI_MODELS.get('chat', settings.AI_MODELS['fast'])
-                provider, _, model_name = model_key.partition(':')
-                if provider != 'openai':
-                    assistant_message = ChatService.generate_assistant_response(
-                        thread_id=thread.id,
-                        user_message_id=message.id
-                    )
-                    content = assistant_message.content or ""
-                    chunk_size = 24
-                    for i in range(0, len(content), chunk_size):
-                        chunk = content[i:i + chunk_size]
-                        payload = json.dumps({"delta": chunk})
-                        yield f"event: chunk\ndata: {payload}\n\n"
-                        time.sleep(0.01)
-                    done_payload = json.dumps({"message_id": str(assistant_message.id)})
-                    yield f"event: done\ndata: {done_payload}\n\n"
-                    return
-
-                client = OpenAI(api_key=settings.OPENAI_API_KEY)
-                context_messages = ChatService._get_context_messages(thread)
+                provider = get_llm_provider('chat')
+                
+                # Wrap sync Django ORM calls
+                context_messages = await sync_to_async(ChatService._get_context_messages)(thread)
                 conversation_context = ChatService._format_conversation_context(context_messages)
                 prompt = get_assistant_response_prompt(
                     user_message=message.content,
@@ -133,27 +137,20 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
 
                 full_content = ""
                 try:
-                    stream_resp = client.chat.completions.create(
-                        model=model_name or model_key,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are Episteme, a thoughtful assistant. "
-                                    "Be concise, ask clarifying questions when useful, and avoid generic advice."
-                                ),
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        stream=True,
+                    # Stream from provider (works with any provider)
+                    system_prompt = (
+                        "You are Episteme, a thoughtful assistant. "
+                        "Be concise, ask clarifying questions when useful, and avoid generic advice."
                     )
-                    for chunk in stream_resp:
-                        delta = chunk.choices[0].delta.content or ""
-                        if not delta:
-                            continue
-                        full_content += delta
-                        payload = json.dumps({"delta": delta})
+                    
+                    async for chunk in provider.stream_chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        system_prompt=system_prompt
+                    ):
+                        full_content += chunk.content
+                        payload = json.dumps({"delta": chunk.content})
                         yield f"event: chunk\ndata: {payload}\n\n"
+                        
                 except Exception:
                     logger.exception(
                         "assistant_stream_failed",
@@ -164,7 +161,8 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
                     payload = json.dumps({"delta": fallback})
                     yield f"event: chunk\ndata: {payload}\n\n"
 
-                assistant_message = ChatService.create_assistant_message(
+                # Create assistant message (sync operation)
+                assistant_message = await sync_to_async(ChatService.create_assistant_message)(
                     thread_id=thread.id,
                     content=full_content,
                     metadata={'model': model_key, 'stub': False, 'streamed': True}
@@ -172,9 +170,19 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
                 done_payload = json.dumps({"message_id": str(assistant_message.id)})
                 yield f"event: done\ndata: {done_payload}\n\n"
 
+            # Create streaming response
+            # DRF recognizes StreamingHttpResponse and skips rendering
             response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
             response["Cache-Control"] = "no-cache"
             response["X-Accel-Buffering"] = "no"
+            
+            # CORS headers
+            origin = request.headers.get("Origin", "http://localhost:3000")
+            response["Access-Control-Allow-Origin"] = origin
+            response["Access-Control-Allow-Credentials"] = "true"
+            
+            # Skip DRF's response finalization by returning raw HttpResponse
+            # DRF detects HttpResponse and returns it as-is
             return response
 
         if settings.CHAT_SYNC_RESPONSES:

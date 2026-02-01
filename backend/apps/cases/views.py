@@ -250,6 +250,181 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
             'citations_created': citations_created
         })
     
+    @action(detail=True, methods=['post'])
+    def integrate_content(self, request, pk=None):
+        """
+        Intelligently integrate content from chat into document.
+        AI determines best placement, formatting, and citation.
+        
+        POST /api/case-documents/{id}/integrate_content/
+        Body: {
+            "content": "content to integrate",
+            "hint": "evidence|assumption|conclusion",
+            "message_id": "optional-message-uuid"
+        }
+        Returns: {"updated_content": "...", "insertion_section": "..."}
+        """
+        from apps.common.llm_providers import get_llm_provider
+        import asyncio
+        
+        document = self.get_object()
+        content_to_add = request.data.get('content', '')
+        hint = request.data.get('hint', 'general')
+        message_id = request.data.get('message_id')
+        
+        if not content_to_add:
+            return Response(
+                {'error': 'Content is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # AI prompt to find best integration point
+        provider = get_llm_provider('fast')
+        system_prompt = "You are an AI editor that helps integrate new information into structured documents."
+        
+        user_prompt = f"""
+Current document:
+{document.content_markdown}
+
+New content to integrate:
+"{content_to_add}"
+
+Content type: {hint}
+
+Instructions:
+1. Analyze the document structure
+2. Find the most appropriate section to add this content
+3. Rewrite the content if needed to match document style and flow
+4. Add a citation marker: [^chat] at the end
+5. Return the FULL updated document with the new content integrated
+
+Return JSON:
+{{
+    "updated_content": "full updated markdown",
+    "insertion_section": "section name where content was added",
+    "rewritten_content": "how the content was adapted"
+}}
+"""
+        
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt
+            ):
+                full_response += chunk.content
+            
+            # Parse JSON response
+            import json
+            try:
+                return json.loads(full_response)
+            except:
+                # Fallback: append to end
+                return {
+                    "updated_content": f"{document.content_markdown}\n\n{content_to_add}\n\n[^chat]",
+                    "insertion_section": "End of document",
+                    "rewritten_content": content_to_add
+                }
+        
+        result = asyncio.run(generate())
+        return Response(result)
+    
+    @action(detail=True, methods=['post'])
+    def detect_assumptions(self, request, pk=None):
+        """
+        AI analyzes document to identify all assumptions.
+        Cross-references with existing inquiries and assumption signals.
+        
+        POST /api/case-documents/{id}/detect_assumptions/
+        Returns: [{
+            text, status, risk_level, inquiry_id, validation_approach
+        }]
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.signals.models import Signal
+        import asyncio
+        import json
+        
+        document = self.get_object()
+        case = document.case
+        
+        # Get existing context
+        inquiries = list(case.inquiries.all())
+        assumption_signals = list(Signal.objects.filter(
+            case=case,
+            signal_type='assumption'
+        ))
+        
+        # AI prompt
+        provider = get_llm_provider('fast')
+        system_prompt = "You are an AI that identifies and analyzes assumptions in decision documents."
+        
+        user_prompt = f"""
+Analyze this case brief and identify ALL assumptions (stated or implied):
+
+Brief:
+{document.content_markdown}
+
+Existing inquiries being investigated:
+{[f"- {i.title} (status: {i.status})" for i in inquiries]}
+
+Previously extracted assumption signals:
+{[f"- {s.content}" for s in assumption_signals[:5]]}
+
+For each assumption, provide:
+1. text: The exact assumption text (quote from document)
+2. status: "untested" | "investigating" | "validated"
+   - investigating if matching inquiry exists
+   - validated if inquiry resolved
+   - untested otherwise
+3. risk_level: "low" | "medium" | "high" based on impact if assumption is wrong
+4. inquiry_id: UUID if matching inquiry exists (match by similarity)
+5. validation_approach: Brief suggestion for how to validate
+
+Return JSON array:
+[{{
+    "text": "assumption text",
+    "status": "untested",
+    "risk_level": "high",
+    "inquiry_id": null,
+    "validation_approach": "Research market data"
+}}]
+
+Return ONLY the JSON array, no other text.
+"""
+        
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt
+            ):
+                full_response += chunk.content
+            
+            try:
+                # Parse JSON response
+                assumptions = json.loads(full_response.strip())
+                
+                # Enhance with inquiry links
+                for assumption in assumptions:
+                    # Find matching inquiry by title similarity
+                    assumption_text = assumption['text'].lower()
+                    for inquiry in inquiries:
+                        if (
+                            assumption_text in inquiry.title.lower() or
+                            inquiry.title.lower() in assumption_text
+                        ):
+                            assumption['inquiry_id'] = str(inquiry.id)
+                            assumption['status'] = 'validated' if inquiry.status == 'resolved' else 'investigating'
+                            break
+                
+                return assumptions
+            except:
+                return []
+        
+        assumptions = asyncio.run(generate())
+        return Response(assumptions)
+    
     @action(detail=False, methods=['post'])
     def generate_research(self, request):
         """

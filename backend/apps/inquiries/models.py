@@ -46,6 +46,26 @@ class Inquiry(UUIDModel, TimestampedModel):
         help_text="Additional context about this inquiry"
     )
     
+    # Origin tracking (for inline-created inquiries)
+    origin_text = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Selected text from document that sparked this inquiry"
+    )
+    origin_document = models.ForeignKey(
+        'cases.CaseDocument',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='spawned_inquiries',
+        help_text="Document where the inquiry originated from"
+    )
+    text_span = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Character range in origin document: {from, to, section}"
+    )
+    
     # Relationships
     case = models.ForeignKey(
         'cases.Case',

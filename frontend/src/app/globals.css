@@ -7,3 +7,163 @@
     @apply bg-white text-gray-900;
   }
 }
+
+@layer components {
+  /* Markdown prose styles for chat messages */
+  .prose {
+    @apply text-gray-900;
+  }
+  
+  .prose p {
+    @apply my-2;
+  }
+  
+  .prose ul, .prose ol {
+    @apply my-2 pl-4;
+  }
+  
+  .prose li {
+    @apply my-1;
+  }
+  
+  /* Inline code */
+  .prose code:not(pre code) {
+    @apply bg-gray-800 text-gray-100 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+  
+  /* Code blocks - support both custom and Shiki rendering */
+  .prose pre {
+    @apply rounded-lg p-4 my-3 overflow-x-auto;
+    background-color: #0d1117 !important;
+    border: 1px solid #30363d;
+  }
+  
+  .prose pre code {
+    @apply text-sm font-mono;
+    background: transparent !important;
+  }
+  
+  /* Streamdown/Shiki specific styles */
+  .prose pre code span {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  
+  /* Ensure code block text is visible with minimum contrast */
+  .prose pre, .prose pre code, .prose pre code span {
+    line-height: 1.6;
+  }
+  
+  /* Fallback for non-highlighted code to ensure it's visible */
+  .prose pre code:not([class*="language-"]) {
+    color: #c9d1d9 !important;
+  }
+  
+  .prose blockquote {
+    @apply border-l-4 border-gray-300 pl-4 italic my-3 text-gray-700;
+  }
+  
+  .prose h1, .prose h2, .prose h3, .prose h4 {
+    @apply font-semibold mt-4 mb-2;
+  }
+  
+  .prose h1 {
+    @apply text-xl;
+  }
+  
+  .prose h2 {
+    @apply text-lg;
+  }
+  
+  .prose h3 {
+    @apply text-base;
+  }
+  
+  .prose a {
+    @apply text-blue-600 underline;
+  }
+  
+  .prose strong {
+    @apply font-semibold;
+  }
+  
+  .prose em {
+    @apply italic;
+  }
+  
+  .prose table {
+    @apply w-full border-collapse my-3;
+  }
+  
+  .prose th, .prose td {
+    @apply border border-gray-300 px-3 py-2;
+  }
+  
+  .prose th {
+    @apply bg-gray-100 font-semibold;
+  }
+
+  /* Workspace transitions */
+  .workspace-transition {
+    transition: opacity 300ms ease-in-out, transform 300ms ease-in-out;
+  }
+
+  .workspace-fade-enter {
+    opacity: 0;
+  }
+
+  .workspace-fade-enter-active {
+    opacity: 1;
+  }
+
+  .workspace-fade-exit {
+    opacity: 1;
+  }
+
+  .workspace-fade-exit-active {
+    opacity: 0;
+  }
+
+  .workspace-slide-enter {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  .workspace-slide-enter-active {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  /* Assumption highlighting in TipTap editor */
+  .assumption {
+    border-radius: 3px;
+    padding: 2px 0;
+    transition: all 0.2s;
+  }
+
+  .assumption-untested {
+    background-color: #fef3c7;
+    border-bottom: 2px dotted #f59e0b;
+  }
+
+  .assumption-untested:hover {
+    background-color: #fde68a;
+  }
+
+  .assumption-investigating {
+    background-color: #ddd6fe;
+    border-bottom: 2px dotted #8b5cf6;
+  }
+
+  .assumption-investigating:hover {
+    background-color: #c4b5fd;
+  }
+
+  .assumption-validated {
+    background-color: #d1fae5;
+    border-bottom: 2px solid #10b981;
+  }
+
+  .assumption-validated:hover {
+    background-color: #a7f3d0;
+  }
+}

@@ -25,7 +25,7 @@ This is a quick, practical guide to start, stop, and restart the local stack.
    - `docker compose up -d db redis`
 2) Start backend:
    - `cd backend`
-   - `./venv/bin/python manage.py runserver`
+   - `./venv/bin/python manage.py runasgi`
 3) Start frontend:
    - `cd frontend`
    - `npm run dev`
@@ -44,7 +44,7 @@ This is a quick, practical guide to start, stop, and restart the local stack.
 
 ## Restart guidance
 ### When you DO need to restart
-- Backend code changes are picked up automatically by `runserver`, but restart if:
+- Backend code changes are picked up automatically by `runasgi`, but restart if:
   - You changed `settings` or `.env`
   - You updated dependencies (pip install)
   - You added/changed environment variables
@@ -55,7 +55,7 @@ This is a quick, practical guide to start, stop, and restart the local stack.
 - Redis/Postgres: restart if you changed docker config or volumes.
 
 ### When you DON'T need to restart
-- Most backend Python code changes (views, serializers, models) are picked up by `runserver`.
+- Most backend Python code changes (views, serializers, models) are picked up automatically by auto-reload.
 - Most frontend UI changes hot-reload.
 
 ## Quick health checks

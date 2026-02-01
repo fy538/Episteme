@@ -53,28 +53,52 @@ export function ChatInterface({
     loadMessages();
   }, [threadId]);
 
-  // Poll for new messages (assistant responses)
+  // Poll for new messages only while waiting for response
   useEffect(() => {
-    // Pause polling during streaming or when loading (optimistic messages active)
-    if (isStreaming || isLoading) return;
-    
-    const interval = setInterval(async () => {
+    if (!isWaitingForResponse || isStreaming || isLoading) return;
+
+    let pollCount = 0;
+    let interval: NodeJS.Timeout;
+
+    const getPollInterval = () => {
+      if (pollCount < 5) return 2000; // 2s for first 10s
+      if (pollCount < 10) return 4000; // 4s for next 20s
+      return 8000; // 8s after 30s
+    };
+
+    const poll = async () => {
       try {
         const msgs = await chatAPI.getMessages(threadId);
-        
-        // Deduplicate: only update if we got new messages
+
         setMessages(prev => {
-          const existingIds = new Set(prev.map(m => m.id));
-          const newMessages = msgs.filter(m => !existingIds.has(m.id));
-          
-          if (newMessages.length === 0 && prev.length === msgs.length) {
-            return prev; // No changes, skip update
+          // Merge server messages with optimistic messages
+          const serverById = new Map(msgs.map(m => [m.id, m]));
+          const merged: Message[] = [];
+
+          // Keep optimistic messages (local ids) if server hasn't returned them yet
+          for (const prevMsg of prev) {
+            if (prevMsg.id.startsWith('local-')) {
+              merged.push(prevMsg);
+              continue;
+            }
+            const serverMsg = serverById.get(prevMsg.id);
+            if (serverMsg) {
+              merged.push(serverMsg);
+              serverById.delete(prevMsg.id);
+            } else {
+              merged.push(prevMsg);
+            }
           }
-          
-          return msgs; // Full replace only if there are real changes
+
+          // Append any new server messages not seen before
+          for (const msg of serverById.values()) {
+            merged.push(msg);
+          }
+
+          return merged;
         });
-        
-        if (isWaitingForResponse && pendingSince) {
+
+        if (pendingSince) {
           const hasNewAssistant = msgs.some(
             msg =>
               msg.role === 'assistant' &&
@@ -87,8 +111,14 @@ export function ChatInterface({
         }
       } catch (error) {
         console.error('Polling error:', error);
+      } finally {
+        pollCount += 1;
+        clearInterval(interval);
+        interval = setInterval(poll, getPollInterval());
       }
-    }, 2000); // Poll every 2 seconds
+    };
+
+    interval = setInterval(poll, getPollInterval());
 
     return () => clearInterval(interval);
   }, [threadId, isStreaming, isLoading, isWaitingForResponse, pendingSince]);
@@ -197,12 +227,15 @@ export function ChatInterface({
         console.warn('Streaming unavailable, falling back to polling.', streamError);
         setIsStreaming(false);
 
+        // Keep optimistic user message, remove only the assistant placeholder
         setMessages(prev =>
-          prev.filter(msg => msg.id !== tempAssistantId && msg.id !== tempUserId)
+          prev.filter(msg => msg.id !== tempAssistantId)
         );
 
         const userMessage = await chatAPI.sendMessage(threadId, content);
-        setMessages(prev => [...prev, userMessage]);
+        setMessages(prev =>
+          prev.map(msg => (msg.id === tempUserId ? userMessage : msg))
+        );
       }
     } catch (error) {
       console.error('Failed to send message:', error);

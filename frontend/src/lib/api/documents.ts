@@ -59,6 +59,37 @@ export const documentsAPI = {
     return apiClient.post(`/cases/documents/${docId}/reparse_citations/`, {});
   },
 
+  async update(docId: string, data: Partial<CaseDocument>): Promise<CaseDocument> {
+    return apiClient.patch<CaseDocument>(`/cases/documents/${docId}/`, data);
+  },
+
+  async integrateContent(
+    docId: string,
+    content: string,
+    hint?: string,
+    messageId?: string
+  ): Promise<{
+    updated_content: string;
+    insertion_section: string;
+    rewritten_content: string;
+  }> {
+    return apiClient.post(`/cases/documents/${docId}/integrate_content/`, {
+      content,
+      hint,
+      message_id: messageId,
+    });
+  },
+
+  async detectAssumptions(docId: string): Promise<Array<{
+    text: string;
+    status: 'untested' | 'investigating' | 'validated';
+    risk_level: 'low' | 'medium' | 'high';
+    inquiry_id: string | null;
+    validation_approach: string;
+  }>> {
+    return apiClient.post(`/cases/documents/${docId}/detect_assumptions/`, {});
+  },
+
   // Phase 2: Create document
   async create(data: {
     title: string;
@@ -68,5 +99,10 @@ export const documentsAPI = {
     case_id?: string;
   }): Promise<CaseDocument> {
     return apiClient.post('/documents/', data);
+  },
+
+  // Alias for backwards compatibility
+  get: async function(docId: string) {
+    return this.getDocument(docId);
   },
 };

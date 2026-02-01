@@ -12,19 +12,25 @@ import { useDebounce } from 'use-debounce';
 import { useEffect, useState } from 'react';
 import { CitationAutocomplete } from './CitationAutocomplete';
 import { EditorToolbar } from './EditorToolbar';
+import { FloatingActionMenu } from './FloatingActionMenu';
 import { documentsAPI } from '@/lib/api/documents';
 import type { CaseDocument } from '@/lib/types/case';
 
 interface BriefEditorProps {
   document: CaseDocument;
   onSave?: (content: string) => void;
+  onCreateInquiry?: (selectedText: string) => void;
+  onMarkAssumption?: (selectedText: string) => void;
 }
 
-export function BriefEditor({ document, onSave }: BriefEditorProps) {
+export function BriefEditor({ document, onSave, onCreateInquiry, onMarkAssumption }: BriefEditorProps) {
   const [content, setContent] = useState(document.content_markdown);
   const [debouncedContent] = useDebounce(content, 1000); // 1s delay
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [selectedText, setSelectedText] = useState('');
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [showFloatingMenu, setShowFloatingMenu] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -52,6 +58,25 @@ export function BriefEditor({ document, onSave }: BriefEditorProps) {
     onUpdate: ({ editor }) => {
       const markdown = editor.getHTML(); // Get HTML for now, can parse to markdown later
       setContent(markdown);
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to);
+      
+      if (text.length >= 10) {
+        // Get selection position
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          
+          setSelectedText(text);
+          setMenuPosition({ x: rect.left + rect.width / 2, y: rect.top });
+          setShowFloatingMenu(true);
+        }
+      } else {
+        setShowFloatingMenu(false);
+      }
     },
   });
 
@@ -104,6 +129,16 @@ export function BriefEditor({ document, onSave }: BriefEditorProps) {
       <CitationAutocomplete
         editor={editor}
         caseId={document.case}
+      />
+      
+      {/* Floating action menu for selected text */}
+      <FloatingActionMenu
+        visible={showFloatingMenu}
+        x={menuPosition.x}
+        y={menuPosition.y}
+        onCreateInquiry={() => onCreateInquiry?.(selectedText)}
+        onMarkAssumption={() => onMarkAssumption?.(selectedText)}
+        onClose={() => setShowFloatingMenu(false)}
       />
     </div>
   );

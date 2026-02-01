@@ -53,9 +53,9 @@ class ChatThread(UUIDModel, TimestampedModel):
     )
     
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-updated_at']  # Sort by most recently active
         indexes = [
-            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', '-updated_at']),
         ]
     
     def __str__(self):

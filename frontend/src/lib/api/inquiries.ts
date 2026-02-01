@@ -23,4 +23,42 @@ export const inquiriesAPI = {
   async getInquiry(inquiryId: string): Promise<Inquiry> {
     return apiClient.get<Inquiry>(`/inquiries/${inquiryId}/`);
   },
+
+  async create(data: {
+    case: string;
+    title: string;
+    description?: string;
+    status: string;
+  }): Promise<Inquiry> {
+    return apiClient.post('/inquiries/', data);
+  },
+
+  async resolve(inquiryId: string, conclusion: string): Promise<Inquiry> {
+    return apiClient.post(`/inquiries/${inquiryId}/resolve/`, { conclusion });
+  },
+
+  async update(inquiryId: string, data: Partial<Inquiry>): Promise<Inquiry> {
+    return apiClient.patch<Inquiry>(`/inquiries/${inquiryId}/`, data);
+  },
+
+  async delete(inquiryId: string): Promise<void> {
+    return apiClient.delete(`/inquiries/${inquiryId}/`);
+  },
+
+  async generateTitle(text: string): Promise<{ title: string }> {
+    return apiClient.post('/inquiries/generate_title/', { text });
+  },
+
+  async generateBriefUpdate(
+    inquiryId: string,
+    briefId: string
+  ): Promise<{
+    updated_content: string;
+    changes: Array<any>;
+    summary: string;
+  }> {
+    return apiClient.post(`/inquiries/${inquiryId}/generate_brief_update/`, {
+      brief_id: briefId,
+    });
+  },
 };

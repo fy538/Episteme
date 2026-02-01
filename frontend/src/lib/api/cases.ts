@@ -28,6 +28,14 @@ export const casesAPI = {
     return response.results || [];
   },
 
+  async updateCase(caseId: string, data: Partial<Case>): Promise<Case> {
+    return apiClient.patch<Case>(`/cases/${caseId}/`, data);
+  },
+
+  async deleteCase(caseId: string): Promise<void> {
+    return apiClient.delete(`/cases/${caseId}/`);
+  },
+
   async getCaseDocuments(caseId: string): Promise<CaseDocument[]> {
     const response = await apiClient.get<{ results: CaseDocument[] }>(
       `/cases/documents/?case=${caseId}`

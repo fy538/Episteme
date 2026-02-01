@@ -4,18 +4,23 @@
 
 import { useEffect, useRef } from 'react';
 import type { Message } from '@/lib/types/chat';
-import ReactMarkdown from 'react-markdown';
+import { Streamdown } from 'streamdown';
+import remarkGfm from 'remark-gfm';
 
 export function MessageList({
   messages,
   isWaitingForResponse,
   isStreaming,
   ttft,
+  onAddToBrief,
+  onCreateEvidence,
 }: {
   messages: Message[];
   isWaitingForResponse?: boolean;
   isStreaming?: boolean;
   ttft?: number | null;
+  onAddToBrief?: (messageId: string, content: string) => void;
+  onCreateEvidence?: (content: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -34,36 +39,87 @@ export function MessageList({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      {messages.map(message => (
-        <div
-          key={message.id}
-          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-        >
+      {messages.map(message => {
+        const isStreamingMsg = message.metadata?.streaming === true;
+        const showActions = message.role === 'assistant' && !isStreamingMsg && message.content.length > 20;
+        
+        return (
           <div
-            className={`max-w-2xl rounded-lg px-4 py-3 ${
-              message.role === 'user'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-900'
-            }`}
+            key={message.id}
+            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} group`}
           >
-            {message.role === 'assistant' ? (
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
-              </div>
-            ) : (
-              <p className="whitespace-pre-wrap">{message.content}</p>
-            )}
+            <div
+              className={`max-w-2xl rounded-lg px-4 py-3 ${
+                message.role === 'user'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-900'
+              }`}
+            >
+              {message.role === 'assistant' ? (
+                message.content.trim() === '' && isStreamingMsg ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <span className="inline-flex gap-1">
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    </span>
+                    <span>Thinking...</span>
+                  </div>
+                ) : (
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <Streamdown
+                      remarkPlugins={[remarkGfm]}
+                      parseIncompleteMarkdown={isStreamingMsg}
+                      isAnimating={isStreamingMsg}
+                      shikiTheme={['min-light', 'min-dark']}
+                    >
+                      {message.content}
+                    </Streamdown>
+                  </div>
+                )
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
+              
+              {/* Action buttons (show on hover) */}
+              {showActions && (onAddToBrief || onCreateEvidence) && (
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex gap-2">
+                  {onAddToBrief && (
+                    <button
+                      onClick={() => onAddToBrief(message.id, message.content)}
+                      className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
+                    >
+                      Add to Brief
+                    </button>
+                  )}
+                  {onCreateEvidence && (
+                    <button
+                      onClick={() => onCreateEvidence(message.content)}
+                      className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors"
+                    >
+                      Create Evidence
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigator.clipboard.writeText(message.content)}
+                    className="text-xs px-2 py-1 bg-gray-50 text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {isWaitingForResponse && !isStreaming && (
         <div className="flex justify-start">
           <div className="max-w-2xl rounded-lg px-4 py-3 bg-gray-100 text-gray-900">
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <span className="inline-flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.2s]" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '-0.2s' }} />
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
               </span>
               <span>Waiting for response...</span>
             </div>

@@ -132,6 +132,148 @@ class InquiryViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def generate_title(self, request):
+        """
+        Generate inquiry title from selected text using AI.
+        
+        POST /inquiries/generate_title/
+        Body: {"text": "selected assumption text"}
+        Returns: {"title": "AI-generated inquiry question"}
+        """
+        from apps.common.llm_providers import get_llm_provider
+        import asyncio
+        
+        selected_text = request.data.get('text', '')
+        if not selected_text:
+            return Response(
+                {'error': 'Text is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # AI prompt to generate validation question
+        provider = get_llm_provider('fast')
+        system_prompt = "You are an AI that helps formulate research questions from assumptions."
+        
+        user_prompt = f"""
+Given this statement or assumption from a decision brief:
+
+"{selected_text}"
+
+Generate a clear, focused research question to validate or investigate this assumption.
+
+Guidelines:
+- Start with "Will...", "Can...", "Is...", or "What..."
+- Be specific and testable
+- Focus on one question
+- Keep under 100 characters
+
+Return only the question, nothing else.
+"""
+        
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt
+            ):
+                full_response += chunk.content
+            return full_response.strip()
+        
+        title = asyncio.run(generate())
+        
+        return Response({'title': title})
+    
+    @action(detail=True, methods=['post'])
+    def generate_brief_update(self, request, pk=None):
+        """
+        Generate AI suggestion for updating case brief based on inquiry resolution.
+        
+        POST /inquiries/{id}/generate_brief_update/
+        Body: {"brief_id": "uuid"}
+        Returns: {
+            "updated_content": "full brief with updates",
+            "changes": [{"type": "replace", "old": "...", "new": "..."}]
+        }
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.cases.models import CaseDocument
+        import asyncio
+        import json
+        
+        inquiry = self.get_object()
+        brief_id = request.data.get('brief_id')
+        
+        if not brief_id:
+            return Response(
+                {'error': 'brief_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            brief = CaseDocument.objects.get(id=brief_id)
+        except CaseDocument.DoesNotExist:
+            return Response(
+                {'error': 'Brief not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # AI prompt to generate updated brief
+        provider = get_llm_provider('fast')
+        system_prompt = "You are an AI editor that updates decision briefs based on research findings."
+        
+        user_prompt = f"""
+Original case brief:
+{brief.content_markdown}
+
+Inquiry that was just resolved:
+Question: {inquiry.title}
+Conclusion: {inquiry.conclusion}
+Confidence: {inquiry.conclusion_confidence or 'N/A'}
+
+{f'Origin text in brief: "{inquiry.origin_text}"' if inquiry.origin_text else ''}
+
+Task:
+1. Update the brief to incorporate this inquiry conclusion
+2. If origin_text exists, update or replace that assumption
+3. If no origin_text, find the most relevant section to add this finding
+4. Add citation: [[inquiry:{inquiry.id}]]
+5. Maintain markdown formatting and document structure
+6. Be concise - don't rewrite sections that don't need updating
+
+Return JSON:
+{{
+    "updated_content": "full updated markdown brief",
+    "changes": [
+        {{"type": "replace", "old": "text that changed", "new": "updated text"}},
+        {{"type": "add", "section": "section name", "content": "what was added"}}
+    ],
+    "summary": "brief summary of changes made"
+}}
+"""
+        
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt
+            ):
+                full_response += chunk.content
+            
+            try:
+                return json.loads(full_response)
+            except:
+                # Fallback
+                fallback_content = f"{brief.content_markdown}\n\n## Updated based on: {inquiry.title}\n\n{inquiry.conclusion}\n\n[[inquiry:{inquiry.id}]]"
+                return {
+                    "updated_content": fallback_content,
+                    "changes": [{"type": "add", "section": "End", "content": inquiry.conclusion}],
+                    "summary": "Added inquiry conclusion at end of document"
+                }
+        
+        result = asyncio.run(generate())
+        return Response(result)
 
 
 class EvidenceViewSet(viewsets.ModelViewSet):

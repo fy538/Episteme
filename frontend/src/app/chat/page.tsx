@@ -281,7 +281,11 @@ export default function ChatPage() {
         <StructureSidebar 
           threadId={threadId} 
           caseId={caseId || undefined}
-          onCaseCreated={(newCaseId) => setCaseId(newCaseId)}
+          onCaseCreated={(newCaseId) => {
+            setCaseId(newCaseId);
+            // Transition to workspace view
+            router.push(`/workspace/cases/${newCaseId}`);
+          }}
         />
       )}
     </div>

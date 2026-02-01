@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { SettingsModal } from '@/components/settings/SettingsModal';
 import type { ChatThread } from '@/lib/types/chat';
 import type { Project } from '@/lib/types/project';
 
@@ -40,6 +41,8 @@ export function ConversationsSidebar({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function startEditing(thread: ChatThread) {
     setEditingId(thread.id);
@@ -163,36 +166,49 @@ export function ConversationsSidebar({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2 group">
                         <button
                           onClick={() => onSelect(thread.id)}
-                          className="text-left flex-1"
+                          className="text-left flex-1 truncate"
                           title={title}
                         >
                           {title}
                         </button>
-                        <div className="flex items-center gap-2">
+                        <div className="relative opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={() => startEditing(thread)}
-                            className="text-xs text-gray-500 hover:text-gray-800"
-                            aria-label="Rename conversation"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenId(menuOpenId === thread.id ? null : thread.id);
+                            }}
+                            className="p-1 hover:bg-gray-200 rounded"
+                            aria-label="Options"
                           >
-                            Rename
+                            <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                            </svg>
                           </button>
-                          <button
-                            onClick={() => handleArchive(thread)}
-                            className="text-xs text-gray-500 hover:text-gray-800"
-                            aria-label="Archive conversation"
-                          >
-                            {isArchived ? 'Unarchive' : 'Archive'}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(thread)}
-                            className="text-xs text-red-600 hover:text-red-800"
-                            aria-label="Delete conversation"
-                          >
-                            Delete
-                          </button>
+                          {menuOpenId === thread.id && (
+                            <div className="absolute right-0 mt-1 w-32 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                              <button
+                                onClick={() => { startEditing(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                              >
+                                Rename
+                              </button>
+                              <button
+                                onClick={() => { handleArchive(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                              >
+                                {isArchived ? 'Unarchive' : 'Archive'}
+                              </button>
+                              <button
+                                onClick={() => { handleDelete(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -291,6 +307,23 @@ export function ConversationsSidebar({
           </div>
         </div>
       )}
+
+      {/* Settings Button - Bottom Left */}
+      <div className="mt-auto pt-4 border-t border-gray-200">
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span className="font-medium">Settings</span>
+        </button>
+      </div>
+
+      {/* Settings Modal */}
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
