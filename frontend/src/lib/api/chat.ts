@@ -95,4 +95,18 @@ export const chatAPI = {
       user_edits: userEdits,
     });
   },
+
+  /**
+   * List all threads for a specific case
+   */
+  async listCaseThreads(caseId: string): Promise<ChatThread[]> {
+    return apiClient.get<ChatThread[]>(`/cases/${caseId}/threads/`);
+  },
+
+  /**
+   * Create a new thread for a case
+   */
+  async createCaseThread(caseId: string, data?: { title?: string; thread_type?: string }): Promise<ChatThread> {
+    return apiClient.post<ChatThread>(`/cases/${caseId}/threads/create/`, data || {});
+  },
 };

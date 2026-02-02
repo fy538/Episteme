@@ -74,18 +74,10 @@ class Case(UUIDModel, TimestampedModel):
     project = models.ForeignKey(
         'projects.Project',
         on_delete=models.CASCADE,
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
         related_name='cases',
-        help_text="Project this case belongs to"
-    )
-    
-    linked_thread = models.ForeignKey(
-        'chat.ChatThread',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='linked_cases'
+        help_text="Project this case belongs to (REQUIRED)"
     )
     
     # Main brief (Phase 2A)
@@ -154,7 +146,6 @@ class Case(UUIDModel, TimestampedModel):
             models.Index(fields=['user', '-updated_at']),
             models.Index(fields=['project', '-updated_at']),
             models.Index(fields=['status', '-updated_at']),
-            models.Index(fields=['linked_thread', '-created_at']),
         ]
     
     def __str__(self):

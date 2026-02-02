@@ -21,6 +21,8 @@ from .document_serializers import (
 )
 from .services import CaseService
 from .document_service import CaseDocumentService
+from apps.chat.models import ChatThread
+from apps.chat.serializers import ChatThreadSerializer, ChatThreadDetailSerializer
 
 
 class CaseViewSet(viewsets.ModelViewSet):
@@ -110,6 +112,104 @@ class CaseViewSet(viewsets.ModelViewSet):
             WorkingViewSerializer(working_view).data,
             status=status.HTTP_201_CREATED
         )
+    
+    @action(detail=True, methods=['get'], url_path='threads')
+    def get_threads(self, request, pk=None):
+        """
+        Get all chat threads for this case
+        
+        GET /api/cases/{id}/threads/
+        
+        Returns list of all chat threads associated with this case.
+        Supports multiple threads per case for different purposes.
+        """
+        case = self.get_object()
+        
+        # Get all threads linked to this case
+        threads = ChatThread.objects.filter(
+            primary_case=case,
+            user=request.user
+        ).order_by('-updated_at')
+        
+        serializer = ChatThreadDetailSerializer(threads, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'], url_path='threads/create')
+    def create_thread(self, request, pk=None):
+        """
+        Create a new chat thread for this case
+        
+        POST /api/cases/{id}/threads/create/
+        
+        Body:
+        {
+            "title": "Research Thread",  # optional
+            "thread_type": "research"     # optional: general, research, inquiry, document
+        }
+        """
+        case = self.get_object()
+        
+        title = request.data.get('title', f'Chat: {case.title}')
+        thread_type = request.data.get('thread_type', 'general')
+        
+        # Create new thread linked to this case
+        thread = ChatThread.objects.create(
+            user=request.user,
+            title=title,
+            thread_type=thread_type,
+            primary_case=case,
+            project=case.project  # Link to same project
+        )
+        
+        serializer = ChatThreadDetailSerializer(thread)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'], url_path='generate-brief-outline')
+    def generate_brief_outline(self, request, pk=None):
+        """
+        Generate an AI-powered brief outline for a new case
+        
+        POST /api/cases/{id}/generate-brief-outline/
+        
+        Creates an initial structure for the case brief based on:
+        - Case title and position
+        - Stakes level
+        - Any initial chat messages or context
+        """
+        case = self.get_object()
+        
+        # Simple outline template for now
+        # In production, this would use an LLM to generate contextual outline
+        outline = f"""# {case.title}
+
+## Position
+{case.position or '_Describe your current position or thesis_'}
+
+## Stakes
+This is a **{case.stakes}** stakes decision.
+
+## Background
+_Provide context about this decision_
+
+## Key Questions
+- _What are the main questions to resolve?_
+- _What assumptions are critical?_
+- _What evidence would change your mind?_
+
+## Analysis
+_Your research and thinking goes here_
+
+## Decision Criteria
+_What factors will determine the right choice?_
+
+## Next Steps
+_What actions follow from this decision?_
+"""
+        
+        return Response({
+            'outline': outline,
+            'case_id': str(case.id)
+        })
     
     @action(detail=True, methods=['post'])
     def activate_skills(self, request, pk=None):

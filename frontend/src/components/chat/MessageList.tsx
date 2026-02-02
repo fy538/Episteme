@@ -4,24 +4,29 @@
 
 import { useEffect, useRef } from 'react';
 import type { Message as MessageType } from '@/lib/types/chat';
+import type { CardAction } from '@/lib/types/cards';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
 import { SignalHighlighter, type HighlightedSignal } from './SignalHighlighter';
 import { useSignalsForMessage, useDismissSignal } from '@/hooks/useSignals';
 import { useUserPreferences } from '@/hooks/usePreferences';
+import { CardRenderer } from './cards/CardRenderer';
 
 // Separate Message component to call hooks at top level
 function Message({ 
   message, 
   onAddToBrief, 
-  onCreateEvidence 
+  onCreateEvidence,
+  onCardAction
 }: { 
   message: MessageType;
   onAddToBrief?: (messageId: string, content: string) => void;
   onCreateEvidence?: (content: string) => void;
+  onCardAction?: (action: CardAction, messageId: string) => void;
 }) {
   const isStreamingMsg = message.metadata?.streaming === true;
-  const showActions = message.role === 'assistant' && !isStreamingMsg && message.content.length > 20;
+  const isRichMessage = message.is_rich_content && message.structured_content;
+  const showActions = message.role === 'assistant' && !isStreamingMsg && !isRichMessage && message.content.length > 20;
   
   // Fetch signals for this message (hook at top level)
   const { data: signals = [] } = useSignalsForMessage(
@@ -46,19 +51,32 @@ function Message({
     dismissSignal.mutate(signalId);
   };
 
+  const handleCardAction = (action: CardAction) => {
+    if (onCardAction) {
+      onCardAction(action, message.id);
+    }
+  };
+
   return (
     <div
       key={message.id}
       className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} group`}
     >
       <div
-        className={`max-w-2xl rounded-lg px-4 py-3 ${
+        className={`${isRichMessage ? 'w-full max-w-3xl' : 'max-w-2xl'} rounded-lg ${isRichMessage ? '' : 'px-4 py-3'} ${
           message.role === 'user'
             ? 'bg-accent-600 text-white'
+            : isRichMessage
+            ? ''  // No background for rich cards
             : 'bg-neutral-100 text-neutral-900 dark:bg-primary-800 dark:text-primary-50'
         }`}
       >
-        {message.role === 'assistant' ? (
+        {message.role === 'assistant' && isRichMessage ? (
+          <CardRenderer 
+            card={message.structured_content!}
+            onAction={handleCardAction}
+          />
+        ) : message.role === 'assistant' ? (
           message.content.trim() === '' && isStreamingMsg ? (
             <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
               <span className="inline-flex gap-1">
@@ -136,6 +154,7 @@ export function MessageList({
   ttft,
   onAddToBrief,
   onCreateEvidence,
+  onCardAction,
 }: {
   messages: MessageType[];
   isWaitingForResponse?: boolean;
@@ -143,6 +162,7 @@ export function MessageList({
   ttft?: number | null;
   onAddToBrief?: (messageId: string, content: string) => void;
   onCreateEvidence?: (content: string) => void;
+  onCardAction?: (action: CardAction, messageId: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +187,7 @@ export function MessageList({
           message={message}
           onAddToBrief={onAddToBrief}
           onCreateEvidence={onCreateEvidence}
+          onCardAction={onCardAction}
         />
       ))}
       {isWaitingForResponse && !isStreaming && (

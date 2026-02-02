@@ -11,18 +11,35 @@ from apps.common.models import TimestampedModel, UUIDModel
 class ChatThread(UUIDModel, TimestampedModel):
     """
     A conversation thread
+    
+    Multiple threads can be associated with a single case for different purposes
+    (general discussion, research, inquiry-specific, document analysis).
     """
     title = models.CharField(max_length=500, blank=True, default='New Chat')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_threads')
     
+    # Thread type for categorization
+    thread_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('general', 'General Discussion'),
+            ('research', 'Research Thread'),
+            ('inquiry', 'Inquiry-Specific'),
+            ('document', 'Document Analysis'),
+        ],
+        default='general',
+        help_text="Type of conversation thread"
+    )
+    
     # Optional: link to a case if this thread is associated with one
-    # This is set when a case is created from this thread
+    # Multiple threads can link to the same case (many-to-one relationship)
     primary_case = models.ForeignKey(
         'cases.Case',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='primary_thread'
+        related_name='chat_threads',  # Changed from 'primary_thread' to 'chat_threads'
+        help_text="Case this thread is about (many threads per case supported)"
     )
 
     # Optional project association
@@ -139,6 +156,18 @@ class MessageRole(models.TextChoices):
     SYSTEM = 'system', 'System'
 
 
+class MessageContentType(models.TextChoices):
+    """Types of message content"""
+    TEXT = 'text', 'Plain Text'
+    CARD_SIGNAL_EXTRACTION = 'card_signal_extraction', 'Signal Extraction Card'
+    CARD_CASE_SUGGESTION = 'card_case_suggestion', 'Case Suggestion Card'
+    CARD_STRUCTURE_PREVIEW = 'card_structure_preview', 'Structure Preview Card'
+    CARD_RESEARCH_STATUS = 'card_research_status', 'Research Status Card'
+    CARD_EVIDENCE_MAP = 'card_evidence_map', 'Evidence Map Card'
+    CARD_ACTION_PROMPT = 'card_action_prompt', 'Action Prompt Card'
+    CARD_ASSUMPTION_VALIDATOR = 'card_assumption_validator', 'Assumption Validator Card'
+
+
 class Message(UUIDModel, TimestampedModel):
     """
     Individual message in a chat thread
@@ -149,6 +178,22 @@ class Message(UUIDModel, TimestampedModel):
     thread = models.ForeignKey(ChatThread, on_delete=models.CASCADE, related_name='messages')
     role = models.CharField(max_length=20, choices=MessageRole.choices)
     content = models.TextField()
+    
+    # Content type for rich messages
+    content_type = models.CharField(
+        max_length=50,
+        choices=MessageContentType.choices,
+        default=MessageContentType.TEXT,
+        help_text="Type of message content (text or card)"
+    )
+    
+    # Structured content for interactive cards
+    structured_content = models.JSONField(
+        default=None,
+        null=True,
+        blank=True,
+        help_text="Structured data for rich message types (cards, forms, etc.)"
+    )
     
     # Link back to the event that created this message
     event_id = models.UUIDField(unique=True, db_index=True)
@@ -161,6 +206,7 @@ class Message(UUIDModel, TimestampedModel):
         indexes = [
             models.Index(fields=['thread', 'created_at']),
             models.Index(fields=['event_id']),
+            models.Index(fields=['content_type']),  # Index for filtering by type
         ]
     
     def __str__(self):

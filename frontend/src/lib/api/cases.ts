@@ -46,4 +46,14 @@ export const casesAPI = {
   async getOnboarding(caseId: string): Promise<any> {
     return apiClient.get(`/cases/${caseId}/onboarding/`);
   },
+
+  /**
+   * Generate a brief outline for a case
+   */
+  async generateBriefOutline(caseId: string): Promise<{ outline: string; case_id: string }> {
+    return apiClient.post<{ outline: string; case_id: string }>(
+      `/cases/${caseId}/generate-brief-outline/`,
+      {}
+    );
+  },
 };

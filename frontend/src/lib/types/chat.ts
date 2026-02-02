@@ -2,6 +2,8 @@
  * TypeScript types for chat-related models
  */
 
+import type { RichCard } from './cards';
+
 export interface ChatThread {
   id: string;
   title: string;
@@ -25,6 +27,9 @@ export interface Message {
   thread: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  content_type?: string;
+  structured_content?: RichCard;
+  is_rich_content?: boolean;
   event_id: string;
   metadata: Record<string, any>;
   created_at: string;

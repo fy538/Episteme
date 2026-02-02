@@ -1,8 +1,11 @@
 /**
- * Mode header - breadcrumb trail + mode badge for context awareness
+ * Mode header - breadcrumb trail + mode badge + quick actions for context awareness
  */
 
 'use client';
+
+import { ReactNode } from 'react';
+import { Button } from '@/components/ui/button';
 
 export type WorkspaceMode = 'chatting' | 'editing_brief' | 'researching' | 'reviewing_evidence' | 'viewing_document';
 
@@ -11,10 +14,18 @@ interface Breadcrumb {
   href?: string;
 }
 
+interface QuickAction {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+}
+
 interface ModeHeaderProps {
   breadcrumbs: Breadcrumb[];
   mode: WorkspaceMode;
   modeLabel?: string;
+  quickActions?: QuickAction[];
 }
 
 const MODE_STYLES: Record<WorkspaceMode, { bg: string; text: string; label: string }> = {
@@ -25,7 +36,7 @@ const MODE_STYLES: Record<WorkspaceMode, { bg: string; text: string; label: stri
   viewing_document: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Viewing Document' },
 };
 
-export function ModeHeader({ breadcrumbs, mode, modeLabel }: ModeHeaderProps) {
+export function ModeHeader({ breadcrumbs, mode, modeLabel, quickActions }: ModeHeaderProps) {
   const modeStyle = MODE_STYLES[mode];
   const displayLabel = modeLabel || modeStyle.label;
 
@@ -54,9 +65,31 @@ export function ModeHeader({ breadcrumbs, mode, modeLabel }: ModeHeaderProps) {
         ))}
       </nav>
 
-      {/* Mode Badge */}
-      <div className={`px-3 py-1 rounded-full text-xs font-medium ${modeStyle.bg} ${modeStyle.text}`}>
-        {displayLabel}
+      {/* Right side: Quick Actions + Mode Badge */}
+      <div className="flex items-center gap-3">
+        {/* Quick Actions */}
+        {quickActions && quickActions.length > 0 && (
+          <div className="flex items-center gap-2">
+            {quickActions.map(action => (
+              <Button
+                key={action.id}
+                size="sm"
+                variant="ghost"
+                onClick={action.onClick}
+                className="text-neutral-700 hover:text-accent-600"
+                title={action.label}
+              >
+                {action.icon}
+                <span className="ml-1 hidden lg:inline">{action.label}</span>
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {/* Mode Badge */}
+        <div className={`px-3 py-1 rounded-full text-xs font-medium ${modeStyle.bg} ${modeStyle.text}`}>
+          {displayLabel}
+        </div>
       </div>
     </div>
   );

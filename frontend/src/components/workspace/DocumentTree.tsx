@@ -1,150 +1,291 @@
 /**
- * Document tree - hierarchical navigation
+ * Document Tree Navigator
+ * 
+ * Hierarchical view of all documents in a case:
+ * - Case brief (pinned)
+ * - Inquiries with their documents
+ * - Project documents
+ * - Uploaded documents
  */
 
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import type { CaseDocument } from '@/lib/types/case';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import type { CaseDocument, Inquiry } from '@/lib/types/case';
 
-export function DocumentTree({ 
-  documents, 
-  caseId 
-}: { 
-  documents: CaseDocument[];
+interface DocumentTreeProps {
   caseId: string;
-}) {
-  const pathname = usePathname();
-
-  // Group by type
-  const briefs = documents.filter(d => 
-    d.document_type === 'case_brief' || d.document_type === 'inquiry_brief'
-  );
-  const research = documents.filter(d => d.document_type === 'research');
-  const debates = documents.filter(d => d.document_type === 'debate');
-  const critiques = documents.filter(d => d.document_type === 'critique');
-  const notes = documents.filter(d => d.document_type === 'notes');
-
-  return (
-    <div className="space-y-6">
-      {/* Briefs */}
-      {briefs.length > 0 && (
-        <DocumentSection
-          title="Briefs"
-          documents={briefs}
-          caseId={caseId}
-          currentPath={pathname}
-        />
-      )}
-
-      {/* Research */}
-      {research.length > 0 && (
-        <DocumentSection
-          title={`Research (${research.length})`}
-          documents={research}
-          caseId={caseId}
-          currentPath={pathname}
-        />
-      )}
-
-      {/* Debates */}
-      {debates.length > 0 && (
-        <DocumentSection
-          title={`Debates (${debates.length})`}
-          documents={debates}
-          caseId={caseId}
-          currentPath={pathname}
-        />
-      )}
-
-      {/* Critiques */}
-      {critiques.length > 0 && (
-        <DocumentSection
-          title={`Critiques (${critiques.length})`}
-          documents={critiques}
-          caseId={caseId}
-          currentPath={pathname}
-        />
-      )}
-
-      {/* Notes */}
-      {notes.length > 0 && (
-        <DocumentSection
-          title="Notes"
-          documents={notes}
-          caseId={caseId}
-          currentPath={pathname}
-        />
-      )}
-    </div>
-  );
+  caseBrief?: CaseDocument;
+  inquiries: Inquiry[];
+  inquiryDocuments: CaseDocument[];
+  projectDocuments?: CaseDocument[];
+  uploadedDocuments?: CaseDocument[];
+  currentDocumentId?: string;
+  onSelectDocument: (documentId: string) => void;
+  onUploadDocument?: () => void;
 }
 
-function DocumentSection({
-  title,
-  documents,
+export function DocumentTree({
   caseId,
-  currentPath,
-}: {
-  title: string;
-  documents: CaseDocument[];
-  caseId: string;
-  currentPath: string;
-}) {
+  caseBrief,
+  inquiries,
+  inquiryDocuments,
+  projectDocuments = [],
+  uploadedDocuments = [],
+  currentDocumentId,
+  onSelectDocument,
+  onUploadDocument,
+}: DocumentTreeProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set(['case-brief', 'inquiries'])
+  );
+
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  };
+
+  const getDocumentIcon = (docType: string) => {
+    switch (docType) {
+      case 'case_brief':
+        return '📋';
+      case 'inquiry_brief':
+        return '❓';
+      case 'research':
+        return '🔬';
+      case 'debate':
+        return '⚖️';
+      case 'critique':
+        return '🎯';
+      case 'source':
+        return '📄';
+      case 'notes':
+        return '📝';
+      default:
+        return '📄';
+    }
+  };
+
+  const filterDocuments = (docs: CaseDocument[]) => {
+    if (!searchTerm) return docs;
+    return docs.filter(doc =>
+      doc.title.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  };
+
+  const SectionHeader = ({ sectionId, title, count, icon }: {
+    sectionId: string;
+    title: string;
+    count: number;
+    icon: string;
+  }) => {
+    const isExpanded = expandedSections.has(sectionId);
+    return (
+      <button
+        onClick={() => toggleSection(sectionId)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 rounded-lg transition-colors"
+      >
+        <svg
+          className={cn(
+            'w-4 h-4 transition-transform',
+            isExpanded && 'rotate-90'
+          )}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="text-lg">{icon}</span>
+        <span className="flex-1 text-left">{title}</span>
+        <span className="text-xs px-2 py-0.5 bg-neutral-100 rounded">
+          {count}
+        </span>
+      </button>
+    );
+  };
+
+  const DocumentItem = ({ doc }: { doc: CaseDocument }) => {
+    const isCurrent = doc.id === currentDocumentId;
+    return (
+      <button
+        onClick={() => onSelectDocument(doc.id)}
+        className={cn(
+          'w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left',
+          isCurrent
+            ? 'bg-accent-50 text-accent-900'
+            : 'hover:bg-neutral-50 text-neutral-700'
+        )}
+      >
+        <span className="text-base">{getDocumentIcon(doc.document_type)}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{doc.title}</p>
+          {doc.generated_by_ai && (
+            <p className="text-xs text-neutral-500">AI-generated</p>
+          )}
+        </div>
+        {isCurrent && (
+          <svg className="w-4 h-4 text-accent-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        )}
+      </button>
+    );
+  };
+
   return (
-    <div>
-      <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2 px-2">
-        {title}
-      </h3>
-      <div className="space-y-1">
-        {documents.map(doc => (
-          <DocumentLink
-            key={doc.id}
-            doc={doc}
-            caseId={caseId}
-            isActive={currentPath.includes(doc.id)}
+    <div className="h-full flex flex-col bg-white">
+      {/* Header */}
+      <div className="p-4 border-b border-neutral-200">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-neutral-900">Documents</h3>
+          {onUploadDocument && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onUploadDocument}
+              className="text-accent-600"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </Button>
+          )}
+        </div>
+        <Input
+          type="text"
+          placeholder="Search documents..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full text-sm"
+        />
+      </div>
+
+      {/* Tree */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {/* Case Brief (Pinned) */}
+        {caseBrief && (
+          <div className="mb-4">
+            <DocumentItem doc={caseBrief} />
+          </div>
+        )}
+
+        {/* Inquiries */}
+        <div>
+          <SectionHeader
+            sectionId="inquiries"
+            title="Inquiries"
+            count={inquiries.length}
+            icon="❓"
           />
-        ))}
-      </div>
-    </div>
-  );
-}
+          {expandedSections.has('inquiries') && (
+            <div className="ml-4 mt-1 space-y-1">
+              {inquiries.map(inquiry => {
+                const docs = filterDocuments(
+                  inquiryDocuments.filter(d => d.inquiry === inquiry.id)
+                );
+                const isExpanded = expandedSections.has(`inquiry-${inquiry.id}`);
 
-function DocumentLink({ 
-  doc, 
-  caseId,
-  isActive 
-}: { 
-  doc: CaseDocument; 
-  caseId: string;
-  isActive: boolean;
-}) {
-  return (
-    <Link
-      href={`/cases/${caseId}/documents/${doc.id}`}
-      className={`block px-2 py-2 text-sm rounded transition-colors ${
-        isActive 
-          ? 'bg-blue-50 border border-blue-200' 
-          : 'hover:bg-gray-100 border border-transparent'
-      }`}
-    >
-      <div className="font-medium text-gray-900 truncate">
-        {doc.title}
+                return (
+                  <div key={inquiry.id}>
+                    <button
+                      onClick={() => toggleSection(`inquiry-${inquiry.id}`)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-50 rounded-lg transition-colors"
+                    >
+                      <svg
+                        className={cn(
+                          'w-3 h-3 transition-transform',
+                          isExpanded && 'rotate-90'
+                        )}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span className="flex-1 text-left truncate">{inquiry.title}</span>
+                      <span className="text-xs text-neutral-400">{docs.length}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="ml-4 space-y-1">
+                        {docs.map(doc => (
+                          <DocumentItem key={doc.id} doc={doc} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Project Documents */}
+        {projectDocuments.length > 0 && (
+          <div>
+            <SectionHeader
+              sectionId="project-docs"
+              title="Project Documents"
+              count={projectDocuments.length}
+              icon="📁"
+            />
+            {expandedSections.has('project-docs') && (
+              <div className="ml-4 mt-1 space-y-1">
+                {filterDocuments(projectDocuments).map(doc => (
+                  <DocumentItem key={doc.id} doc={doc} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Uploaded Documents */}
+        {uploadedDocuments.length > 0 && (
+          <div>
+            <SectionHeader
+              sectionId="uploads"
+              title="Uploaded"
+              count={uploadedDocuments.length}
+              icon="📤"
+            />
+            {expandedSections.has('uploads') && (
+              <div className="ml-4 mt-1 space-y-1">
+                {filterDocuments(uploadedDocuments).map(doc => (
+                  <DocumentItem key={doc.id} doc={doc} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex items-center gap-2 mt-1">
-        {doc.edit_friction === 'low' && (
-          <span className="text-xs text-green-600">• Editable</span>
-        )}
-        {doc.generated_by_ai && (
-          <span className="text-xs text-purple-600">• AI</span>
-        )}
-        {doc.times_cited > 0 && (
-          <span className="text-xs text-gray-500">
-            {doc.times_cited} citations
-          </span>
-        )}
-      </div>
-    </Link>
+
+      {/* Footer */}
+      {onUploadDocument && (
+        <div className="p-4 border-t border-neutral-200 bg-neutral-50">
+          <Button
+            onClick={onUploadDocument}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            Upload Document
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

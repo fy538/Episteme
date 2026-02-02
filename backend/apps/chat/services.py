@@ -15,6 +15,7 @@ from apps.events.services import EventService
 from apps.events.models import EventType, ActorType
 from apps.common.ai_models import get_model
 from apps.signals.prompts import get_assistant_response_prompt
+from .card_builders import CardBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -276,3 +277,122 @@ class ChatService:
                 content += "..."
             context_lines.append(f"{role}: {content}")
         return "\n".join(context_lines)
+    
+    @staticmethod
+    @transaction.atomic
+    def create_rich_message(
+        thread_id: uuid.UUID,
+        content_type: str,
+        structured_content: dict,
+        fallback_text: str,
+        metadata: Optional[dict] = None
+    ) -> Message:
+        """
+        Create a rich message (card) in a thread
+        
+        Args:
+            thread_id: Thread to add message to
+            content_type: Type of rich content (from MessageContentType)
+            structured_content: Structured card data
+            fallback_text: Plain text fallback for accessibility/search
+            metadata: Optional metadata
+            
+        Returns:
+            Created Message
+        """
+        thread = ChatThread.objects.get(id=thread_id)
+        
+        # 1. Append event
+        event = EventService.append(
+            event_type=EventType.ASSISTANT_MESSAGE_CREATED,
+            payload={
+                'thread_id': str(thread_id),
+                'content': fallback_text,
+                'content_type': content_type,
+                'structured_content': structured_content,
+                'metadata': metadata or {},
+            },
+            actor_type=ActorType.ASSISTANT,
+            thread_id=thread_id,
+        )
+        
+        # 2. Create message
+        message = Message.objects.create(
+            thread=thread,
+            role=MessageRole.ASSISTANT,
+            content=fallback_text,
+            content_type=content_type,
+            structured_content=structured_content,
+            event_id=event.id,
+            metadata=metadata or {},
+        )
+        
+        logger.info(
+            "rich_message_created",
+            extra={
+                "thread_id": str(thread_id),
+                "message_id": str(message.id),
+                "content_type": content_type
+            }
+        )
+        
+        return message
+    
+    @staticmethod
+    def create_signal_extraction_card(
+        thread_id: uuid.UUID,
+        signals: List
+    ) -> Message:
+        """
+        Create a signal extraction card message
+        
+        Args:
+            thread_id: Thread ID
+            signals: List of Signal objects
+            
+        Returns:
+            Created Message with signal card
+        """
+        card_data = CardBuilder.build_signal_extraction_card(signals)
+        
+        fallback_text = f"I detected {len(signals)} signals in our conversation: "
+        fallback_text += f"{sum(1 for s in signals if s.type == 'assumption')} assumptions, "
+        fallback_text += f"{sum(1 for s in signals if s.type == 'question')} questions, "
+        fallback_text += f"{sum(1 for s in signals if s.type == 'evidence')} pieces of evidence."
+        
+        return ChatService.create_rich_message(
+            thread_id=thread_id,
+            content_type='card_signal_extraction',
+            structured_content=card_data,
+            fallback_text=fallback_text,
+            metadata={'signal_count': len(signals)}
+        )
+    
+    @staticmethod
+    def create_assumption_validator_card(
+        thread_id: uuid.UUID,
+        assumptions: List,
+        research_results: Optional[dict] = None
+    ) -> Message:
+        """
+        Create an assumption validator card message
+        
+        Args:
+            thread_id: Thread ID
+            assumptions: List of assumption Signal objects
+            research_results: Optional research results
+            
+        Returns:
+            Created Message with assumption validator card
+        """
+        card_data = CardBuilder.build_assumption_validator_card(assumptions, research_results)
+        
+        fallback_text = f"Assumption validation results for {len(assumptions)} assumptions."
+        
+        return ChatService.create_rich_message(
+            thread_id=thread_id,
+            content_type='card_assumption_validator',
+            structured_content=card_data,
+            fallback_text=fallback_text,
+            metadata={'assumption_count': len(assumptions)}
+        )

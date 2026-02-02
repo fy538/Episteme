@@ -12,6 +12,8 @@ import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { chatAPI } from '@/lib/api/chat';
 import type { Message } from '@/lib/types/chat';
+import type { CardAction } from '@/lib/types/cards';
+import { useCardActions } from '@/hooks/useCardActions';
 
 export function ChatInterface({
   threadId,
@@ -40,6 +42,9 @@ export function ChatInterface({
   const [error, setError] = useState<string | null>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [ttft, setTtft] = useState<number | null>(null);
+  
+  // Card actions hook
+  const { executeAction, isExecuting } = useCardActions();
 
   // Load messages on mount
   useEffect(() => {
@@ -267,6 +272,16 @@ export function ChatInterface({
       );
     }
   }
+  
+  function handleCardAction(action: CardAction, messageId: string) {
+    console.log('[Chat] Card action:', action.action_type, messageId);
+    
+    executeAction({
+      action,
+      messageId,
+      threadId
+    });
+  }
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -336,6 +351,7 @@ export function ChatInterface({
         isWaitingForResponse={isWaitingForResponse}
         isStreaming={isStreaming}
         ttft={ttft}
+        onCardAction={handleCardAction}
       />
       <MessageInput 
         onSend={handleSendMessage} 

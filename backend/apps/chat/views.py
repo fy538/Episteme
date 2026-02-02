@@ -363,6 +363,120 @@ Return ONLY valid JSON:
             )
     
     @action(detail=True, methods=['post'])
+    def validate_assumptions(self, request, pk=None):
+        """
+        Validate assumptions from a card action.
+        
+        POST /api/chat/threads/{id}/validate_assumptions/
+        Body: {"assumption_ids": ["uuid1", "uuid2"]}
+        
+        Triggers research to validate assumptions.
+        """
+        from apps.signals.models import Signal
+        
+        thread = self.get_object()
+        assumption_ids = request.data.get('assumption_ids', [])
+        
+        if not assumption_ids:
+            return Response(
+                {'error': 'assumption_ids required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get assumptions
+        assumptions = Signal.objects.filter(
+            id__in=assumption_ids,
+            thread=thread,
+            type='assumption'
+        )
+        
+        if not assumptions.exists():
+            return Response(
+                {'error': 'No valid assumptions found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Create assumption validator card
+        message = ChatService.create_assumption_validator_card(
+            thread_id=thread.id,
+            assumptions=list(assumptions)
+        )
+        
+        return Response({
+            'status': 'validation_started',
+            'message_id': str(message.id),
+            'assumption_count': len(assumptions)
+        })
+    
+    @action(detail=True, methods=['post'])
+    def organize_questions(self, request, pk=None):
+        """
+        Organize questions into an inquiry.
+        
+        POST /api/chat/threads/{id}/organize_questions/
+        Body: {"question_ids": ["uuid1", "uuid2"]}
+        """
+        from apps.signals.models import Signal
+        
+        thread = self.get_object()
+        question_ids = request.data.get('question_ids', [])
+        
+        if not question_ids:
+            return Response(
+                {'error': 'question_ids required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get questions
+        questions = Signal.objects.filter(
+            id__in=question_ids,
+            thread=thread,
+            type='question'
+        )
+        
+        if not questions.exists():
+            return Response(
+                {'error': 'No valid questions found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # TODO: Actually create inquiry
+        # For now, just acknowledge
+        
+        return Response({
+            'status': 'questions_organized',
+            'question_count': len(questions),
+            'message': 'Questions ready to be organized into inquiry'
+        })
+    
+    @action(detail=True, methods=['post'])
+    def dismiss_suggestion(self, request, pk=None):
+        """
+        Dismiss a suggestion/intervention.
+        
+        POST /api/chat/threads/{id}/dismiss_suggestion/
+        Body: {"type": "organize_questions"}
+        """
+        from .interventions import InterventionService
+        
+        thread = self.get_object()
+        suggestion_type = request.data.get('type')
+        
+        if not suggestion_type:
+            return Response(
+                {'error': 'type required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Mark suggestion as dismissed
+        InterventionService.dismiss_suggestion(thread, suggestion_type)
+        
+        return Response({
+            'status': 'dismissed',
+            'type': suggestion_type
+        })
+    
+    @action(detail=True, methods=['post'])
     async def create_case_from_analysis(self, request, pk=None):
         """
         Create case from conversation analysis with pre-filled content.

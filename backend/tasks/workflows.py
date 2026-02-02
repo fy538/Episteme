@@ -117,6 +117,27 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
         
         thread.save()
     
+    # STEP 2.5: Check for proactive interventions (pattern detection)
+    # This runs after agent checks but before generating response
+    try:
+        from apps.chat.interventions import InterventionService
+        
+        intervention_msg = InterventionService.check_and_intervene(thread)
+        if intervention_msg:
+            logger.info(
+                "proactive_intervention_triggered",
+                extra={
+                    "thread_id": str(thread.id),
+                    "message_id": str(intervention_msg.id),
+                    "content_type": intervention_msg.content_type
+                }
+            )
+    except Exception:
+        logger.exception(
+            "intervention_check_failed",
+            extra={"thread_id": str(thread.id)}
+        )
+    
     # STEP 3: Generate normal assistant response (Phase 1: with memory integration)
     response = ChatService.generate_assistant_response(
         thread_id=thread.id,
