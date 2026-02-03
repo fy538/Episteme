@@ -117,13 +117,13 @@ export function CaseBriefView({
                 }}
                 autoFocus
                 aria-label="Edit case title"
-                className="text-3xl font-bold text-neutral-900 border-b-2 border-accent-500 bg-transparent outline-none flex-1 h-auto py-0"
+                className="text-3xl tracking-tight font-bold text-neutral-900 border-b-2 border-accent-500 bg-transparent outline-none flex-1 h-auto py-0"
               />
             </div>
           ) : (
             <button
               onClick={() => setIsEditingTitle(true)}
-              className="text-3xl font-bold text-neutral-900 hover:text-accent-600 transition-colors"
+              className="text-3xl tracking-tight font-bold text-neutral-900 hover:text-accent-600 transition-colors"
             >
               {caseData.title}
             </button>
@@ -137,7 +137,7 @@ export function CaseBriefView({
             {caseData.stakes} stakes
           </span>
           {caseData.confidence != null && (
-            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
+            <span className="px-2 py-1 bg-accent-100 text-accent-700 rounded">
               {Math.round(caseData.confidence * 100)}% confidence
             </span>
           )}

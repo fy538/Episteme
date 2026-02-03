@@ -1,7 +1,7 @@
 import { AssumptionValidatorCard as CardType, CardAction } from '@/lib/types/cards';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
 interface Props {
   card: CardType;
@@ -9,7 +9,7 @@ interface Props {
 }
 
 const statusConfig = {
-  pending: { color: 'secondary' as const, icon: '⏳', label: 'Pending' },
+  pending: { color: 'neutral' as const, icon: '⏳', label: 'Pending' },
   validated: { color: 'success' as const, icon: '✅', label: 'Validated' },
   refuted: { color: 'error' as const, icon: '❌', label: 'Refuted' },
   uncertain: { color: 'warning' as const, icon: '⚠️', label: 'Uncertain' }
@@ -77,7 +77,7 @@ export function AssumptionValidatorCard({ card, onAction }: Props) {
             {card.actions.map((action) => (
               <Button
                 key={action.id}
-                variant={action.variant === 'primary' ? 'default' : 'secondary'}
+                variant={action.variant === 'primary' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => onAction(action)}
               >

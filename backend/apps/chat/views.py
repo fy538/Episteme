@@ -7,13 +7,14 @@ import logging
 import asyncio
 from asgiref.sync import sync_to_async
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import BaseRenderer
 from django.conf import settings
 from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 
 from .models import ChatThread, Message
 from .serializers import (
@@ -510,6 +511,271 @@ Return ONLY valid JSON:
             'inquiries': await sync_to_async(lambda: InquirySerializer(inquiries, many=True).data)(),
             'correlation_id': str(correlation_id)
         })
+        
+        async def event_stream():
+            """Generator for SSE events"""
+            from apps.companion.services import CompanionService
+            from apps.companion.models import ReflectionTriggerType, Reflection as ReflectionModel
+            
+            companion = CompanionService()
+            
+            # Prepare reflection context
+            try:
+                context = await companion.prepare_reflection_context(thread_id=thread.id)
+                
+                # Extract current topic for semantic highlighting
+                current_topic = companion.extract_current_topic(context['recent_messages'])
+                
+                # Stream reflection token-by-token
+                full_reflection_text = ""
+                
+                async for token in companion.stream_reflection(
+                    thread=context['thread'],
+                    recent_messages=context['recent_messages'],
+                    current_signals=context['current_signals'],
+                    patterns=context['patterns']
+                ):
+                    full_reflection_text += token
+                    
+                    # Send each token immediately
+                    payload = json.dumps({
+                        'type': 'reflection_chunk',
+                        'delta': token
+                    })
+                    yield f"data: {payload}\n\n"
+                
+                # Save completed reflection to database
+                reflection = ReflectionModel.objects.create(
+                    thread=context['thread'],
+                    reflection_text=full_reflection_text.strip(),
+                    trigger_type=ReflectionTriggerType.PERIODIC,
+                    analyzed_messages=[str(m['id']) for m in context['recent_messages']],
+                    analyzed_signals=[str(s['id']) for s in context['current_signals']],
+                    patterns=context['patterns']
+                )
+                
+                # Send completion event with full reflection and patterns
+                payload = json.dumps({
+                    'type': 'reflection_complete',
+                    'id': str(reflection.id),
+                    'text': full_reflection_text.strip(),
+                    'patterns': context['patterns'],
+                    'current_topic': current_topic
+                })
+                yield f"data: {payload}\n\n"
+                
+            except Exception:
+                logger.exception(
+                    "companion_reflection_failed",
+                    extra={"thread_id": str(thread.id)}
+                )
+            
+            # Send initial background activity
+            try:
+                activity = await companion.track_background_work(thread_id=thread.id)
+                
+                payload = json.dumps({
+                    'type': 'background_update',
+                    'activity': activity
+                })
+                yield f"data: {payload}\n\n"
+                
+            except Exception:
+                logger.exception(
+                    "companion_background_failed",
+                    extra={"thread_id": str(thread.id)}
+                )
+            
+            # Keep connection alive and send periodic updates
+            update_interval = 30  # seconds
+            last_update = time.time()
+            
+            while True:
+                await asyncio.sleep(2)  # Check every 2 seconds
+                
+                current_time = time.time()
+                
+                # Send periodic background updates
+                if current_time - last_update >= update_interval:
+                    try:
+                        activity = await companion.track_background_work(thread_id=thread.id)
+                        
+                        # Only send if there's actual activity
+                        if activity['signals_extracted']['count'] > 0 or \
+                           activity['evidence_linked']['count'] > 0 or \
+                           activity['connections_built']['count'] > 0 or \
+                           activity['confidence_updates']:
+                            payload = json.dumps({
+                                'type': 'background_update',
+                                'activity': activity
+                            })
+                            yield f"data: {payload}\n\n"
+                        
+                        last_update = current_time
+                        
+                    except Exception:
+                        logger.exception(
+                            "companion_periodic_update_failed",
+                            extra={"thread_id": str(thread.id)}
+                        )
+                
+                # Send heartbeat to keep connection alive
+                if current_time - last_update >= 10:
+                    yield f": heartbeat\n\n"
+        
+        # Create streaming response
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        
+        # CORS headers
+        origin = request.headers.get("Origin", "http://localhost:3000")
+        response["Access-Control-Allow-Origin"] = origin
+        response["Access-Control-Allow-Credentials"] = "true"
+        
+        return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+async def companion_stream(request, thread_id):
+    """
+    Server-Sent Events stream for reasoning companion updates.
+    
+    GET /api/chat/threads/{thread_id}/companion-stream/
+    
+    Streams:
+    - reflection: Meta-cognitive commentary
+    - background_update: Activity summary
+    - confidence_change: Inquiry confidence updates
+    """
+    # Get thread and verify ownership
+    thread = await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=request.user)
+    )()
+    
+    async def event_stream():
+        """Generator for SSE events"""
+        from apps.companion.services import CompanionService
+        from apps.companion.models import ReflectionTriggerType, Reflection as ReflectionModel
+        
+        companion = CompanionService()
+        
+        # Prepare reflection context
+        try:
+            context = await companion.prepare_reflection_context(thread_id=thread.id)
+            
+            # Extract current topic for semantic highlighting
+            current_topic = companion.extract_current_topic(context['recent_messages'])
+            
+            # Stream reflection token-by-token
+            full_reflection_text = ""
+            
+            async for token in companion.stream_reflection(
+                thread=context['thread'],
+                recent_messages=context['recent_messages'],
+                current_signals=context['current_signals'],
+                patterns=context['patterns']
+            ):
+                full_reflection_text += token
+                
+                # Send each token immediately
+                payload = json.dumps({
+                    'type': 'reflection_chunk',
+                    'delta': token
+                })
+                yield f"data: {payload}\n\n"
+            
+            # Save completed reflection to database
+            reflection = ReflectionModel.objects.create(
+                thread=context['thread'],
+                reflection_text=full_reflection_text.strip(),
+                trigger_type=ReflectionTriggerType.PERIODIC,
+                analyzed_messages=[str(m['id']) for m in context['recent_messages']],
+                analyzed_signals=[str(s['id']) for s in context['current_signals']],
+                patterns=context['patterns']
+            )
+            
+            # Send completion event with full reflection and patterns
+            payload = json.dumps({
+                'type': 'reflection_complete',
+                'id': str(reflection.id),
+                'text': full_reflection_text.strip(),
+                'patterns': context['patterns'],
+                'current_topic': current_topic
+            })
+            yield f"data: {payload}\n\n"
+            
+        except Exception:
+            logger.exception(
+                "companion_reflection_failed",
+                extra={"thread_id": str(thread.id)}
+            )
+        
+        # Send initial background activity
+        try:
+            activity = await companion.track_background_work(thread_id=thread.id)
+            
+            payload = json.dumps({
+                'type': 'background_update',
+                'activity': activity
+            })
+            yield f"data: {payload}\n\n"
+            
+        except Exception:
+            logger.exception(
+                "companion_background_failed",
+                extra={"thread_id": str(thread.id)}
+            )
+        
+        # Keep connection alive and send periodic updates
+        update_interval = 30  # seconds
+        last_update = time.time()
+        
+        while True:
+            await asyncio.sleep(2)  # Check every 2 seconds
+            
+            current_time = time.time()
+            
+            # Send periodic background updates
+            if current_time - last_update >= update_interval:
+                try:
+                    activity = await companion.track_background_work(thread_id=thread.id)
+                    
+                    # Only send if there's actual activity
+                    if activity['signals_extracted']['count'] > 0 or \
+                       activity['evidence_linked']['count'] > 0 or \
+                       activity['connections_built']['count'] > 0 or \
+                       activity['confidence_updates']:
+                        payload = json.dumps({
+                            'type': 'background_update',
+                            'activity': activity
+                        })
+                        yield f"data: {payload}\n\n"
+                    
+                    last_update = current_time
+                    
+                except Exception:
+                    logger.exception(
+                        "companion_periodic_update_failed",
+                        extra={"thread_id": str(thread.id)}
+                    )
+            
+            # Send heartbeat to keep connection alive
+            if current_time - last_update >= 10:
+                yield f": heartbeat\n\n"
+    
+    # Create streaming response
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    
+    # CORS headers
+    origin = request.headers.get("Origin", "http://localhost:3000")
+    response["Access-Control-Allow-Origin"] = origin
+    response["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
 
 class MessageViewSet(viewsets.ReadOnlyModelViewSet):

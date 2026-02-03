@@ -1,7 +1,7 @@
 import { SignalExtractionCard as CardType, CardAction } from '@/lib/types/cards';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
 interface Props {
   card: CardType;
@@ -10,9 +10,9 @@ interface Props {
 
 const signalTypeColors = {
   assumption: 'warning' as const,
-  question: 'accent' as const,
+  question: 'default' as const,
   evidence: 'success' as const,
-  claim: 'primary' as const
+  claim: 'default' as const
 };
 
 const signalTypeIcons = {
@@ -62,7 +62,7 @@ export function SignalExtractionCard({ card, onAction }: Props) {
                       >
                         {Math.round(item.confidence * 100)}% confidence
                       </Badge>
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge variant="neutral" className="text-xs">
                         {item.status}
                       </Badge>
                     </div>
@@ -79,7 +79,7 @@ export function SignalExtractionCard({ card, onAction }: Props) {
             {card.actions.map((action) => (
               <Button
                 key={action.id}
-                variant={action.variant === 'primary' ? 'default' : 'secondary'}
+                variant={action.variant === 'primary' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => onAction(action)}
               >

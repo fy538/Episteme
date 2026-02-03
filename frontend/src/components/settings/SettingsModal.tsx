@@ -111,7 +111,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <div className="flex-1 flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-neutral-200">
-            <h3 className="text-xl font-semibold text-neutral-900">
+            <h3 className="text-xl font-display font-semibold tracking-tight text-neutral-900">
               {TABS.find(t => t.id === activeTab)?.label}
             </h3>
             <button

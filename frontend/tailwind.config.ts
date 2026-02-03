@@ -139,6 +139,7 @@ const config: Config = {
       // Design Tokens: Typography
       fontFamily: {
         sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       fontSize: {
@@ -170,23 +171,33 @@ const config: Config = {
         '2xl': '1.5rem',   // 24px
         'full': '9999px',
       },
-      // Design Tokens: Shadows (refined)
+      // Design Tokens: Shadows (refined elevation system)
       boxShadow: {
-        'sm': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-        'DEFAULT': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
-        'md': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-        'lg': '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
-        'xl': '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
-        '2xl': '0 25px 50px -12px rgb(0 0 0 / 0.25)',
+        'xs': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+        'sm': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+        'DEFAULT': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        'md': '0 8px 12px -2px rgb(0 0 0 / 0.12), 0 4px 8px -4px rgb(0 0 0 / 0.08)',
+        'lg': '0 12px 24px -4px rgb(0 0 0 / 0.15), 0 8px 16px -8px rgb(0 0 0 / 0.1)',
+        'xl': '0 20px 40px -8px rgb(0 0 0 / 0.2), 0 12px 24px -12px rgb(0 0 0 / 0.15)',
+        '2xl': '0 30px 60px -12px rgb(0 0 0 / 0.25), 0 18px 36px -18px rgb(0 0 0 / 0.2)',
         'inner': 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
         'none': 'none',
+        // Colored shadows for accents
+        'accent': '0 10px 30px -8px rgb(20 184 166 / 0.3)',
+        'success': '0 10px 30px -8px rgb(16 185 129 / 0.3)',
+        'error': '0 10px 30px -8px rgb(225 29 72 / 0.3)',
+        'glow': '0 0 20px rgb(20 184 166 / 0.4), 0 0 40px rgb(20 184 166 / 0.2)',
       },
-      // Animation & Transitions
+      // Animation & Transitions (Enhanced for smoothness)
       animation: {
         'fade-in': 'fadeIn 200ms ease-in',
-        'slide-up': 'slideUp 300ms ease-out',
-        'slide-down': 'slideDown 300ms ease-out',
-        'scale-in': 'scaleIn 200ms ease-out',
+        'slide-up': 'slideUp 300ms cubic-bezier(0.33, 1, 0.68, 1)',
+        'slide-down': 'slideDown 300ms cubic-bezier(0.33, 1, 0.68, 1)',
+        'scale-in': 'scaleIn 200ms cubic-bezier(0.33, 1, 0.68, 1)',
+        'pulse-subtle': 'pulseSubtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'shimmer': 'shimmer 2s linear infinite',
+        'wiggle': 'wiggle 0.5s ease-in-out',
+        'heartbeat': 'heartbeat 1.5s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -205,6 +216,37 @@ const config: Config = {
           '0%': { transform: 'scale(0.95)', opacity: '0' },
           '100%': { transform: 'scale(1)', opacity: '1' },
         },
+        pulseSubtle: {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.8' },
+        },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        wiggle: {
+          '0%, 100%': { transform: 'rotate(0deg)' },
+          '25%': { transform: 'rotate(-3deg)' },
+          '75%': { transform: 'rotate(3deg)' },
+        },
+        heartbeat: {
+          '0%, 100%': { transform: 'scale(1)' },
+          '14%': { transform: 'scale(1.1)' },
+          '28%': { transform: 'scale(1)' },
+          '42%': { transform: 'scale(1.1)' },
+          '56%': { transform: 'scale(1)' },
+        },
+      },
+      // Add backdrop blur utilities
+      backdropBlur: {
+        xs: '2px',
+        sm: '4px',
+        DEFAULT: '8px',
+        md: '12px',
+        lg: '16px',
+        xl: '24px',
+        '2xl': '40px',
+        '3xl': '64px',
       },
     },
   },

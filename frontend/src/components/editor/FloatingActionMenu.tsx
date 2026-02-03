@@ -81,7 +81,7 @@ export function FloatingActionMenu({
   return (
     <div
       data-floating-menu
-      className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[180px]"
+      className="fixed z-50 bg-white border border-neutral-200 rounded-lg shadow-lg py-1 min-w-[180px]"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -92,9 +92,9 @@ export function FloatingActionMenu({
           onCreateInquiry();
           onClose();
         }}
-        className="w-full px-4 py-2 text-left text-sm hover:bg-blue-50 transition-colors flex items-center gap-2"
+        className="w-full px-4 py-2 text-left text-sm hover:bg-accent-50 transition-colors flex items-center gap-2"
       >
-        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-accent-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <span className="font-medium">Create Inquiry</span>
@@ -113,8 +113,8 @@ export function FloatingActionMenu({
         <span className="font-medium">Mark as Assumption</span>
       </button>
 
-      <div className="border-t border-gray-200 mt-1 pt-1">
-        <div className="px-4 py-1 text-xs text-gray-500">
+      <div className="border-t border-neutral-200 mt-1 pt-1">
+        <div className="px-4 py-1 text-xs text-neutral-500">
           ESC to close
         </div>
       </div>

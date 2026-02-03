@@ -127,11 +127,11 @@ export function StructureSidebar({
   }
 
   return (
-    <div className="w-80 border-l border-gray-200 p-4 overflow-y-auto bg-gray-50 flex flex-col">
+    <div className="w-80 border-l border-neutral-200 p-4 overflow-y-auto bg-neutral-50 flex flex-col">
       <div className="flex-1 space-y-6">
         {/* Header */}
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          <h2 className="text-lg font-semibold text-neutral-900 mb-4">
             Structure
           </h2>
           
@@ -162,10 +162,10 @@ export function StructureSidebar({
 
       {/* Collapsible Signals - Bottom Right */}
       {signals.length > 0 && (
-        <div className="mt-auto pt-4 border-t border-gray-200">
+        <div className="mt-auto pt-4 border-t border-neutral-200">
           <button
             onClick={() => setSignalsExpanded(!signalsExpanded)}
-            className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded transition-colors"
+            className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 rounded transition-colors"
           >
             <span className="flex items-center gap-2">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">

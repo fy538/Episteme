@@ -1,11 +1,15 @@
 /**
  * Toast component - non-blocking notifications
+ * Enhanced with smoother animations
  */
 
 'use client';
 
 import * as React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { easingCurves, transitionDurations } from '@/lib/motion-config';
 
 export interface Toast {
   id: string;
@@ -67,10 +71,12 @@ function ToastContainer({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="fixed bottom-0 right-0 z-50 p-4 space-y-2 max-w-md w-full">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
-      ))}
+    <div className="fixed bottom-0 right-0 z-50 p-4 space-y-2 max-w-md w-full pointer-events-none">
+      <AnimatePresence mode="popLayout">
+        {toasts.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -82,12 +88,14 @@ function ToastItem({
   toast: Toast;
   onRemove: (id: string) => void;
 }) {
-  return (
+  const prefersReducedMotion = useReducedMotion();
+
+  const content = (
     <div
       className={cn(
-        'flex items-start gap-3 rounded-lg border p-4 shadow-lg animate-slide-up',
-        'bg-white dark:bg-primary-900',
-        'border-neutral-200 dark:border-neutral-700',
+        'flex items-start gap-3 rounded-lg border p-4 shadow-xl pointer-events-auto',
+        'backdrop-blur-md bg-white/95 dark:bg-primary-900/95',
+        'border-neutral-200/50 dark:border-neutral-700/50',
         {
           'border-l-4 border-l-accent-600': toast.variant === 'default',
           'border-l-4 border-l-success-600': toast.variant === 'success',
@@ -144,5 +152,24 @@ function ToastItem({
         </svg>
       </button>
     </div>
+  );
+
+  if (prefersReducedMotion) {
+    return content;
+  }
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+      transition={{
+        duration: transitionDurations.normal,
+        ease: easingCurves.easeOutCubic,
+      }}
+    >
+      {content}
+    </motion.div>
   );
 }

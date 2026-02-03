@@ -32,7 +32,7 @@ export function useCardActions() {
           });
         
         case 'create_case_from_thread':
-          return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`);
+          return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
         
         case 'dismiss_suggestion':
           return apiClient.post(`/chat/threads/${threadId}/dismiss_suggestion/`, {
@@ -48,7 +48,7 @@ export function useCardActions() {
           });
         
         case 'preview_case_structure':
-          return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`);
+          return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
         
         case 'stop_agent':
           // TODO: Implement agent stop endpoint

@@ -123,7 +123,7 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
       {/* Critique */}
       <div className="mb-6">
         <h4 className="font-medium mb-2">Red-Team / Critique</h4>
-        <p className="text-sm text-gray-600 mb-3">
+        <p className="text-sm text-neutral-600 mb-3">
           Challenge assumptions and find counterarguments
         </p>
         <button
@@ -138,7 +138,7 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
       {/* Brief */}
       <div>
         <h4 className="font-medium mb-2">Decision Brief</h4>
-        <p className="text-sm text-gray-600 mb-3">
+        <p className="text-sm text-neutral-600 mb-3">
           Synthesize position with evidence into stakeholder brief
         </p>
         <button
@@ -152,12 +152,12 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
 
       {/* Progress indicator */}
       {isGenerating && (
-        <div className="mt-4 p-3 bg-blue-50 rounded">
-          <p className="text-sm text-blue-800">
+        <div className="mt-4 p-3 bg-accent-50 rounded">
+          <p className="text-sm text-accent-800">
             Generating {generationType}... This may take 10-30 seconds.
           </p>
-          <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
-            <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+          <div className="mt-2 w-full bg-accent-200 dark:bg-accent-800 rounded-full h-2">
+            <div className="bg-accent-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
           </div>
         </div>
       )}

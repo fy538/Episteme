@@ -190,7 +190,7 @@ function StatCard({ label, value, variant }: { label: string; value: number; var
 
   return (
     <div className={`p-4 rounded-md border ${colorClasses[variant as keyof typeof colorClasses]}`}>
-      <p className="text-2xl font-semibold">{value}</p>
+      <p className="text-2xl tracking-tight font-semibold">{value}</p>
       <p className="text-xs font-medium mt-1">{label}</p>
     </div>
   );

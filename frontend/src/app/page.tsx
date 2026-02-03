@@ -39,12 +39,14 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-neutral-900 dark:text-neutral-50 mb-4">
-          Episteme
+    <main className="flex min-h-screen flex-col items-center justify-center p-8 md:p-24 bg-gradient-to-br from-neutral-50 via-white to-accent-50/30 dark:from-primary-950 dark:via-primary-950 dark:to-accent-950/20">
+      <div className="text-center max-w-2xl">
+        <h1 className="text-5xl md:text-6xl font-display font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mb-6">
+          <span className="bg-gradient-to-r from-accent-600 via-accent-500 to-accent-700 bg-clip-text text-transparent">
+            Episteme
+          </span>
         </h1>
-        <p className="text-xl text-neutral-600 dark:text-neutral-400 mb-8">
+        <p className="text-xl md:text-2xl text-neutral-600 dark:text-neutral-400 mb-12 leading-relaxed">
           Workspace for rigorous decision-making
         </p>
         

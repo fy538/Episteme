@@ -56,7 +56,7 @@ export function InvestigationSetupModal({
         {/* Header */}
         <div className="p-6 border-b border-neutral-200">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-2xl font-bold text-neutral-900">Start Investigation</h2>
+            <h2 className="text-2xl tracking-tight font-bold text-neutral-900">Start Investigation</h2>
             <Button onClick={onCancel} variant="ghost" size="icon">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -71,8 +71,8 @@ export function InvestigationSetupModal({
           <div className="space-y-6">
             {/* Context Display */}
             {context.selectedText && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs font-medium text-blue-900 mb-1">Selected from brief:</p>
+              <div className="p-3 bg-accent-50 border border-accent-200 rounded-lg">
+                <p className="text-xs font-medium text-accent-900 mb-1">Selected from brief:</p>
                 <p className="text-sm text-neutral-800 italic">"{context.selectedText}"</p>
               </div>
             )}
@@ -145,7 +145,7 @@ export function InvestigationSetupModal({
           </div>
 
           {/* Right: Preview */}
-          <div className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
+          <div className="bg-gradient-to-br from-purple-50 to-accent-50 dark:from-purple-900/20 dark:to-accent-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-purple-900 mb-4">What You'll Get</h3>
             
             <div className="space-y-4">

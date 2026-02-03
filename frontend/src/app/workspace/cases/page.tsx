@@ -99,7 +99,7 @@ export default function CasesListPage() {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-primary-900 dark:text-primary-50">
+              <h1 className="text-3xl tracking-tight font-bold text-primary-900 dark:text-primary-50">
                 Cases
               </h1>
               <p className="text-primary-600 dark:text-primary-400 mt-1">

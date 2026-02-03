@@ -71,22 +71,22 @@ export function AssumptionPopover({
 
         <div className="space-y-2 text-sm mb-3">
           <div className="flex items-center justify-between">
-            <span className="text-gray-600">Status:</span>
+            <span className="text-neutral-600">Status:</span>
             <span className={`font-medium ${colors.text}`}>
               {assumption.status}
             </span>
           </div>
           
           <div className="flex items-center justify-between">
-            <span className="text-gray-600">Risk if wrong:</span>
+            <span className="text-neutral-600">Risk if wrong:</span>
             <span className="font-medium">
               {riskIcons[assumption.risk_level]} {assumption.risk_level}
             </span>
           </div>
 
           {assumption.validation_approach && (
-            <div className="pt-2 border-t border-gray-200">
-              <p className="text-gray-600 text-xs">
+            <div className="pt-2 border-t border-neutral-200">
+              <p className="text-neutral-600 text-xs">
                 Suggested: {assumption.validation_approach}
               </p>
             </div>

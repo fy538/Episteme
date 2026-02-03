@@ -56,6 +56,26 @@ class InquiryViewSet(viewsets.ModelViewSet):
         
         return queryset.select_related('case').prefetch_related('related_signals')
     
+    @action(detail=True, methods=['get'])
+    def confidence_history(self, request, pk=None):
+        """
+        Get confidence evolution timeline for an inquiry.
+        
+        GET /api/inquiries/{id}/confidence-history/
+        
+        Returns array of confidence changes with timestamps and reasons.
+        """
+        from apps.companion.models import InquiryHistory
+        from apps.companion.serializers import InquiryHistorySerializer
+        
+        inquiry = self.get_object()
+        
+        # Get confidence history ordered by time
+        history = InquiryHistory.objects.filter(inquiry=inquiry).order_by('timestamp')
+        
+        serializer = InquiryHistorySerializer(history, many=True)
+        return Response(serializer.data)
+    
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
         """

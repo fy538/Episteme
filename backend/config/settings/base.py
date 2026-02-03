@@ -45,6 +45,8 @@ INSTALLED_APPS = [
     'apps.projects',  # Phase 2
     'apps.artifacts',  # Phase 2.4
     'apps.skills',  # Skills system
+    'apps.companion',  # Reasoning companion
+    'apps.reasoning',  # Auto-reasoning and knowledge graph
 ]
 
 MIDDLEWARE = [

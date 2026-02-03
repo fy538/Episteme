@@ -28,7 +28,7 @@ class CaseSerializer(serializers.ModelSerializer):
             'position',
             'confidence',
             'user',
-            'linked_thread',
+            'project',
             'created_from_event_id',
             'created_at',
             'updated_at',

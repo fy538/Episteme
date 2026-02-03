@@ -1,10 +1,16 @@
 /**
  * Dialog component - reusable modal
+ * Enhanced with smooth animations
  */
 
+'use client';
+
 import * as React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Button } from './button';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { easingCurves, transitionDurations } from '@/lib/motion-config';
 
 export interface DialogProps {
   isOpen: boolean;
@@ -33,36 +39,40 @@ export function Dialog({
       if (e.key === 'Escape') onClose();
     }
 
+    // Prevent body scroll when dialog is open
+    document.body.classList.add('dialog-open');
+
     window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+      document.body.classList.remove('dialog-open');
+    };
   }, [isOpen, onClose]);
+
+  const prefersReducedMotion = useReducedMotion();
 
   if (!isOpen) return null;
 
-  return (
+  const dialogContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
+      className={cn(
+        'bg-white dark:bg-primary-900 rounded-lg shadow-xl w-full',
+        {
+          'max-w-sm': size === 'sm',
+          'max-w-md': size === 'md',
+          'max-w-2xl': size === 'lg',
+          'max-w-4xl': size === 'xl',
+          'max-w-full m-4': size === 'full',
+        }
+      )}
+      onClick={(e) => e.stopPropagation()}
     >
-      <div
-        className={cn(
-          'bg-white rounded-lg shadow-xl w-full animate-scale-in',
-          {
-            'max-w-sm': size === 'sm',
-            'max-w-md': size === 'md',
-            'max-w-2xl': size === 'lg',
-            'max-w-4xl': size === 'xl',
-            'max-w-full m-4': size === 'full',
-          }
-        )}
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Header */}
         {(title || showClose) && (
           <div className="flex items-center justify-between p-6 border-b border-neutral-200">
             <div>
               {title && (
-                <h2 className="text-xl font-semibold text-primary-900">{title}</h2>
+                <h2 className="text-xl font-display font-semibold tracking-tight text-primary-900">{title}</h2>
               )}
               {description && (
                 <p className="text-sm text-primary-600 mt-1">{description}</p>
@@ -81,7 +91,43 @@ export function Dialog({
         {/* Content */}
         <div className="p-6">{children}</div>
       </div>
-    </div>
+  );
+
+  if (prefersReducedMotion) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onClick={onClose}
+      >
+        {dialogContent}
+      </div>
+    );
+  }
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: transitionDurations.fast }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          transition={{
+            duration: transitionDurations.normal,
+            ease: easingCurves.easeOutCubic,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {dialogContent}
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 

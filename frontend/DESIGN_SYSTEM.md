@@ -481,29 +481,229 @@ Build complex UIs by composing primitives:
 
 ---
 
-## Future Enhancements
+---
 
-### Planned Components
-- [ ] Select/Dropdown
-- [ ] Modal/Dialog
-- [ ] Toast notifications
-- [ ] Tabs
-- [ ] Accordion
-- [ ] Tooltip
-- [ ] Popover
-- [ ] Date picker
-- [ ] Table
-- [ ] Avatar
-- [ ] Checkbox/Radio
-- [ ] Switch/Toggle
+## UX & Animation Principles
 
-### Planned Features
-- [ ] Dark mode support
-- [ ] Animation presets
-- [ ] Form validation patterns
-- [ ] Loading states
-- [ ] Empty states
-- [ ] Error states
+### Core Philosophy
+**Smooth > Fast**: Users prefer 300ms smooth animation over instant jarring changes
+**Feedback > Speed**: Optimistic updates make apps feel instant
+**Delight > Decoration**: Animations serve purpose, not just aesthetics
+
+### Animation Guidelines
+
+#### 1. Page Transitions
+- **Duration**: 300ms
+- **Easing**: easeOutExpo `[0.22, 1, 0.36, 1]`
+- **Motion**: Fade + slight upward slide (10px)
+- **Implementation**: Use `template.tsx` in app router
+
+```tsx
+// Automatic page transitions via template.tsx
+<motion.div
+  initial={{ opacity: 0, y: 10 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+>
+  {children}
+</motion.div>
+```
+
+#### 2. List Animations
+- **Stagger delay**: 30-50ms between items
+- **Only stagger first 5 items**: Avoid long delays
+- **Layout animations**: Use `layout` prop for reordering
+
+```tsx
+// Staggered list entrance
+<motion.div
+  initial={{ opacity: 0, x: -20 }}
+  animate={{ opacity: 1, x: 0 }}
+  transition={{
+    duration: 0.2,
+    delay: index < 5 ? index * 0.03 : 0,
+  }}
+>
+  {item}
+</motion.div>
+```
+
+#### 3. Button Interactions
+- **Hover**: Scale 1.02
+- **Tap**: Scale 0.98
+- **Physics**: Spring (stiffness: 400, damping: 17)
+- **Always**: Use `useReducedMotion()` for fallback
+
+```tsx
+// All buttons automatically have micro-interactions
+<motion.button
+  whileHover={{ scale: 1.02 }}
+  whileTap={{ scale: 0.98 }}
+  transition={springConfig.bouncy}
+>
+  Click me
+</motion.button>
+```
+
+#### 4. Loading States
+- **Use skeletons**, not spinners
+- **Match final layout** structure
+- **Smooth transition** to real content
+
+```tsx
+// Prefer skeletons over spinners
+if (isLoading) return <ConversationsSkeleton />;
+return <ConversationsList data={data} />;
+```
+
+#### 5. Optimistic Updates
+- **Update UI immediately** before API call
+- **Rollback on error** with toast notification
+- **Show "Saving..." indicator** only if needed
+
+```tsx
+// Optimistic create/delete
+const { execute } = useOptimisticUpdate();
+
+execute(
+  () => setItems([...items, newItem]), // Optimistic
+  () => api.create(newItem),            // API call
+  () => setItems(items),                // Rollback
+  { errorMessage: 'Failed to create' }
+);
+```
+
+#### 6. Micro-interactions
+Use sparingly for meaningful feedback:
+
+- **Pulse**: New signals, important updates
+- **Bounce**: Success actions, items added
+- **Shake**: Errors, invalid input
+- **Wobble**: Failed actions
+- **Glow**: Active processes, live data
+
+```tsx
+import { Pulse, Shake } from '@/components/ui/micro-interactions';
+
+<Pulse trigger={hasNewSignals}>
+  <Badge>3 New Signals</Badge>
+</Pulse>
+
+<Shake trigger={hasError}>
+  <Input error />
+</Shake>
+```
+
+#### 7. Gesture Support
+- **Swipe to delete**: Conversations, list items
+- **Drag to reorder**: Prioritize inquiries, organize
+- **Pull to refresh**: Mobile-style data refresh
+
+```tsx
+import { SwipeableItem } from '@/components/ui/swipeable-item';
+
+<SwipeableItem
+  onSwipeLeft={handleDelete}
+  rightAction={{ icon, color: '#e11d48', label: 'Delete' }}
+>
+  <ConversationItem />
+</SwipeableItem>
+```
+
+### Motion Config
+
+Centralized in `lib/motion-config.ts`:
+
+```tsx
+import { easingCurves, springConfig, transitionDurations } from '@/lib/motion-config';
+
+// Use predefined curves
+transition={{ ease: easingCurves.easeOutExpo }}
+
+// Use spring configs
+transition={springConfig.bouncy} // Buttons, clicks
+transition={springConfig.smooth}  // Cards, panels
+transition={springConfig.gentle}  // Pages, modals
+```
+
+### Accessibility
+
+**ALWAYS respect reduced motion:**
+
+```tsx
+const prefersReducedMotion = useReducedMotion();
+
+if (prefersReducedMotion) {
+  return <div>{children}</div>; // No animation
+}
+
+return <motion.div animate={...}>{children}</motion.div>;
+```
+
+### Performance
+
+- Use `will-change` for animated elements (already in globals.css)
+- GPU-accelerate with `transform` and `opacity` (not `top`/`left`)
+- Limit concurrent animations to <10 elements
+- Debounce scroll-linked animations
+
+### When to Use Each Animation
+
+| Use Case | Animation | Duration | Example |
+|----------|-----------|----------|---------|
+| Page navigation | Fade + slide | 300ms | Route changes |
+| List items appear | Stagger fade | 30ms delay | Conversations load |
+| Button click | Scale | 150ms | All buttons |
+| Modal open | Scale + fade | 300ms | Dialogs |
+| Toast enter | Slide up | 300ms | Notifications |
+| Delete item | Slide + fade out | 200ms | Remove from list |
+| Loading state | Pulse opacity | Infinite | Skeleton shimmer |
+| New item added | Bounce in | 200ms | Added to list |
+| Error state | Shake | 400ms | Invalid input |
+| Success state | Confetti | 3000ms | Case completed |
+
+### Loading & Progress
+
+- **Progress bar**: Top bar for navigation/async ops
+- **Skeleton**: Structure-matching placeholders
+- **Spinner**: Only for small inline loading (< 32px)
+- **Optimistic indicator**: "Saving..." badge
+
+```tsx
+// Navigation loading (automatic via LoadingBarProvider)
+<LoadingBar isLoading={isNavigating} />
+
+// Content loading
+if (isLoading) return <MessageListSkeleton />;
+
+// Optimistic state
+<OptimisticIndicator isOptimistic={isSaving} />
+```
+
+---
+
+## Component Status
+
+### ✅ Production Ready
+- Button, Input, Textarea, Label
+- Card, Badge, Breadcrumbs
+- Dialog, Toast, Spinner
+- Checkbox, Radio, Select, Switch
+- Table, Tooltip
+- Skeleton (loading states)
+- LoadingBar (progress)
+- SwipeableItem (gestures)
+- DragReorder (reordering)
+- Confetti (celebrations)
+- Micro-interactions (Pulse, Shake, Bounce, Wobble, Glow)
+
+### 🚧 Planned
+- Tabs, Accordion
+- Popover, Dropdown Menu
+- Date picker
+- Avatar, Avatar Group
+- Command palette (Cmd+K)
+- File upload
 
 ---
 

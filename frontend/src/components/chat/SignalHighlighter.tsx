@@ -15,6 +15,8 @@ export interface HighlightedSignal {
   end: number;
   text: string;
   confidence: number;
+  evidence_count?: number;
+  contradiction_count?: number;
 }
 
 interface SignalHighlighterProps {
@@ -122,6 +124,27 @@ export function SignalHighlighter({
             onClick={() => setActiveSignal(isActive ? null : signal.id)}
           >
             {segment.content}
+            
+            {/* Grounding badges - always visible for assumptions/claims */}
+            {(signal.type === 'assumption' || signal.type === 'claim') && (
+              <span className="ml-1 inline-flex items-center gap-1">
+                {signal.evidence_count === 0 && (
+                  <span className="inline-flex items-center px-1 py-0.5 text-[10px] font-medium bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 rounded">
+                    ⚠ Ungrounded
+                  </span>
+                )}
+                {signal.evidence_count! > 0 && (
+                  <span className="inline-flex items-center px-1 py-0.5 text-[10px] font-medium bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400 rounded">
+                    ✓ {signal.evidence_count}
+                  </span>
+                )}
+                {signal.contradiction_count! > 0 && (
+                  <span className="inline-flex items-center px-1 py-0.5 text-[10px] font-medium bg-error-100 dark:bg-error-900/30 text-error-700 dark:text-error-400 rounded">
+                    ✕ {signal.contradiction_count}
+                  </span>
+                )}
+              </span>
+            )}
             
             {/* Hover indicator */}
             <span className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 text-xs">

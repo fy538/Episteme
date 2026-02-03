@@ -69,7 +69,6 @@ class CaseService:
             project_id=project_id,
             position=position,
             stakes=stakes,
-            linked_thread_id=thread_id,
             created_from_event_id=event.id,
         )
         

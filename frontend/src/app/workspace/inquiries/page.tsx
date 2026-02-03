@@ -124,7 +124,7 @@ export default function InquiriesListPage() {
           {/* Header with Stats */}
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-primary-900 dark:text-primary-50">
+              <h1 className="text-3xl tracking-tight font-bold text-primary-900 dark:text-primary-50">
                 Research Inquiries
               </h1>
               <p className="text-primary-600 dark:text-primary-400 mt-1">
@@ -133,15 +133,15 @@ export default function InquiriesListPage() {
             </div>
             <div className="flex gap-3">
               <div className="text-center px-4 py-2 bg-white dark:bg-primary-900 border border-neutral-200 dark:border-neutral-800 rounded-lg">
-                <div className="text-2xl font-bold text-primary-900 dark:text-primary-50">{stats.open}</div>
+                <div className="text-2xl tracking-tight font-bold text-primary-900 dark:text-primary-50">{stats.open}</div>
                 <div className="text-xs text-primary-600 dark:text-primary-400">Open</div>
               </div>
               <div className="text-center px-4 py-2 bg-white dark:bg-primary-900 border border-neutral-200 dark:border-neutral-800 rounded-lg">
-                <div className="text-2xl font-bold text-accent-600">{stats.investigating}</div>
+                <div className="text-2xl tracking-tight font-bold text-accent-600">{stats.investigating}</div>
                 <div className="text-xs text-primary-600 dark:text-primary-400">Investigating</div>
               </div>
               <div className="text-center px-4 py-2 bg-white dark:bg-primary-900 border border-neutral-200 dark:border-neutral-800 rounded-lg">
-                <div className="text-2xl font-bold text-success-600">{stats.resolved}</div>
+                <div className="text-2xl tracking-tight font-bold text-success-600">{stats.resolved}</div>
                 <div className="text-xs text-primary-600 dark:text-primary-400">Resolved</div>
               </div>
             </div>

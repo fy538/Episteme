@@ -307,3 +307,62 @@ class CardBuilder:
         )
         
         return card.model_dump()
+    
+    @staticmethod
+    def build_contradiction_card(
+        contradiction: dict,
+        priority: str = 'high'
+    ) -> dict:
+        """
+        Build a contradiction detection card.
+        
+        Args:
+            contradiction: Dict with evidence, contradicts info
+            priority: Card priority (high/medium/low)
+        
+        Returns:
+            Dict ready for structured_content field
+        """
+        evidence_text = contradiction.get('evidence_text', '')
+        contradicts_text = contradiction.get('contradicts_text', '')
+        confidence = contradiction.get('confidence', 0.0)
+        
+        heading = "Contradiction Detected"
+        description = (
+            f'"{evidence_text[:60]}..." contradicts '
+            f'"{contradicts_text[:60]}..." '
+            f'(Confidence: {int(confidence * 100)}%)'
+        )
+        
+        actions = [
+            CardAction(
+                id='investigate_contradiction',
+                label='Investigate',
+                action_type='create_inquiry',
+                payload={
+                    'evidence_id': contradiction.get('evidence_id'),
+                    'signal_id': contradiction.get('contradicts_id'),
+                    'contradiction_data': contradiction
+                },
+                variant='primary'
+            ),
+            CardAction(
+                id='dismiss_contradiction',
+                label='Dismiss',
+                action_type='dismiss_intervention',
+                payload={'contradiction_id': contradiction.get('evidence_id')},
+                variant='secondary'
+            )
+        ]
+        
+        return ActionPromptCard(
+            heading=heading,
+            description=description,
+            prompt_type='resolve_contradiction',
+            priority=priority,
+            actions=actions,
+            metadata={
+                'contradiction': contradiction,
+                'auto_detected': True
+            }
+        ).model_dump()

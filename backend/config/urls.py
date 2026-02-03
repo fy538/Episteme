@@ -18,6 +18,8 @@ urlpatterns = [
     path('api/', include('apps.projects.urls')),  # Phase 2: projects + documents + evidence
     path('api/artifacts/', include('apps.artifacts.urls')),  # Phase 2.4: artifacts
     path('api/', include('apps.skills.urls')),  # Skills system
+    path('api/companion/', include('apps.companion.urls')),  # Reasoning companion
+    path('api/', include('apps.reasoning.urls')),  # Knowledge graph and auto-reasoning
 ]
 
 # Debug toolbar (only in development)

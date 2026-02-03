@@ -3,6 +3,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import type { Message as MessageType } from '@/lib/types/chat';
 import type { CardAction } from '@/lib/types/cards';
 import { Streamdown } from 'streamdown';
@@ -11,19 +12,24 @@ import { SignalHighlighter, type HighlightedSignal } from './SignalHighlighter';
 import { useSignalsForMessage, useDismissSignal } from '@/hooks/useSignals';
 import { useUserPreferences } from '@/hooks/usePreferences';
 import { CardRenderer } from './cards/CardRenderer';
+import { MessageListSkeleton } from '@/components/ui/skeleton';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 
 // Separate Message component to call hooks at top level
 function Message({ 
   message, 
   onAddToBrief, 
   onCreateEvidence,
-  onCardAction
+  onCardAction,
+  index,
 }: { 
   message: MessageType;
   onAddToBrief?: (messageId: string, content: string) => void;
   onCreateEvidence?: (content: string) => void;
   onCardAction?: (action: CardAction, messageId: string) => void;
+  index: number;
 }) {
+  const prefersReducedMotion = useReducedMotion();
   const isStreamingMsg = message.metadata?.streaming === true;
   const isRichMessage = message.is_rich_content && message.structured_content;
   const showActions = message.role === 'assistant' && !isStreamingMsg && !isRichMessage && message.content.length > 20;
@@ -57,11 +63,8 @@ function Message({
     }
   };
 
-  return (
-    <div
-      key={message.id}
-      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} group`}
-    >
+  const messageContent = (
+    <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
       <div
         className={`${isRichMessage ? 'w-full max-w-3xl' : 'max-w-2xl'} rounded-lg ${isRichMessage ? '' : 'px-4 py-3'} ${
           message.role === 'user'
@@ -121,7 +124,7 @@ function Message({
             {onAddToBrief && (
               <button
                 onClick={() => onAddToBrief(message.id, message.content)}
-                className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors dark:bg-blue-900 dark:text-blue-200"
+                className="text-xs px-2 py-1 bg-accent-50 text-accent-700 rounded hover:bg-accent-100 transition-colors dark:bg-accent-900 dark:text-accent-200"
               >
                 Add to Brief
               </button>
@@ -145,6 +148,27 @@ function Message({
       </div>
     </div>
   );
+
+  // Skip animation for reduced motion
+  if (prefersReducedMotion) {
+    return messageContent;
+  }
+
+  // Stagger animation for new messages
+  return (
+    <motion.div
+      key={message.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: 0.3,
+        delay: index < 3 ? index * 0.1 : 0, // Only stagger first 3 messages
+        ease: [0.22, 1, 0.36, 1],
+      }}
+    >
+      {messageContent}
+    </motion.div>
+  );
 }
 
 export function MessageList({
@@ -155,6 +179,7 @@ export function MessageList({
   onAddToBrief,
   onCreateEvidence,
   onCardAction,
+  isLoading,
 }: {
   messages: MessageType[];
   isWaitingForResponse?: boolean;
@@ -163,6 +188,7 @@ export function MessageList({
   onAddToBrief?: (messageId: string, content: string) => void;
   onCreateEvidence?: (content: string) => void;
   onCardAction?: (action: CardAction, messageId: string) => void;
+  isLoading?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -170,6 +196,11 @@ export function MessageList({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isWaitingForResponse]);
+
+  // Show skeleton during initial load
+  if (isLoading) {
+    return <MessageListSkeleton />;
+  }
 
   if (messages.length === 0) {
     return (
@@ -181,10 +212,11 @@ export function MessageList({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      {messages.map(message => (
+      {messages.map((message, index) => (
         <Message
           key={message.id}
           message={message}
+          index={index}
           onAddToBrief={onAddToBrief}
           onCreateEvidence={onCreateEvidence}
           onCardAction={onCardAction}

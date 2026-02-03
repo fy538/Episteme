@@ -71,7 +71,7 @@ export function ChatHistory({
       {/* Header */}
       <div className="p-6 border-b border-neutral-200">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold text-neutral-900">Chat Threads</h2>
+          <h2 className="text-2xl tracking-tight font-bold text-neutral-900">Chat Threads</h2>
           <Button onClick={() => onNewThread()}>
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

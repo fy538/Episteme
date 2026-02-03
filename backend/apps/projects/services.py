@@ -249,7 +249,36 @@ class DocumentService:
             evidence_extractor = get_evidence_extractor()
             total_evidence = evidence_extractor.extract_from_document(document)
             
-            # 7. Update document status
+            # 7. Auto-reasoning: Build knowledge graph from evidence
+            # Find relationships, detect contradictions, update confidence
+            try:
+                from apps.reasoning.auto_reasoning import get_auto_reasoning_pipeline
+                import asyncio
+                
+                pipeline = get_auto_reasoning_pipeline()
+                evidence_items = Evidence.objects.filter(document=document)
+                
+                # Process each evidence item through auto-reasoning
+                for evidence in evidence_items:
+                    results = asyncio.run(pipeline.process_new_evidence(evidence))
+                    
+                    # Log results
+                    if results['contradictions_detected']:
+                        logger.info(
+                            f"Auto-reasoning detected {len(results['contradictions_detected'])} contradictions",
+                            extra={
+                                'document_id': str(document.id),
+                                'evidence_id': str(evidence.id)
+                            }
+                        )
+            except Exception as e:
+                logger.exception(
+                    "auto_reasoning_failed",
+                    extra={'document_id': str(document.id)}
+                )
+                # Don't fail document processing if auto-reasoning fails
+            
+            # 8. Update document status
             document.chunk_count = len(created_chunks)
             document.evidence_count = total_evidence
             document.indexed_at = timezone.now()

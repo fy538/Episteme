@@ -1,7 +1,7 @@
 import { ResearchStatusCard as CardType, CardAction } from '@/lib/types/cards';
-import { Button } from '@/components/ui/Button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import { Spinner } from '@/components/ui/Spinner';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Spinner } from '@/components/ui/spinner';
 
 interface Props {
   card: CardType;
@@ -72,7 +72,7 @@ export function ResearchStatusCard({ card, onAction }: Props) {
             {card.actions.map((action) => (
               <Button
                 key={action.id}
-                variant={action.variant === 'danger' ? 'destructive' : action.variant === 'primary' ? 'default' : 'secondary'}
+                variant={action.variant === 'danger' ? 'destructive' : action.variant === 'primary' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => onAction(action)}
               >

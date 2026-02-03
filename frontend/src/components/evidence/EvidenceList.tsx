@@ -64,7 +64,7 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
   };
 
   if (isLoading) {
-    return <div className="text-center py-8 text-gray-500">Loading evidence...</div>;
+    return <div className="text-center py-8 text-neutral-500">Loading evidence...</div>;
   }
 
   return (
@@ -72,7 +72,7 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
       {/* Filters */}
       <div className="mb-4 flex gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-neutral-700 mb-1">
             Type
           </label>
           <select
@@ -90,7 +90,7 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-neutral-700 mb-1">
             Min Rating
           </label>
           <select
@@ -107,14 +107,14 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
       </div>
 
       {/* Results count */}
-      <div className="mb-3 text-sm text-gray-600">
+      <div className="mb-3 text-sm text-neutral-600">
         Showing {filteredEvidence.length} of {evidence.length} evidence items
       </div>
 
       {/* Evidence list */}
       <div className="space-y-3">
         {filteredEvidence.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-neutral-500">
             No evidence found
           </div>
         ) : (

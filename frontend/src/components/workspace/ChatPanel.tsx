@@ -250,7 +250,7 @@ export function ChatPanel({
         </button>
         
         {signals.length > 0 && (
-          <div className="mt-4 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+          <div className="mt-4 px-2 py-1 bg-accent-100 text-accent-700 rounded-full text-xs font-medium">
             {signals.length}
           </div>
         )}

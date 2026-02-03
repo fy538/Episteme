@@ -160,7 +160,7 @@ export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUpload
       )}
 
       {uploading && (
-        <div className="mt-3 text-sm text-gray-600">
+        <div className="mt-3 text-sm text-neutral-600">
           Processing document... Evidence will be extracted automatically.
         </div>
       )}

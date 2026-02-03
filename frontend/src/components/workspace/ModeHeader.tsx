@@ -29,11 +29,11 @@ interface ModeHeaderProps {
 }
 
 const MODE_STYLES: Record<WorkspaceMode, { bg: string; text: string; label: string }> = {
-  chatting: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Chatting' },
+  chatting: { bg: 'bg-accent-100', text: 'text-accent-700', label: 'Chatting' },
   editing_brief: { bg: 'bg-green-100', text: 'text-green-700', label: 'Editing Brief' },
   researching: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Researching' },
   reviewing_evidence: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Reviewing Evidence' },
-  viewing_document: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Viewing Document' },
+  viewing_document: { bg: 'bg-neutral-100', text: 'text-neutral-700', label: 'Viewing Document' },
 };
 
 export function ModeHeader({ breadcrumbs, mode, modeLabel, quickActions }: ModeHeaderProps) {
@@ -47,19 +47,19 @@ export function ModeHeader({ breadcrumbs, mode, modeLabel, quickActions }: ModeH
         {breadcrumbs.map((crumb, idx) => (
           <div key={idx} className="flex items-center gap-2">
             {idx > 0 && (
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             )}
             {crumb.href ? (
               <a
                 href={crumb.href}
-                className="text-gray-600 hover:text-gray-900 transition-colors"
+                className="text-neutral-600 hover:text-neutral-900 transition-colors"
               >
                 {crumb.label}
               </a>
             ) : (
-              <span className="text-gray-900 font-medium">{crumb.label}</span>
+              <span className="text-neutral-900 font-medium">{crumb.label}</span>
             )}
           </div>
         ))}

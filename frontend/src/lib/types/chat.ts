@@ -7,6 +7,7 @@ import type { RichCard } from './cards';
 export interface ChatThread {
   id: string;
   title: string;
+  thread_type?: 'general' | 'research' | 'inquiry' | 'document';
   primary_case?: string;
   project?: string | null;
   user: string;

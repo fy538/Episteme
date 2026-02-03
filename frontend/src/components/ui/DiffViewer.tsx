@@ -36,7 +36,7 @@ export function DiffViewer({
       <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-neutral-200">
-          <h2 className="text-xl font-semibold text-neutral-900">{title}</h2>
+          <h2 className="text-xl font-display font-semibold tracking-tight text-neutral-900">{title}</h2>
           <Button
             onClick={onClose}
             variant="ghost"
@@ -76,7 +76,7 @@ export function DiffViewer({
                   ? 'text-green-900'
                   : part.removed
                   ? 'text-red-900'
-                  : 'text-gray-700';
+                  : 'text-neutral-700';
 
                 const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
 
@@ -98,9 +98,9 @@ export function DiffViewer({
           )}
 
           {/* Summary */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <h4 className="font-medium text-blue-900 mb-2">Change Summary</h4>
-            <div className="text-sm text-blue-800 space-y-1">
+          <div className="mt-6 p-4 bg-accent-50 border border-accent-200 rounded-lg">
+            <h4 className="font-medium text-accent-900 mb-2">Change Summary</h4>
+            <div className="text-sm text-accent-800 space-y-1">
               <p>
                 <span className="font-medium text-green-700">
                   +{diff.filter((p) => p.added).reduce((sum, p) => sum + p.value.split('\n').length, 0)} lines added
@@ -116,7 +116,7 @@ export function DiffViewer({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between p-6 border-t border-neutral-200 bg-neutral-50">
           <div className="flex gap-2">
             <Button
               onClick={() => setIsEditing(!isEditing)}

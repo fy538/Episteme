@@ -35,12 +35,12 @@ export function EvidenceCard({ evidence, onUpdate, showLinkButton }: EvidenceCar
 
   const getTypeBadgeColor = () => {
     switch (evidence.type) {
-      case 'metric': return 'bg-blue-100 text-blue-800';
+      case 'metric': return 'bg-accent-100 text-accent-800';
       case 'benchmark': return 'bg-purple-100 text-purple-800';
       case 'fact': return 'bg-green-100 text-green-800';
       case 'claim': return 'bg-yellow-100 text-yellow-800';
       case 'quote': return 'bg-pink-100 text-pink-800';
-      default: return 'bg-gray-100 text-gray-800';
+      default: return 'bg-neutral-100 text-neutral-800';
     }
   };
 
@@ -53,20 +53,20 @@ export function EvidenceCard({ evidence, onUpdate, showLinkButton }: EvidenceCar
         </span>
         
         {/* Confidence indicator */}
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
           <span>Confidence: {Math.round(evidence.extraction_confidence * 100)}%</span>
         </div>
       </div>
 
       {/* Evidence text */}
-      <p className="text-gray-900 mb-3">{evidence.text}</p>
+      <p className="text-neutral-900 mb-3">{evidence.text}</p>
 
       {/* Source info */}
-      <div className="text-sm text-gray-600 mb-3">
+      <div className="text-sm text-neutral-600 mb-3">
         <span className="font-medium">From:</span> {evidence.document_title}
         <button
           onClick={() => setShowSource(!showSource)}
-          className="ml-2 text-blue-600 hover:underline"
+          className="ml-2 text-accent-600 hover:underline"
         >
           {showSource ? 'Hide' : 'Show'} source
         </button>
@@ -74,17 +74,17 @@ export function EvidenceCard({ evidence, onUpdate, showLinkButton }: EvidenceCar
 
       {/* Source preview */}
       {showSource && (
-        <div className="bg-gray-50 p-3 rounded text-sm mb-3">
-          <div className="text-xs text-gray-500 mb-1">
+        <div className="bg-neutral-50 p-3 rounded text-sm mb-3">
+          <div className="text-xs text-neutral-500 mb-1">
             Chunk {evidence.chunk_preview.chunk_index} ({evidence.chunk_preview.token_count} tokens)
           </div>
-          <p className="text-gray-700 italic">{evidence.chunk_preview.text_preview}</p>
+          <p className="text-neutral-700 italic">{evidence.chunk_preview.text_preview}</p>
         </div>
       )}
 
       {/* Rating */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-gray-600">Credibility:</span>
+        <span className="text-sm text-neutral-600">Credibility:</span>
         <div className="flex gap-1">
           {[1, 2, 3, 4, 5].map((star) => (
             <button
@@ -92,7 +92,7 @@ export function EvidenceCard({ evidence, onUpdate, showLinkButton }: EvidenceCar
               onClick={() => handleRate(star)}
               disabled={isRating}
               className={`text-lg ${
-                star <= rating ? 'text-yellow-400' : 'text-gray-300'
+                star <= rating ? 'text-yellow-400' : 'text-neutral-300'
               } hover:text-yellow-500 disabled:opacity-50`}
             >
               ★
@@ -100,13 +100,13 @@ export function EvidenceCard({ evidence, onUpdate, showLinkButton }: EvidenceCar
           ))}
         </div>
         {rating > 0 && (
-          <span className="text-sm text-gray-500">({rating}/5)</span>
+          <span className="text-sm text-neutral-500">({rating}/5)</span>
         )}
       </div>
 
       {/* Link button (optional) */}
       {showLinkButton && (
-        <button className="mt-3 text-sm text-blue-600 hover:underline">
+        <button className="mt-3 text-sm text-accent-600 hover:underline">
           Link to Signal
         </button>
       )}

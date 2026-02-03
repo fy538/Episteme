@@ -10,8 +10,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 
 type ActionId = 'inquiry' | 'document' | 'chat' | 'generate';
 
@@ -30,6 +32,7 @@ interface FloatingActionButtonProps {
 
 export function FloatingActionButton({ actions, primaryAction }: FloatingActionButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   // Keyboard shortcut
   useEffect(() => {
@@ -85,8 +88,8 @@ export function FloatingActionButton({ actions, primaryAction }: FloatingActionB
           </div>
         )}
 
-        {/* Primary button */}
-        <button
+        {/* Primary button with glassmorphism */}
+        <motion.button
           onClick={() => {
             if (actions.length === 1) {
               handleActionClick(primary);
@@ -95,11 +98,13 @@ export function FloatingActionButton({ actions, primaryAction }: FloatingActionB
             }
           }}
           className={cn(
-            'w-14 h-14 rounded-full shadow-lg hover:shadow-xl transition-all',
+            'w-14 h-14 rounded-full shadow-xl hover:shadow-2xl shadow-accent/30 hover:shadow-accent/50 transition-all backdrop-blur-sm',
             'flex items-center justify-center',
-            'bg-accent-600 hover:bg-accent-700 text-white',
+            'bg-gradient-to-br from-accent-600 to-accent-700 hover:from-accent-700 hover:to-accent-800 text-white',
             isOpen && 'rotate-45'
           )}
+          whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+          whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
           aria-label="Quick actions"
         >
           {isOpen ? (
@@ -109,7 +114,7 @@ export function FloatingActionButton({ actions, primaryAction }: FloatingActionB
           ) : (
             primary.icon
           )}
-        </button>
+        </motion.button>
 
         {/* Keyboard hint */}
         {!isOpen && (

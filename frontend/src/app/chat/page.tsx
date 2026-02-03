@@ -8,14 +8,20 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
-import { StructureSidebar } from '@/components/structure/StructureSidebar';
+import { ReasoningCompanion } from '@/components/chat/ReasoningCompanion';
 import { GlobalHeader } from '@/components/layout/GlobalHeader';
 import { Button } from '@/components/ui/button';
+import { ResponsiveLayout } from '@/components/layout/ResponsiveLayout';
+import { NetworkErrorBanner } from '@/components/ui/network-error-banner';
+import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
 import type { ChatThread } from '@/lib/types/chat';
 import { projectsAPI } from '@/lib/api/projects';
 import type { Project } from '@/lib/types/project';
+import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate';
+import { useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
+import { useIsMobile } from '@/hooks/useResponsive';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -32,6 +38,13 @@ export default function ChatPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [threadProjectId, setThreadProjectId] = useState<string | null>(null);
+  const { execute: executeOptimistic } = useOptimisticUpdate();
+  const [networkError, setNetworkError] = useState(false);
+  const isMobile = useIsMobile();
+
+  // Keyboard shortcuts
+  useKeyboardShortcut(['Cmd', 'N'], handleCreateThread);
+  useKeyboardShortcut(['Cmd', 'B'], () => setShowConversations(prev => !prev));
 
   // Check auth before loading
   useEffect(() => {
@@ -74,6 +87,7 @@ export default function ChatPage() {
       } catch (err) {
         console.error('Failed to create thread:', err);
         setError(err instanceof Error ? err.message : 'Failed to connect to API');
+        setNetworkError(true);
       } finally {
         setIsLoadingThreads(false);
         setIsLoading(false);
@@ -111,39 +125,82 @@ export default function ChatPage() {
   }, [threadId]);
 
   async function handleCreateThread() {
-    try {
-      const created = await chatAPI.createThread(threadProjectId);
-      setThreads(prev => [created, ...prev]);
-      setThreadId(created.id);
-      setCaseId(created.primary_case || null);
-      setThreadProjectId(created.project || null);
-    } catch (err) {
-      console.error('Failed to create thread:', err);
-    }
+    // Create optimistic thread with temporary ID
+    const optimisticThread: ChatThread = {
+      id: `temp-${Date.now()}`,
+      title: 'New Chat',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      user: 'current-user', // Placeholder
+      project: threadProjectId || undefined,
+      archived: false,
+    };
+
+    await executeOptimistic(
+      // Optimistic update - add immediately
+      () => {
+        setThreads(prev => [optimisticThread, ...prev]);
+        setThreadId(optimisticThread.id);
+      },
+      // API call
+      async () => {
+        const created = await chatAPI.createThread(threadProjectId);
+        // Update with real thread
+        setThreads(prev => prev.map(t => t.id === optimisticThread.id ? created : t));
+        setThreadId(created.id);
+        setCaseId(created.primary_case || null);
+        setThreadProjectId(created.project || null);
+        return created;
+      },
+      // Rollback on error
+      () => {
+        setThreads(prev => prev.filter(t => t.id !== optimisticThread.id));
+        setThreadId(threads.length > 0 ? threads[0].id : null);
+      },
+      {
+        errorMessage: 'Failed to create conversation',
+      }
+    );
   }
 
   async function handleDeleteThread(threadIdToDelete: string) {
-    try {
-      await chatAPI.deleteThread(threadIdToDelete);
-      setThreads(prev => {
-        const remaining = prev.filter(t => t.id !== threadIdToDelete);
-        if (threadId === threadIdToDelete) {
-          if (remaining.length > 0) {
+    const deletedThread = threads.find(t => t.id === threadIdToDelete);
+    if (!deletedThread) return;
+
+    await executeOptimistic(
+      // Optimistic update - remove immediately
+      () => {
+        setThreads(prev => {
+          const remaining = prev.filter(t => t.id !== threadIdToDelete);
+          if (threadId === threadIdToDelete && remaining.length > 0) {
             setThreadId(remaining[0].id);
-          } else {
-            void (async () => {
-              const created = await chatAPI.createThread();
-              setThreads([created]);
-              setThreadId(created.id);
-              setCaseId(created.primary_case || null);
-            })();
           }
+          return remaining;
+        });
+      },
+      // API call
+      async () => {
+        await chatAPI.deleteThread(threadIdToDelete);
+        // If was last thread, create new one
+        if (threads.length === 1) {
+          const created = await chatAPI.createThread();
+          setThreads([created]);
+          setThreadId(created.id);
+          setCaseId(created.primary_case || null);
         }
-        return remaining;
-      });
-    } catch (err) {
-      console.error('Failed to delete thread:', err);
-    }
+      },
+      // Rollback on error
+      () => {
+        setThreads(prev => [...prev, deletedThread].sort((a, b) => 
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        ));
+        setThreadId(threadIdToDelete);
+      },
+      {
+        successMessage: 'Conversation deleted',
+        errorMessage: 'Failed to delete conversation',
+      }
+    );
   }
 
   async function handleRenameThread(threadIdToRename: string, title: string) {
@@ -241,36 +298,58 @@ export default function ChatPage() {
     );
   }
 
-  const filteredThreads = threads.filter(thread =>
-    (thread.title || 'New Chat').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   return (
-    <div className="flex flex-col h-screen">
-      <GlobalHeader 
-        breadcrumbs={[{ label: 'Chat' }]}
-        showNav={true}
-      />
-      <div className="flex flex-1 overflow-hidden">
-        {showConversations && (
-          <ConversationsSidebar
-            projects={projects}
-            threads={filteredThreads}
-            selectedThreadId={threadId}
-            isLoading={isLoadingThreads}
-            onSelect={(id) => setThreadId(id)}
-            onCreate={handleCreateThread}
-            onRename={handleRenameThread}
-            onDelete={handleDeleteThread}
-            onArchive={handleArchiveThread}
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            showArchived={showArchived}
-            onToggleArchived={() => setShowArchived(prev => !prev)}
-          />
-        )}
-        {/* Main chat area */}
-        <div className="flex-1 flex flex-col">
+    <ErrorBoundary>
+      <div className="flex flex-col h-screen">
+        <NetworkErrorBanner
+          isVisible={networkError}
+          onRetry={() => {
+            setNetworkError(false);
+            window.location.reload();
+          }}
+        />
+
+        <GlobalHeader 
+          breadcrumbs={[
+            { label: 'Chat' },
+          ]}
+          showNav={true}
+        />
+        
+        {/* Role Clarity Banner - Hide on mobile */}
+        <div className="hidden md:block px-6 py-2 bg-accent-50 dark:bg-accent-900/10 border-b border-accent-100 dark:border-accent-800/30">
+          <p className="text-sm text-accent-700 dark:text-accent-300 text-center">
+            Explore ideas, ask questions, think freely — organize into projects when ready
+          </p>
+        </div>
+        
+        <ResponsiveLayout
+          leftSidebar={
+            <ConversationsSidebar
+              projects={projects}
+              threads={threads}
+              selectedThreadId={threadId}
+              isLoading={isLoadingThreads}
+              onSelect={(id) => setThreadId(id)}
+              onCreate={handleCreateThread}
+              onRename={handleRenameThread}
+              onDelete={handleDeleteThread}
+              onArchive={handleArchiveThread}
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              showArchived={showArchived}
+              onToggleArchived={() => setShowArchived(prev => !prev)}
+            />
+          }
+          rightSidebar={
+            <ReasoningCompanion 
+              threadId={threadId}
+              caseId={caseId}
+            />
+          }
+          showLeftSidebar={showConversations}
+          showRightSidebar={showStructure}
+        >
           <ChatInterface
             threadId={threadId}
             onToggleLeft={() => setShowConversations(prev => !prev)}
@@ -281,21 +360,8 @@ export default function ChatPage() {
             projectId={threadProjectId}
             onProjectChange={handleChangeThreadProject}
           />
-        </div>
-        
-        {/* Structure sidebar */}
-        {showStructure && (
-          <StructureSidebar 
-            threadId={threadId} 
-            caseId={caseId || undefined}
-            onCaseCreated={(newCaseId) => {
-              setCaseId(newCaseId);
-              // Transition to workspace view
-              router.push(`/workspace/cases/${newCaseId}`);
-            }}
-          />
-        )}
+        </ResponsiveLayout>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }

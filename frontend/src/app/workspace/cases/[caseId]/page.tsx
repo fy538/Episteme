@@ -146,7 +146,7 @@ export default function CaseWorkspacePage({
   if (loading || !caseData) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-gray-500">Loading workspace...</p>
+        <p className="text-neutral-500">Loading workspace...</p>
       </div>
     );
   }
@@ -270,7 +270,7 @@ export default function CaseWorkspacePage({
               <div className="mb-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h1 className="text-2xl font-semibold text-neutral-900 mb-2">
+                    <h1 className="text-2xl tracking-tight font-semibold text-neutral-900 mb-2">
                       Investigation Dashboard
                     </h1>
                     <p className="text-neutral-600">

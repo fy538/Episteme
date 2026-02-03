@@ -57,7 +57,7 @@ export function GuidedFirstActions({ show, onDismiss }: GuidedFirstActionsProps)
         </div>
 
         <div className="space-y-3">
-          <div className="flex items-start gap-3 p-3 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors">
+          <div className="flex items-start gap-3 p-3 hover:bg-accent-50 rounded-lg cursor-pointer transition-colors">
             <span className="text-2xl">💬</span>
             <div>
               <p className="text-sm font-medium text-neutral-900">Chat with AI</p>
@@ -65,7 +65,7 @@ export function GuidedFirstActions({ show, onDismiss }: GuidedFirstActionsProps)
             </div>
           </div>
 
-          <div className="flex items-start gap-3 p-3 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors">
+          <div className="flex items-start gap-3 p-3 hover:bg-accent-50 rounded-lg cursor-pointer transition-colors">
             <span className="text-2xl">⚠️</span>
             <div>
               <p className="text-sm font-medium text-neutral-900">Investigate Assumptions</p>
@@ -73,7 +73,7 @@ export function GuidedFirstActions({ show, onDismiss }: GuidedFirstActionsProps)
             </div>
           </div>
 
-          <div className="flex items-start gap-3 p-3 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors">
+          <div className="flex items-start gap-3 p-3 hover:bg-accent-50 rounded-lg cursor-pointer transition-colors">
             <span className="text-2xl">🔍</span>
             <div>
               <p className="text-sm font-medium text-neutral-900">Start Researching</p>

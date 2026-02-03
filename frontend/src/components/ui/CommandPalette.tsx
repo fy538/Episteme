@@ -136,8 +136,8 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
                   }}
                   className={`w-full px-4 py-3 flex items-center justify-between transition-colors ${
                     idx === selectedIndex
-                      ? 'bg-blue-50 text-blue-900'
-                      : 'text-neutral-900 hover:bg-gray-50'
+                      ? 'bg-accent-50 text-accent-900'
+                      : 'text-neutral-900 hover:bg-neutral-50'
                   }`}
                 >
                   <div className="flex items-center gap-3">

@@ -165,13 +165,13 @@ export function InquiryWorkspaceView({
               }}
               autoFocus
               aria-label="Edit inquiry title"
-              className="text-3xl font-bold text-neutral-900 border-b-2 border-accent-500 bg-transparent outline-none flex-1 h-auto py-0"
+              className="text-3xl tracking-tight font-bold text-neutral-900 border-b-2 border-accent-500 bg-transparent outline-none flex-1 h-auto py-0"
             />
           </div>
         ) : (
           <button
             onClick={() => setIsEditingTitle(true)}
-            className="text-3xl font-bold text-neutral-900 hover:text-accent-600 transition-colors mb-3 text-left"
+            className="text-3xl tracking-tight font-bold text-neutral-900 hover:text-accent-600 transition-colors mb-3 text-left"
           >
             {inquiry.title}
           </button>
@@ -295,8 +295,8 @@ export function InquiryWorkspaceView({
 
           {/* Resolve section */}
           {inquiry.status !== 'resolved' && evidence.length > 0 && (
-            <div className="mt-8 p-6 bg-blue-50 border border-blue-200 rounded-lg">
-              <h3 className="text-lg font-semibold text-blue-900 mb-3">
+            <div className="mt-8 p-6 bg-accent-50 border border-accent-200 rounded-lg">
+              <h3 className="text-lg font-semibold text-accent-900 mb-3">
                 Ready to conclude?
               </h3>
               <Textarea

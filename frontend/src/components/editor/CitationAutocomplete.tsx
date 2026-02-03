@@ -130,8 +130,8 @@ export function CitationAutocomplete({
   if (!isOpen || filteredSuggestions.length === 0) return null;
 
   return (
-    <div className="fixed z-50 bg-white border border-gray-300 rounded-lg shadow-xl w-80">
-      <div className="text-xs text-gray-500 px-3 py-2 border-b border-gray-200">
+    <div className="fixed z-50 bg-white border border-neutral-300 rounded-lg shadow-xl w-80">
+      <div className="text-xs text-neutral-500 px-3 py-2 border-b border-neutral-200">
         Citation suggestions (↑↓ to navigate, ⏎ to select):
       </div>
       <div className="max-h-64 overflow-y-auto">
@@ -139,12 +139,12 @@ export function CitationAutocomplete({
           <button
             key={doc.id}
             onClick={() => insertCitation(doc)}
-            className={`w-full text-left px-3 py-2 border-b border-gray-100 last:border-0 transition-colors ${
-              index === selectedIndex ? 'bg-blue-50' : 'hover:bg-gray-50'
+            className={`w-full text-left px-3 py-2 border-b border-neutral-100 last:border-0 transition-colors ${
+              index === selectedIndex ? 'bg-accent-50' : 'hover:bg-neutral-50'
             }`}
           >
-            <div className="font-medium text-gray-900 text-sm">{doc.title}</div>
-            <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+            <div className="font-medium text-neutral-900 text-sm">{doc.title}</div>
+            <div className="text-xs text-neutral-500 mt-0.5 flex items-center gap-2">
               <span>{doc.document_type.replace('_', ' ')}</span>
               {doc.times_cited > 0 && (
                 <span>• Cited {doc.times_cited}x</span>

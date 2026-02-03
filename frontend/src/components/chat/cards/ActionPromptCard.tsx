@@ -1,6 +1,6 @@
 import { ActionPromptCard as CardType, CardAction } from '@/lib/types/cards';
-import { Button } from '@/components/ui/Button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
 interface Props {
   card: CardType;
@@ -45,7 +45,7 @@ export function ActionPromptCard({ card, onAction }: Props) {
           {card.actions.map((action) => (
             <Button
               key={action.id}
-              variant={action.variant === 'primary' ? 'default' : 'secondary'}
+              variant={action.variant === 'primary' ? 'default' : 'outline'}
               size="sm"
               onClick={() => onAction(action)}
             >

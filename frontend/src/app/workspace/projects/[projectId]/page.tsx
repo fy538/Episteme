@@ -79,9 +79,7 @@ export default function ProjectDashboardPage({
     if (!project) return;
     
     try {
-      const result = await casesAPI.createCase('New Case', {
-        project_id: project.id,
-      });
+      const result = await casesAPI.createCase('New Case', project.id);
       
       router.push(`/workspace/cases/${result.case.id}`);
     } catch (error) {
@@ -128,7 +126,7 @@ export default function ProjectDashboardPage({
         <div className="max-w-7xl mx-auto space-y-8">
           {/* Project Header */}
           <div>
-            <h1 className="text-3xl font-bold text-primary-900 mb-2">
+            <h1 className="text-3xl tracking-tight font-bold text-primary-900 mb-2">
               {project.title}
             </h1>
             {project.description && (
@@ -145,7 +143,7 @@ export default function ProjectDashboardPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-neutral-600">Total Cases</p>
-                    <p className="text-3xl font-bold text-primary-900 mt-1">
+                    <p className="text-3xl tracking-tight font-bold text-primary-900 mt-1">
                       {cases.length}
                     </p>
                   </div>
@@ -161,7 +159,7 @@ export default function ProjectDashboardPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-neutral-600">Active</p>
-                    <p className="text-3xl font-bold text-accent-600 mt-1">
+                    <p className="text-3xl tracking-tight font-bold text-accent-600 mt-1">
                       {activeCases.length}
                     </p>
                   </div>
@@ -177,7 +175,7 @@ export default function ProjectDashboardPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-neutral-600">Draft</p>
-                    <p className="text-3xl font-bold text-warning-600 mt-1">
+                    <p className="text-3xl tracking-tight font-bold text-warning-600 mt-1">
                       {draftCases.length}
                     </p>
                   </div>
@@ -193,7 +191,7 @@ export default function ProjectDashboardPage({
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-neutral-600">Documents</p>
-                    <p className="text-3xl font-bold text-neutral-900 mt-1">
+                    <p className="text-3xl tracking-tight font-bold text-neutral-900 mt-1">
                       {project.total_documents || 0}
                     </p>
                   </div>

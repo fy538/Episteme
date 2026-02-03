@@ -42,7 +42,7 @@ export function BriefEditor({ document, onSave, onCreateInquiry, onMarkAssumptio
       Link.configure({
         openOnClick: false,
         HTMLAttributes: {
-          class: 'text-blue-600 underline',
+          class: 'text-accent-600 underline',
         },
       }),
       Placeholder.configure({
@@ -102,16 +102,16 @@ export function BriefEditor({ document, onSave, onCreateInquiry, onMarkAssumptio
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Header with title and save status */}
-      <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between bg-white">
+      <div className="border-b border-neutral-200 px-6 py-4 flex items-center justify-between bg-white">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">
+          <h1 className="text-lg font-semibold text-neutral-900">
             {document.title}
           </h1>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-neutral-600">
             {document.document_type === 'case_brief' ? 'Case Brief' : 'Inquiry Brief'} • Edit freely
           </p>
         </div>
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-neutral-500">
           {isSaving && 'Saving...'}
           {!isSaving && lastSaved && `Saved ${lastSaved.toLocaleTimeString()}`}
         </div>

@@ -9,6 +9,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardHeader, CardContent, CardFooter, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { springConfig } from '@/lib/motion-config';
 
 interface StructureSuggestion {
   ready: boolean;
@@ -34,6 +36,8 @@ export function StructurePreview({
   onDismiss,
   onConfigure
 }: StructurePreviewProps) {
+  const prefersReducedMotion = useReducedMotion();
+
   if (!suggestion || suggestion.dismissed || !suggestion.ready) {
     return null;
   }
@@ -52,16 +56,8 @@ export function StructurePreview({
     none: '📋'
   }[suggestion.structure_type];
 
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 20, scale: 0.95 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        className="fixed bottom-24 right-6 w-[420px] z-50"
-      >
-        <Card className="shadow-2xl border-accent-200 dark:border-accent-800">
+  const cardContent = (
+        <Card className="shadow-2xl shadow-accent/20 border-accent-200 dark:border-accent-800 backdrop-blur-md bg-white/95 dark:bg-primary-900/95">
           <CardHeader>
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2 flex-1">
@@ -168,6 +164,26 @@ export function StructurePreview({
             )}
           </CardFooter>
         </Card>
+  );
+
+  if (prefersReducedMotion) {
+    return (
+      <div className="fixed bottom-24 right-6 w-[420px] z-50">
+        {cardContent}
+      </div>
+    );
+  }
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 20, scale: 0.95 }}
+        transition={springConfig.smooth}
+        className="fixed bottom-24 right-6 w-[420px] z-50"
+      >
+        {cardContent}
       </motion.div>
     </AnimatePresence>
   );

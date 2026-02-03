@@ -4,9 +4,61 @@
 
 - **DO NOT** create documentation files (*.md) unless explicitly requested by the user
 - **DO NOT** create README files proactively
-- **DO NOT** create multiple similar documentation files (summaries, guides, checklists)
-- **If documentation is needed**, consolidate into a SINGLE file with clear sections
+- **DO NOT** create phase-by-phase implementation docs or summaries
+- **DO NOT** create multiple similar documentation files (summaries, guides, checklists, testing guides)
+- **If documentation is needed**, consolidate into existing files
 - **Update existing docs** rather than creating new ones
+- **When changes are complete**, provide a brief summary in chat - don't write it to a file
+
+**Existing docs** (do not duplicate):
+- `frontend/DESIGN_SYSTEM.md` - Design tokens, components, UX principles
+- `frontend/DESIGN_AND_IA_GUIDE.md` - Quick reference, navigation
+- `frontend/README.md` - Project setup and structure
+- `docs/LOCAL_DEV_RUNBOOK.md` - Development guide
+
+## Design System Enforcement
+
+**ALWAYS follow** `frontend/DESIGN_SYSTEM.md`:
+
+### Colors
+- Use semantic colors: `primary`, `accent`, `success`, `warning`, `error`, `neutral`
+- Never use raw hex colors or old `gray-*` classes
+- Use `neutral-*` for grays (professional slate with subtle blue undertone)
+- Use `accent-*` for CTAs, links, focus states (teal/indigo)
+
+### Components
+- Import from `@/components/ui/*` - never create custom buttons, inputs, etc.
+- Use existing components: Button, Input, Card, Badge, Dialog, Toast, etc.
+- Follow component API (variants, sizes, props)
+
+### Spacing & Layout
+- Use Tailwind spacing scale (4px increments)
+- Card padding: `p-6`
+- Gaps: `gap-4`, `space-y-4`
+- Section margins: `mb-6` or `mb-8`
+
+### Typography
+- Page title: `text-2xl font-semibold`
+- Section: `text-xl font-semibold`
+- Body: `text-base` or `text-sm`
+- Use `font-medium` or `font-semibold` for headings
+
+### Animations & Interactions
+- Use Framer Motion for all animations
+- Respect `useReducedMotion()` hook - always provide fallback
+- Follow motion config in `lib/motion-config.ts`
+- Page transitions: 300ms with easeOutExpo
+- Button interactions: scale 1.02 on hover, 0.98 on tap
+- List items: stagger by 30-50ms for first 5 items
+- Use optimistic updates for create/delete actions
+- Show loading states with skeletons (not spinners)
+
+### Accessibility
+- Always use semantic HTML
+- Provide ARIA labels for icon buttons
+- Ensure keyboard navigation works
+- Support reduced motion preference
+- Maintain WCAG AA contrast ratios
 
 ## Code Quality
 
@@ -14,9 +66,19 @@
 - Use inline comments sparingly and only when complex logic requires explanation
 - Let the code be self-documenting through good naming
 - TypeScript types are better than JSDoc comments
+- Use `cn()` utility for conditional classes (from `@/lib/utils`)
+
+## Before Creating Components
+
+**Check if it exists first:**
+1. Look in `@/components/ui/` for base components
+2. Check design system doc for existing patterns
+3. Reuse and compose existing components
+4. Only create new components if truly needed
 
 ## Preferences
 
 - Focus on implementation, not documentation
 - Ask before creating any *.md file
-- When changes are complete, provide a brief summary in chat - don't write it to a file
+- Consistency over creativity - follow the design system
+- When in doubt, check `DESIGN_SYSTEM.md`
