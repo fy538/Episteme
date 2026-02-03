@@ -177,6 +177,33 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
                         "signals_extracted": signals_extracted
                     }
                 )
+
+                # Trigger companion reflection if significant signals extracted
+                # (Silent Observer mode: only on 5+ signals)
+                if signals_extracted >= 5:
+                    try:
+                        from apps.companion.tasks import generate_companion_reflection_task
+
+                        generate_companion_reflection_task.delay(
+                            thread_id=str(thread.id),
+                            trigger_type='signals_extracted',
+                            trigger_context={
+                                'signals_count': signals_extracted,
+                                'messages_in_batch': len(unprocessed_messages)
+                            }
+                        )
+                        logger.info(
+                            "companion_reflection_triggered_by_signals",
+                            extra={
+                                "thread_id": str(thread.id),
+                                "signals_count": signals_extracted
+                            }
+                        )
+                    except Exception:
+                        logger.exception(
+                            "companion_reflection_trigger_failed",
+                            extra={"thread_id": str(thread.id)}
+                        )
         else:
             logger.debug(
                 "batch_threshold_not_met",

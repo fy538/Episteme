@@ -164,28 +164,28 @@ class CompanionService:
     ):
         """
         Stream Meta-LLM reflection token-by-token.
-        
+
         Yields chunks as they're generated for true real-time streaming.
-        
+
         Args:
             thread: Thread being analyzed
             recent_messages: Recent conversation messages
             current_signals: Current signals extracted
             patterns: Graph patterns identified
-        
+
         Yields:
             String chunks (tokens) as they're generated
         """
         from apps.companion.prompts import get_socratic_reflection_prompt
-        
+
         # Get topic/context from thread
         topic = thread.title if thread.title != "New Chat" else "this conversation"
-        
+
         # Prepare data for prompt
         claims = [s for s in current_signals if s['type'] == 'Claim']
         assumptions = [s for s in current_signals if s['type'] == 'Assumption']
         questions = [s for s in current_signals if s['type'] == 'Question']
-        
+
         # Build system prompt
         system_prompt = get_socratic_reflection_prompt(
             topic=topic,
@@ -194,7 +194,7 @@ class CompanionService:
             questions=questions,
             patterns=patterns
         )
-        
+
         # Prepare conversation context
         messages = []
         for msg in recent_messages[-3:]:  # Last 3 messages for context
@@ -202,7 +202,68 @@ class CompanionService:
                 'role': msg['role'],
                 'content': msg['content'][:500]  # Truncate long messages
             })
-        
+
+        # Stream LLM response token-by-token
+        async for chunk in self.meta_llm.stream_chat(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=0.7,  # Some creativity for natural language
+            max_tokens=500    # 2-3 paragraphs
+        ):
+            yield chunk.content
+
+    async def stream_reflection_with_memory(
+        self,
+        thread: ChatThread,
+        recent_messages: List[Dict],
+        current_signals: List[Dict],
+        patterns: Dict,
+        memory_context: Optional[Dict] = None
+    ):
+        """
+        Stream Meta-LLM reflection with memory context.
+
+        Enhanced version that includes companion's past observations
+        for continuity across reflections.
+
+        Args:
+            thread: Thread being analyzed
+            recent_messages: Recent conversation messages
+            current_signals: Current signals extracted
+            patterns: Graph patterns identified
+            memory_context: Dict with recent_reflections, key_observations
+
+        Yields:
+            String chunks (tokens) as they're generated
+        """
+        from apps.companion.prompts import get_socratic_reflection_prompt_with_memory
+
+        # Get topic/context from thread
+        topic = thread.title if thread.title != "New Chat" else "this conversation"
+
+        # Prepare data for prompt
+        claims = [s for s in current_signals if s['type'] == 'Claim']
+        assumptions = [s for s in current_signals if s['type'] == 'Assumption']
+        questions = [s for s in current_signals if s['type'] == 'Question']
+
+        # Build system prompt with memory
+        system_prompt = get_socratic_reflection_prompt_with_memory(
+            topic=topic,
+            claims=claims,
+            assumptions=assumptions,
+            questions=questions,
+            patterns=patterns,
+            memory_context=memory_context
+        )
+
+        # Prepare conversation context
+        messages = []
+        for msg in recent_messages[-3:]:  # Last 3 messages for context
+            messages.append({
+                'role': msg['role'],
+                'content': msg['content'][:500]  # Truncate long messages
+            })
+
         # Stream LLM response token-by-token
         async for chunk in self.meta_llm.stream_chat(
             messages=messages,

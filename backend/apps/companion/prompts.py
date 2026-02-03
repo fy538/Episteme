@@ -1,7 +1,7 @@
 """
 Prompts for companion meta-reflection
 """
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 def get_socratic_reflection_prompt(
@@ -99,7 +99,119 @@ Remember:
 - You help surface blind spots
 
 Write your reflection now:"""
-    
+
+    return prompt
+
+
+def get_socratic_reflection_prompt_with_memory(
+    topic: str,
+    claims: List[Dict],
+    assumptions: List[Dict],
+    questions: List[Dict],
+    patterns: Dict,
+    memory_context: Optional[Dict] = None
+) -> str:
+    """
+    Generate Socratic reflection prompt with companion memory.
+
+    Enhanced version that includes past observations for continuity.
+    Companion can reference and build on previous reflections.
+
+    Args:
+        topic: What the conversation is about
+        claims: List of claims made
+        assumptions: List of assumptions
+        questions: List of open questions
+        patterns: Graph patterns identified
+        memory_context: Dict with recent_reflections, key_observations, conversation_arc
+
+    Returns:
+        System prompt for Meta-LLM
+    """
+    from apps.companion.memory import CompanionMemory
+
+    # Format claims
+    claims_text = ""
+    if claims:
+        claims_text = "Recent claims made:\n"
+        for claim in claims[:3]:  # Top 3
+            confidence = claim.get('confidence', 0.5)
+            claims_text += f"- \"{claim['text']}\" (confidence: {int(confidence * 100)}%)\n"
+    else:
+        claims_text = "No specific claims made yet.\n"
+
+    # Format assumptions
+    assumptions_text = ""
+    if assumptions:
+        assumptions_text = "Assumptions being made:\n"
+        for assumption in assumptions[:3]:  # Top 3
+            assumptions_text += f"- \"{assumption['text']}\"\n"
+    else:
+        assumptions_text = "No explicit assumptions identified.\n"
+
+    # Format questions
+    questions_text = ""
+    if questions:
+        questions_text = "Open questions:\n"
+        for question in questions[:3]:  # Top 3
+            questions_text += f"- \"{question['text']}\"\n"
+
+    # Format patterns
+    ungrounded_count = len(patterns.get('ungrounded_assumptions', []))
+    contradiction_count = len(patterns.get('contradictions', []))
+    strong_claim_count = len(patterns.get('strong_claims', []))
+
+    patterns_text = f"""
+Patterns noticed in the reasoning:
+- {ungrounded_count} ungrounded assumption(s)
+- {contradiction_count} contradiction(s) detected
+- {strong_claim_count} well-supported claim(s)
+"""
+
+    # Format memory context
+    memory_text = ""
+    if memory_context:
+        memory_text = CompanionMemory.format_memory_for_prompt(memory_context)
+        if memory_text:
+            memory_text = f"\n--- YOUR PREVIOUS CONTEXT ---\n{memory_text}\n--- END PREVIOUS CONTEXT ---\n"
+
+    # Build full prompt
+    prompt = f"""You are a thoughtful companion analyzing a conversation about: {topic}
+{memory_text}
+{claims_text}
+
+{assumptions_text}
+
+{questions_text}
+
+{patterns_text}
+
+Your role is to help the user think more deeply, NOT to provide answers or information. You are a meta-cognitive partner.
+
+Guidelines:
+1. Ask probing questions (Socratic method) - "What if X is actually about Y?"
+2. Challenge assumptions gently - "You're assuming Z, but have you considered..."
+3. Point out missing considerations - "What about the cost of NOT doing this?"
+4. Reframe questions when helpful - "This seems less about speed and more about..."
+5. Show uncertainty transparently - "We don't actually know whether..."
+6. Focus on helping user THINK, not showing off knowledge
+7. Be conversational and natural, not formal or academic
+8. Write 2-3 short paragraphs maximum
+
+IMPORTANT - Memory Guidelines:
+- Build on your previous observations when relevant (don't repeat yourself)
+- Reference patterns you've noticed before if they're still relevant
+- If you've asked a question before that wasn't addressed, you can note that
+- Show continuity - the user should feel you "remember" the conversation
+
+Remember:
+- You're not the main chat - you're the companion that asks "but what about...?"
+- You don't answer questions - you ask better questions
+- You highlight what's uncertain or unexamined
+- You help surface blind spots
+
+Write your reflection now:"""
+
     return prompt
 
 
