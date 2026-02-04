@@ -13,8 +13,27 @@ import { Input } from '@/components/ui/input';
 import { BriefEditor } from '@/components/editor/BriefEditor';
 import { CaseOnboarding } from '@/components/onboarding/CaseOnboarding';
 import { AssumptionHighlighter } from '@/components/onboarding/AssumptionHighlighter';
+import {
+  DecisionFrameEditor,
+  DecisionFrameSummary,
+  CopilotStatus,
+  HealthBadge,
+  AgenticTaskDialog,
+  EvidenceLinksPanel,
+  EvidenceLandscape,
+  UserConfidenceInput,
+  UserConfidenceBadge,
+  ReadinessChecklist,
+  BlindSpotPrompts,
+} from '@/components/cases';
+import { BriefSuggestionList } from '@/components/cases/BriefSuggestion';
+import { SuggestionReviewPanel } from '@/components/cases/SuggestionReviewPanel';
+import { useBackgroundAnalysis } from '@/hooks/useBackgroundAnalysis';
 import { documentsAPI } from '@/lib/api/documents';
 import { inquiriesAPI } from '@/lib/api/inquiries';
+import { casesAPI } from '@/lib/api/cases';
+import { useBriefSuggestions } from '@/hooks/useBriefSuggestions';
+import { SparklesIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
 
 interface CaseBriefViewProps {
@@ -42,6 +61,49 @@ export function CaseBriefView({
   const [detectingAssumptions, setDetectingAssumptions] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [hasInteracted, setHasInteracted] = useState(false);
+  const [showDecisionFrame, setShowDecisionFrame] = useState(false);
+  const [showEvidenceLandscape, setShowEvidenceLandscape] = useState(false);
+  const [showReadinessChecklist, setShowReadinessChecklist] = useState(false);
+  const [showBlindSpots, setShowBlindSpots] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [showAgenticTask, setShowAgenticTask] = useState(false);
+  const [showEvidenceLinks, setShowEvidenceLinks] = useState(false);
+  const [briefContent, setBriefContent] = useState(brief?.content_markdown || '');
+  const [inlineEnabled, setInlineEnabled] = useState(false);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
+
+  // Background analysis hook
+  const {
+    healthScore,
+    isAnalyzing: isAnalyzingHealth,
+    triggerAnalysis,
+  } = useBackgroundAnalysis({
+    documentId: brief?.id || '',
+    enabled: !!brief,
+    analyzeOnMount: true,
+  });
+
+  // Brief suggestions hook
+  const {
+    suggestions,
+    isLoading: suggestionsLoading,
+    isGenerating,
+    error: suggestionsError,
+    generateSuggestions,
+    acceptSuggestion,
+    rejectSuggestion,
+    acceptAllSuggestions,
+    rejectAllSuggestions,
+    clearSuggestions,
+    pendingCount,
+  } = useBriefSuggestions({
+    documentId: brief?.id || '',
+    onContentUpdate: (newContent) => {
+      setBriefContent(newContent);
+      onRefresh();
+    },
+  });
 
   useEffect(() => {
     setTitleDraft(caseData.title);
@@ -131,18 +193,118 @@ export function CaseBriefView({
         </div>
 
         {/* Case metadata */}
-        <div className="flex items-center gap-4 text-sm text-neutral-600">
+        <div className="flex items-center gap-4 text-sm text-neutral-600 flex-wrap">
           <span className="px-2 py-1 bg-neutral-100 rounded">{caseData.status}</span>
           <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded">
             {caseData.stakes} stakes
           </span>
-          {caseData.confidence != null && (
-            <span className="px-2 py-1 bg-accent-100 text-accent-700 rounded">
-              {Math.round(caseData.confidence * 100)}% confidence
-            </span>
+
+          {/* User's self-stated confidence */}
+          <button
+            onClick={() => setShowEvidenceLandscape(!showEvidenceLandscape)}
+            className="px-2 py-1 bg-accent-100 text-accent-700 rounded hover:bg-accent-200 transition-colors flex items-center gap-1"
+          >
+            <UserConfidenceBadge confidence={caseData.user_confidence ?? null} />
+          </button>
+
+          {/* Readiness checklist */}
+          <button
+            onClick={() => setShowReadinessChecklist(!showReadinessChecklist)}
+            className="px-2 py-1 text-accent-600 hover:text-accent-700 hover:underline"
+          >
+            {showReadinessChecklist ? 'Hide' : 'Show'} Readiness
+          </button>
+
+          <button
+            onClick={() => setShowDecisionFrame(!showDecisionFrame)}
+            className="px-2 py-1 text-accent-600 hover:text-accent-700 hover:underline"
+          >
+            {showDecisionFrame ? 'Hide' : 'Edit'} Decision Frame
+          </button>
+
+          {/* Document Health */}
+          {brief && healthScore !== null && (
+            <HealthBadge
+              score={healthScore}
+              onClick={() => triggerAnalysis(true)}
+            />
+          )}
+
+          {/* AI Copilot Status */}
+          {brief && (
+            <CopilotStatus
+              isActive={suggestionsEnabled || inlineEnabled}
+              pendingSuggestions={pendingCount}
+              isAnalyzing={isGenerating || isAnalyzingHealth}
+              inlineEnabled={inlineEnabled}
+              suggestionsEnabled={suggestionsEnabled}
+              onToggleInline={setInlineEnabled}
+              onToggleSuggestions={setSuggestionsEnabled}
+              onGenerateSuggestions={() => generateSuggestions(5)}
+              onOpenReviewPanel={() => setShowReviewPanel(true)}
+            />
           )}
         </div>
       </div>
+
+      {/* Decision Frame Editor */}
+      {showDecisionFrame && (
+        <div className="mb-6 p-4 bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <h3 className="text-lg font-semibold text-neutral-900 mb-4">Decision Frame</h3>
+          <DecisionFrameEditor
+            caseData={caseData}
+            onSave={async (updates) => {
+              await casesAPI.updateDecisionFrame(caseData.id, updates);
+              onRefresh();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Decision Frame Summary (when not editing) */}
+      {!showDecisionFrame && caseData.decision_question && (
+        <div className="mb-6">
+          <DecisionFrameSummary caseData={caseData} />
+        </div>
+      )}
+
+      {/* Evidence Landscape */}
+      {showEvidenceLandscape && (
+        <div className="mb-6 space-y-4">
+          <EvidenceLandscape
+            caseId={caseData.id}
+            onInquiryClick={onOpenInquiry}
+          />
+          <UserConfidenceInput
+            caseId={caseData.id}
+            initialConfidence={caseData.user_confidence}
+            initialWhatWouldChange={caseData.what_would_change_mind}
+          />
+          <BlindSpotPrompts
+            caseId={caseData.id}
+            onCreateInquiry={(text) => {
+              console.log('Create inquiry from blind spot:', text);
+              onStartInquiry();
+            }}
+            maxPrompts={3}
+          />
+        </div>
+      )}
+
+      {/* Readiness Checklist */}
+      {showReadinessChecklist && (
+        <div className="mb-6">
+          <ReadinessChecklist
+            caseId={caseData.id}
+            onReadyClick={() => {
+              setShowReadinessChecklist(false);
+            }}
+            onNotYetClick={() => {
+              setShowReadinessChecklist(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* Onboarding (for new cases) */}
       {showOnboarding && (
@@ -304,22 +466,163 @@ export function CaseBriefView({
         </div>
       )}
 
+      {/* Suggestion Review Panel (Modal) */}
+      {showReviewPanel && brief && (
+        <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl max-h-[80vh] overflow-auto">
+            <SuggestionReviewPanel
+              suggestions={suggestions}
+              onAccept={acceptSuggestion}
+              onReject={rejectSuggestion}
+              onAcceptAll={acceptAllSuggestions}
+              onRejectAll={rejectAllSuggestions}
+              onRefresh={() => generateSuggestions(5)}
+              isLoading={suggestionsLoading}
+              isRefreshing={isGenerating}
+              onClose={() => setShowReviewPanel(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* AI Suggestions Panel */}
+      {showSuggestions && brief && (
+        <div className="mb-8 p-4 bg-accent-50 border border-accent-200 rounded-lg">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <SparklesIcon className="w-5 h-5 text-accent-600" />
+              <h3 className="text-lg font-semibold text-accent-900">
+                AI Suggestions
+              </h3>
+              {pendingCount > 0 && (
+                <span className="px-2 py-0.5 bg-accent-200 text-accent-800 rounded-full text-sm">
+                  {pendingCount} pending
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => generateSuggestions(5)}
+                disabled={isGenerating}
+              >
+                {isGenerating ? 'Analyzing...' : 'Refresh Suggestions'}
+              </Button>
+              <button
+                onClick={() => {
+                  setShowSuggestions(false);
+                  clearSuggestions();
+                }}
+                className="p-1 text-neutral-500 hover:text-neutral-700"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {suggestionsError && (
+            <div className="mb-4 p-3 bg-error-50 border border-error-200 rounded text-error-700 text-sm">
+              {suggestionsError}
+            </div>
+          )}
+
+          {isGenerating && suggestions.length === 0 && (
+            <div className="py-8 text-center text-neutral-500">
+              <div className="animate-pulse flex flex-col items-center gap-2">
+                <SparklesIcon className="w-8 h-8 text-accent-400" />
+                <p>Analyzing your brief for improvements...</p>
+              </div>
+            </div>
+          )}
+
+          {!isGenerating && suggestions.length === 0 && (
+            <div className="py-8 text-center text-neutral-500">
+              <p>No suggestions generated yet.</p>
+              <p className="text-sm mt-1">Click "Refresh Suggestions" to analyze your brief.</p>
+            </div>
+          )}
+
+          {suggestions.length > 0 && (
+            <BriefSuggestionList
+              suggestions={suggestions}
+              onAccept={acceptSuggestion}
+              onReject={rejectSuggestion}
+              isLoading={suggestionsLoading}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Evidence Links Panel */}
+      {showEvidenceLinks && brief && (
+        <div className="mb-8">
+          <EvidenceLinksPanel
+            documentId={brief.id}
+            onContentUpdated={(content) => {
+              setBriefContent(content);
+              onRefresh();
+            }}
+          />
+        </div>
+      )}
+
       {/* Quick Actions */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         <Button onClick={onStartInquiry} variant="outline">
           + Start New Inquiry
         </Button>
-        <Button 
-          onClick={detectAssumptions} 
+        <Button
+          onClick={detectAssumptions}
           variant="outline"
           disabled={detectingAssumptions || !brief}
         >
           {detectingAssumptions ? 'Detecting...' : 'Detect Assumptions'}
         </Button>
-        <Button variant="outline">
-          Generate Research
+        <Button
+          onClick={() => {
+            setShowSuggestions(true);
+            if (brief && suggestions.length === 0) {
+              generateSuggestions(5);
+            }
+          }}
+          variant="outline"
+          disabled={!brief}
+          className="flex items-center gap-2"
+        >
+          <SparklesIcon className="w-4 h-4" />
+          {pendingCount > 0 ? `AI Suggestions (${pendingCount})` : 'Get AI Suggestions'}
+        </Button>
+        <Button
+          onClick={() => setShowEvidenceLinks(!showEvidenceLinks)}
+          variant="outline"
+          disabled={!brief}
+        >
+          {showEvidenceLinks ? 'Hide' : 'Show'} Evidence Links
+        </Button>
+        <Button
+          onClick={() => setShowAgenticTask(true)}
+          variant="outline"
+          disabled={!brief}
+          className="flex items-center gap-2"
+        >
+          <SparklesIcon className="w-4 h-4" />
+          AI Edit Task
         </Button>
       </div>
+
+      {/* Agentic Task Dialog */}
+      {brief && (
+        <AgenticTaskDialog
+          documentId={brief.id}
+          isOpen={showAgenticTask}
+          onClose={() => setShowAgenticTask(false)}
+          onApplied={() => {
+            onRefresh();
+            triggerAnalysis(true);
+          }}
+        />
+      )}
     </div>
   );
 }

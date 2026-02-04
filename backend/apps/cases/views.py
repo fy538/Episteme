@@ -1,17 +1,22 @@
 """
 Case views
 """
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Case, WorkingView, CaseDocument
+from .models import Case, WorkingView, CaseDocument, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST
 from .serializers import (
     CaseSerializer,
     WorkingViewSerializer,
     CreateCaseSerializer,
     UpdateCaseSerializer,
+    ReadinessChecklistItemSerializer,
+    CreateChecklistItemSerializer,
+    UpdateChecklistItemSerializer,
+    UserConfidenceSerializer,
 )
 from .document_serializers import (
     CaseDocumentSerializer,
@@ -430,17 +435,475 @@ _What actions follow from this decision?_
     def skill_preview(self, request, pk=None):
         """
         Preview what skill would be created from this case
-        
+
         GET /api/cases/{id}/skill_preview/
-        
+
         Returns: Skill preview data
         """
         from apps.skills.preview import SkillPreviewService
-        
+
         case = self.get_object()
         preview = SkillPreviewService.analyze_case(case)
-        
+
         return Response(preview)
+
+    @action(detail=True, methods=['get'], url_path='evidence-landscape')
+    def evidence_landscape(self, request, pk=None):
+        """
+        Get evidence landscape (counts, not scores).
+
+        GET /api/cases/{id}/evidence-landscape/
+
+        Returns objective counts of evidence, assumptions, and inquiries
+        without computing arbitrary scores.
+
+        Returns: {
+            evidence: {supporting, contradicting, neutral},
+            assumptions: {total, validated, untested, untested_list},
+            inquiries: {total, open, investigating, resolved},
+            unlinked_claims: [{text, location}]
+        }
+        """
+        from apps.signals.models import Signal
+        from apps.inquiries.models import Inquiry, InquiryStatus
+
+        case = self.get_object()
+
+        # Count evidence by direction
+        evidence_signals = Signal.objects.filter(case=case, signal_type='evidence')
+        evidence = {
+            'supporting': evidence_signals.filter(metadata__direction='supports').count(),
+            'contradicting': evidence_signals.filter(metadata__direction='contradicts').count(),
+            'neutral': evidence_signals.filter(metadata__direction='neutral').count() +
+                       evidence_signals.filter(metadata__direction__isnull=True).count(),
+        }
+
+        # Count assumptions and their validation status
+        assumption_signals = Signal.objects.filter(case=case, signal_type='assumption')
+        total_assumptions = assumption_signals.count()
+
+        # An assumption is validated if it has a linked inquiry that is resolved
+        validated_assumptions = 0
+        untested_list = []
+
+        for assumption in assumption_signals:
+            # Check if there's an inquiry investigating this assumption
+            linked_inquiry = Inquiry.objects.filter(
+                case=case,
+                signals=assumption
+            ).first()
+
+            if linked_inquiry and linked_inquiry.status == InquiryStatus.RESOLVED:
+                validated_assumptions += 1
+            else:
+                untested_list.append({
+                    'id': str(assumption.id),
+                    'text': assumption.content[:200],
+                    'inquiry_id': str(linked_inquiry.id) if linked_inquiry else None,
+                })
+
+        assumptions = {
+            'total': total_assumptions,
+            'validated': validated_assumptions,
+            'untested': total_assumptions - validated_assumptions,
+            'untested_list': untested_list[:10],  # Limit to 10
+        }
+
+        # Count inquiries by status
+        inquiries = case.inquiries.exclude(status=InquiryStatus.ARCHIVED)
+        inquiry_counts = {
+            'total': inquiries.count(),
+            'open': inquiries.filter(status=InquiryStatus.OPEN).count(),
+            'investigating': inquiries.filter(status=InquiryStatus.INVESTIGATING).count(),
+            'resolved': inquiries.filter(status=InquiryStatus.RESOLVED).count(),
+        }
+
+        # Find unlinked claims from the brief
+        unlinked_claims = []
+        if case.main_brief:
+            claim_signals = Signal.objects.filter(
+                case=case,
+                signal_type='claim',
+                metadata__has_evidence=False
+            )[:5]
+            for claim in claim_signals:
+                unlinked_claims.append({
+                    'text': claim.content[:150],
+                    'location': 'brief',
+                })
+
+        return Response({
+            'evidence': evidence,
+            'assumptions': assumptions,
+            'inquiries': inquiry_counts,
+            'unlinked_claims': unlinked_claims,
+        })
+
+    @action(detail=True, methods=['patch'], url_path='user-confidence')
+    def user_confidence(self, request, pk=None):
+        """
+        Set user's self-assessed confidence.
+
+        PATCH /api/cases/{id}/user-confidence/
+
+        Body: {
+            user_confidence: int (0-100),
+            what_would_change_mind: str (optional)
+        }
+
+        This is the user's own assessment, not a computed score.
+        """
+        case = self.get_object()
+        serializer = UserConfidenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        case.user_confidence = serializer.validated_data['user_confidence']
+        case.user_confidence_updated_at = timezone.now()
+
+        if 'what_would_change_mind' in serializer.validated_data:
+            case.what_would_change_mind = serializer.validated_data['what_would_change_mind']
+
+        case.save(update_fields=[
+            'user_confidence',
+            'user_confidence_updated_at',
+            'what_would_change_mind',
+            'updated_at'
+        ])
+
+        return Response({
+            'user_confidence': case.user_confidence,
+            'user_confidence_updated_at': case.user_confidence_updated_at,
+            'what_would_change_mind': case.what_would_change_mind,
+        })
+
+    @action(detail=True, methods=['get', 'post'], url_path='readiness-checklist')
+    def readiness_checklist(self, request, pk=None):
+        """
+        Get or create checklist items for this case.
+
+        GET /api/cases/{id}/readiness-checklist/
+        Returns list of checklist items.
+
+        POST /api/cases/{id}/readiness-checklist/
+        Creates a new checklist item.
+        Body: {description, is_required?, linked_inquiry?, linked_assumption_signal?}
+        """
+        case = self.get_object()
+
+        if request.method == 'GET':
+            items = case.readiness_checklist.all()
+            serializer = ReadinessChecklistItemSerializer(items, many=True)
+
+            # Calculate progress
+            total = items.count()
+            completed = items.filter(is_complete=True).count()
+            required = items.filter(is_required=True).count()
+            required_completed = items.filter(is_required=True, is_complete=True).count()
+
+            return Response({
+                'items': serializer.data,
+                'progress': {
+                    'completed': completed,
+                    'required': required,
+                    'required_completed': required_completed,
+                    'total': total,
+                }
+            })
+
+        elif request.method == 'POST':
+            serializer = CreateChecklistItemSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            # Get next order
+            max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or 0
+
+            item = ReadinessChecklistItem.objects.create(
+                case=case,
+                description=serializer.validated_data['description'],
+                is_required=serializer.validated_data.get('is_required', True),
+                linked_inquiry_id=serializer.validated_data.get('linked_inquiry'),
+                linked_assumption_signal_id=serializer.validated_data.get('linked_assumption_signal'),
+                order=max_order + 1,
+            )
+
+            return Response(
+                ReadinessChecklistItemSerializer(item).data,
+                status=status.HTTP_201_CREATED
+            )
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'readiness-checklist/(?P<item_id>[^/.]+)')
+    def readiness_checklist_item(self, request, pk=None, item_id=None):
+        """
+        Update or delete a specific checklist item.
+
+        PATCH /api/cases/{id}/readiness-checklist/{item_id}/
+        Body: {description?, is_required?, is_complete?, order?}
+
+        DELETE /api/cases/{id}/readiness-checklist/{item_id}/
+        """
+        case = self.get_object()
+
+        try:
+            item = case.readiness_checklist.get(id=item_id)
+        except ReadinessChecklistItem.DoesNotExist:
+            return Response(
+                {'error': 'Checklist item not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if request.method == 'DELETE':
+            item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PATCH
+        serializer = UpdateChecklistItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        if 'description' in serializer.validated_data:
+            item.description = serializer.validated_data['description']
+        if 'is_required' in serializer.validated_data:
+            item.is_required = serializer.validated_data['is_required']
+        if 'order' in serializer.validated_data:
+            item.order = serializer.validated_data['order']
+
+        # Handle completion toggle
+        if 'is_complete' in serializer.validated_data:
+            was_complete = item.is_complete
+            item.is_complete = serializer.validated_data['is_complete']
+
+            if item.is_complete and not was_complete:
+                item.completed_at = timezone.now()
+            elif not item.is_complete:
+                item.completed_at = None
+
+        item.save()
+
+        return Response(ReadinessChecklistItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'], url_path='readiness-checklist/init-defaults')
+    def init_default_checklist(self, request, pk=None):
+        """
+        Initialize checklist with default items.
+
+        POST /api/cases/{id}/readiness-checklist/init-defaults/
+
+        Only creates items if checklist is empty.
+        """
+        case = self.get_object()
+
+        if case.readiness_checklist.exists():
+            return Response({
+                'message': 'Checklist already has items',
+                'items': ReadinessChecklistItemSerializer(
+                    case.readiness_checklist.all(), many=True
+                ).data
+            })
+
+        items = []
+        for idx, item_data in enumerate(DEFAULT_READINESS_CHECKLIST):
+            item = ReadinessChecklistItem.objects.create(
+                case=case,
+                description=item_data['description'],
+                is_required=item_data['is_required'],
+                order=idx,
+            )
+            items.append(item)
+
+        return Response({
+            'message': 'Default checklist initialized',
+            'items': ReadinessChecklistItemSerializer(items, many=True).data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='suggest-inquiries')
+    def suggest_inquiries(self, request, pk=None):
+        """
+        Get AI-suggested inquiries based on case context.
+
+        POST /api/cases/{id}/suggest-inquiries/
+
+        Returns: [{title, description, reason, priority}]
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.intelligence.case_prompts import build_inquiry_suggestion_prompt
+        import asyncio
+        import json
+
+        case = self.get_object()
+        prompt = build_inquiry_suggestion_prompt(case)
+
+        provider = get_llm_provider('fast')
+
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You suggest inquiries to help make better decisions."
+            ):
+                full_response += chunk.content
+
+            # Parse JSON response
+            try:
+                response_text = full_response.strip()
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+                    response_text = response_text.strip()
+                return json.loads(response_text)
+            except Exception:
+                return []
+
+        suggestions = asyncio.run(generate())
+        return Response(suggestions)
+
+    @action(detail=True, methods=['post'], url_path='analyze-gaps')
+    def analyze_gaps(self, request, pk=None):
+        """
+        Analyze gaps and return as prompts for reflection.
+
+        POST /api/cases/{id}/analyze-gaps/
+
+        Returns prompts (not deficiencies) to encourage reflection:
+        {
+            prompts: [
+                {type, text, action, signal_id?}
+            ],
+            # Legacy format also included for backwards compatibility
+            missing_perspectives: [str],
+            unvalidated_assumptions: [str],
+            contradictions: [str],
+            evidence_gaps: [str],
+            recommendations: [str]
+        }
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.intelligence.case_prompts import build_gap_analysis_prompt
+        import asyncio
+        import json
+
+        case = self.get_object()
+        prompt = build_gap_analysis_prompt(case)
+
+        provider = get_llm_provider('fast')
+
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You analyze decision cases to find gaps and blind spots."
+            ):
+                full_response += chunk.content
+
+            # Parse JSON response
+            try:
+                response_text = full_response.strip()
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+                    response_text = response_text.strip()
+                return json.loads(response_text)
+            except Exception:
+                return {
+                    'missing_perspectives': [],
+                    'unvalidated_assumptions': [],
+                    'contradictions': [],
+                    'evidence_gaps': [],
+                    'recommendations': []
+                }
+
+        analysis = asyncio.run(generate())
+
+        # Convert to prompts format (new approach)
+        prompts = []
+
+        # Convert missing perspectives to prompts
+        for perspective in analysis.get('missing_perspectives', []):
+            prompts.append({
+                'type': 'alternative',
+                'text': f"Have you considered: {perspective}",
+                'action': 'create_inquiry',
+            })
+
+        # Convert unvalidated assumptions to prompts
+        for assumption in analysis.get('unvalidated_assumptions', []):
+            prompts.append({
+                'type': 'assumption',
+                'text': f"You're assuming: {assumption}. Want to validate this?",
+                'action': 'investigate',
+            })
+
+        # Convert evidence gaps to prompts
+        for gap in analysis.get('evidence_gaps', []):
+            prompts.append({
+                'type': 'evidence_gap',
+                'text': gap,
+                'action': 'add_evidence',
+            })
+
+        # Include prompts in response alongside legacy format
+        analysis['prompts'] = prompts[:10]  # Limit to 10 prompts
+
+        return Response(analysis)
+
+    @action(detail=True, methods=['post'], url_path='suggest-evidence-sources')
+    def suggest_evidence_sources(self, request, pk=None):
+        """
+        Get AI-suggested evidence sources for an inquiry.
+
+        POST /api/cases/{id}/suggest-evidence-sources/
+        Body: {"inquiry_id": "uuid"}
+
+        Returns: [{suggestion, source_type, why_helpful, how_to_find}]
+        """
+        from apps.common.llm_providers import get_llm_provider
+        from apps.intelligence.case_prompts import build_evidence_suggestion_prompt
+        from apps.inquiries.models import Inquiry
+        import asyncio
+        import json
+
+        case = self.get_object()
+        inquiry_id = request.data.get('inquiry_id')
+
+        if not inquiry_id:
+            return Response(
+                {'error': 'inquiry_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            inquiry = Inquiry.objects.get(id=inquiry_id, case=case)
+        except Inquiry.DoesNotExist:
+            return Response(
+                {'error': 'Inquiry not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        prompt = build_evidence_suggestion_prompt(case, inquiry)
+        provider = get_llm_provider('fast')
+
+        async def generate():
+            full_response = ""
+            async for chunk in provider.stream_chat(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You suggest evidence sources to help validate inquiries."
+            ):
+                full_response += chunk.content
+
+            # Parse JSON response
+            try:
+                response_text = full_response.strip()
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+                    response_text = response_text.strip()
+                return json.loads(response_text)
+            except Exception:
+                return []
+
+        suggestions = asyncio.run(generate())
+        return Response(suggestions)
 
 
 class WorkingViewViewSet(viewsets.ReadOnlyModelViewSet):
@@ -660,6 +1123,374 @@ Return JSON:
         result = asyncio.run(generate())
         return Response(result)
     
+    @action(detail=True, methods=['post'], url_path='generate-suggestions')
+    def generate_suggestions(self, request, pk=None):
+        """
+        Generate AI suggestions for improving this document.
+
+        POST /api/case-documents/{id}/generate-suggestions/
+
+        Returns: [{
+            id, section_id, suggestion_type, current_content,
+            suggested_content, reason, linked_signal_id, confidence, status
+        }]
+        """
+        from .suggestions import generate_brief_suggestions
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+
+        # Build case context
+        inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'signal_type', 'content'
+        )[:20])
+
+        # Get gaps if available (cached or generate)
+        gaps = {}
+        try:
+            from apps.intelligence.case_prompts import build_gap_analysis_prompt
+            from apps.common.llm_providers import get_llm_provider
+            import asyncio
+            import json
+
+            prompt = build_gap_analysis_prompt(case)
+            provider = get_llm_provider('fast')
+
+            async def get_gaps():
+                full_response = ""
+                async for chunk in provider.stream_chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt="You analyze decision cases to find gaps."
+                ):
+                    full_response += chunk.content
+                try:
+                    response_text = full_response.strip()
+                    if response_text.startswith("```"):
+                        response_text = response_text.split("```")[1]
+                        if response_text.startswith("json"):
+                            response_text = response_text[4:]
+                        response_text = response_text.strip()
+                    return json.loads(response_text)
+                except Exception:
+                    return {}
+
+            gaps = asyncio.run(get_gaps())
+        except Exception:
+            pass
+
+        case_context = {
+            'decision_question': case.decision_question,
+            'inquiries': inquiries,
+            'signals': signals,
+            'gaps': gaps,
+        }
+
+        max_suggestions = request.data.get('max_suggestions', 5)
+        suggestions = generate_brief_suggestions(
+            brief_content=document.content_markdown,
+            case_context=case_context,
+            max_suggestions=max_suggestions
+        )
+
+        return Response(suggestions)
+
+    @action(detail=True, methods=['post'], url_path='apply-suggestion')
+    def apply_suggestion(self, request, pk=None):
+        """
+        Apply a suggestion to document content.
+
+        POST /api/case-documents/{id}/apply-suggestion/
+        Body: {
+            suggestion: {id, suggestion_type, current_content, suggested_content, ...}
+        }
+
+        Returns: {updated_content, suggestion_applied}
+        """
+        from .suggestions import apply_suggestion
+
+        document = self.get_object()
+        suggestion = request.data.get('suggestion')
+
+        if not suggestion:
+            return Response(
+                {'error': 'suggestion is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Apply the suggestion
+        updated_content = apply_suggestion(
+            document_content=document.content_markdown,
+            suggestion=suggestion
+        )
+
+        # Save the updated content
+        document.content_markdown = updated_content
+        document.save(update_fields=['content_markdown', 'updated_at'])
+
+        return Response({
+            'updated_content': updated_content,
+            'suggestion_applied': suggestion.get('id')
+        })
+
+    @action(detail=True, methods=['post'], url_path='inline-complete')
+    def inline_complete(self, request, pk=None):
+        """
+        Get inline completion for ghost text.
+
+        POST /api/case-documents/{id}/inline-complete/
+        Body: {
+            context_before: str,
+            context_after: str,
+            max_length: int (optional, default 50)
+        }
+
+        Returns: {completion: str | null}
+        """
+        from .suggestions import get_inline_completion
+
+        document = self.get_object()
+        context_before = request.data.get('context_before', '')
+        context_after = request.data.get('context_after', '')
+        max_length = request.data.get('max_length', 50)
+
+        if len(context_before) < 10:
+            return Response({'completion': None})
+
+        completion = get_inline_completion(
+            context_before=context_before,
+            context_after=context_after,
+            max_length=max_length
+        )
+
+        return Response({'completion': completion})
+
+    @action(detail=True, methods=['get'], url_path='background-analysis')
+    def background_analysis(self, request, pk=None):
+        """
+        Get or trigger background analysis for this document.
+
+        GET /api/case-documents/{id}/background-analysis/
+
+        Query params:
+        - force: bool (default false) - Force re-analysis even if cached
+
+        Returns comprehensive analysis including health score, issues,
+        suggestions, evidence gaps, and metrics.
+        """
+        from .background_analysis import (
+            should_reanalyze,
+            get_cached_analysis,
+            run_background_analysis
+        )
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+        force = request.query_params.get('force', 'false').lower() == 'true'
+
+        # Check if we need to analyze
+        if not force and not should_reanalyze(str(document.id), document.content_markdown):
+            cached = get_cached_analysis(str(document.id))
+            if cached:
+                return Response(cached)
+
+        # Build case context
+        inquiries = list(case.inquiries.values('id', 'title', 'status'))
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'signal_type', 'content'
+        )[:20])
+
+        case_context = {
+            'decision_question': case.decision_question,
+            'inquiries': inquiries,
+            'signals': signals,
+        }
+
+        # Run analysis
+        analysis = run_background_analysis(
+            document_id=str(document.id),
+            content=document.content_markdown,
+            case_context=case_context
+        )
+
+        return Response(analysis)
+
+    @action(detail=True, methods=['get'], url_path='health')
+    def document_health(self, request, pk=None):
+        """
+        Get quick health metrics for this document.
+
+        GET /api/case-documents/{id}/health/
+
+        Returns cached health score and issue counts.
+        """
+        from .background_analysis import get_document_health
+
+        document = self.get_object()
+        health = get_document_health(str(document.id))
+
+        if health is None:
+            return Response({
+                'health_score': None,
+                'message': 'No analysis available. Trigger background-analysis first.'
+            })
+
+        return Response(health)
+
+    @action(detail=True, methods=['post'], url_path='execute-task')
+    def execute_task(self, request, pk=None):
+        """
+        Execute an agentic document editing task.
+
+        POST /api/case-documents/{id}/execute-task/
+        Body: {
+            task: str (e.g., "Add citations to all claims")
+        }
+
+        Returns the task result with plan, changes, and final content.
+        """
+        from .agentic_tasks import execute_agentic_task
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+        task_description = request.data.get('task')
+
+        if not task_description:
+            return Response(
+                {'error': 'task is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Build case context
+        inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'signal_type', 'content'
+        )[:20])
+
+        case_context = {
+            'decision_question': case.decision_question,
+            'inquiries': inquiries,
+            'signals': signals,
+        }
+
+        # Execute the task
+        result = execute_agentic_task(
+            task_description=task_description,
+            document_content=document.content_markdown,
+            case_context=case_context
+        )
+
+        return Response(result)
+
+    @action(detail=True, methods=['post'], url_path='apply-task-result')
+    def apply_task_result(self, request, pk=None):
+        """
+        Apply the result of an agentic task to the document.
+
+        POST /api/case-documents/{id}/apply-task-result/
+        Body: {
+            final_content: str
+        }
+
+        Saves the final content from a task execution.
+        """
+        document = self.get_object()
+        final_content = request.data.get('final_content')
+
+        if not final_content:
+            return Response(
+                {'error': 'final_content is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        document.content_markdown = final_content
+        document.save(update_fields=['content_markdown', 'updated_at'])
+
+        return Response({
+            'success': True,
+            'message': 'Task result applied successfully'
+        })
+
+    @action(detail=True, methods=['get'], url_path='evidence-links')
+    def evidence_links(self, request, pk=None):
+        """
+        Extract claims and link them to available evidence.
+
+        GET /api/case-documents/{id}/evidence-links/
+
+        Returns claims with their evidence links and coverage metrics.
+        """
+        from .evidence_linker import extract_and_link_claims
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+
+        # Get signals for this case
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'signal_type', 'content'
+        ))
+
+        # Get inquiries
+        inquiries = list(case.inquiries.values('id', 'title', 'status'))
+
+        # Extract and link claims
+        result = extract_and_link_claims(
+            document_content=document.content_markdown,
+            signals=signals,
+            inquiries=inquiries
+        )
+
+        return Response(result)
+
+    @action(detail=True, methods=['post'], url_path='add-citations')
+    def add_citations(self, request, pk=None):
+        """
+        Add inline citations to the document based on evidence links.
+
+        POST /api/case-documents/{id}/add-citations/
+
+        Automatically adds citation markers to substantiated claims
+        and creates a sources section.
+        """
+        from .evidence_linker import extract_and_link_claims, create_inline_citations
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+
+        # Get signals
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'signal_type', 'content'
+        ))
+
+        # Extract and link claims
+        link_result = extract_and_link_claims(
+            document_content=document.content_markdown,
+            signals=signals
+        )
+
+        # Create inline citations
+        cited_content = create_inline_citations(
+            document_content=document.content_markdown,
+            linked_claims=link_result.get('claims', [])
+        )
+
+        # Optionally save (controlled by request)
+        save = request.data.get('save', False)
+        if save:
+            document.content_markdown = cited_content
+            document.save(update_fields=['content_markdown', 'updated_at'])
+
+        return Response({
+            'cited_content': cited_content,
+            'claims_cited': link_result.get('summary', {}).get('substantiated', 0),
+            'saved': save
+        })
+
     @action(detail=True, methods=['post'])
     def detect_assumptions(self, request, pk=None):
         """

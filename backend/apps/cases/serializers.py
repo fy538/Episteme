@@ -2,7 +2,7 @@
 Case serializers
 """
 from rest_framework import serializers
-from .models import Case, WorkingView, CaseStatus, StakesLevel
+from .models import Case, WorkingView, CaseStatus, StakesLevel, ReadinessChecklistItem
 
 
 class CaseSerializer(serializers.ModelSerializer):
@@ -17,7 +17,7 @@ class CaseSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True
     )
-    
+
     class Meta:
         model = Case
         fields = [
@@ -27,6 +27,16 @@ class CaseSerializer(serializers.ModelSerializer):
             'stakes',
             'position',
             'confidence',
+            # User-stated epistemic confidence
+            'user_confidence',
+            'user_confidence_updated_at',
+            'what_would_change_mind',
+            # Decision Frame fields
+            'decision_question',
+            'constraints',
+            'success_criteria',
+            'stakeholders',
+            # Relationships
             'user',
             'project',
             'created_from_event_id',
@@ -40,7 +50,7 @@ class CaseSerializer(serializers.ModelSerializer):
             'became_skill',
             'became_skill_name',
         ]
-        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at']
 
 
 class WorkingViewSerializer(serializers.ModelSerializer):
@@ -73,9 +83,85 @@ class CreateCaseSerializer(serializers.Serializer):
 
 class UpdateCaseSerializer(serializers.Serializer):
     """Serializer for updating a case"""
-    
+
     title = serializers.CharField(max_length=500, required=False)
     position = serializers.CharField(required=False)
     stakes = serializers.ChoiceField(choices=StakesLevel.choices, required=False)
     confidence = serializers.FloatField(min_value=0.0, max_value=1.0, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=CaseStatus.choices, required=False)
+    # Decision Frame fields
+    decision_question = serializers.CharField(required=False, allow_blank=True)
+    constraints = serializers.ListField(child=serializers.DictField(), required=False)
+    success_criteria = serializers.ListField(child=serializers.DictField(), required=False)
+    stakeholders = serializers.ListField(child=serializers.DictField(), required=False)
+    # User-stated confidence
+    user_confidence = serializers.IntegerField(min_value=0, max_value=100, required=False, allow_null=True)
+    what_would_change_mind = serializers.CharField(required=False, allow_blank=True)
+
+
+class CreateCaseFromAnalysisSerializer(serializers.Serializer):
+    """Serializer for creating a case from conversation analysis"""
+
+    analysis = serializers.DictField(required=True)
+    correlation_id = serializers.UUIDField(required=True)
+    user_edits = serializers.DictField(required=False, allow_null=True)
+
+
+class CaseAnalysisResponseSerializer(serializers.Serializer):
+    """Serializer for case analysis response"""
+
+    should_suggest = serializers.BooleanField()
+    suggested_title = serializers.CharField()
+    suggested_question = serializers.CharField()
+    signals_summary = serializers.DictField()
+    position_draft = serializers.CharField(required=False)
+    key_questions = serializers.ListField(child=serializers.CharField(), required=False)
+    assumptions = serializers.ListField(child=serializers.CharField(), required=False)
+    constraints = serializers.ListField(child=serializers.DictField(), required=False)
+    success_criteria = serializers.ListField(child=serializers.DictField(), required=False)
+    confidence = serializers.FloatField(required=False)
+
+
+class ReadinessChecklistItemSerializer(serializers.ModelSerializer):
+    """Serializer for readiness checklist items"""
+
+    class Meta:
+        model = ReadinessChecklistItem
+        fields = [
+            'id',
+            'description',
+            'is_required',
+            'is_complete',
+            'completed_at',
+            'linked_inquiry',
+            'linked_assumption_signal',
+            'order',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'completed_at', 'created_at', 'updated_at']
+
+
+class CreateChecklistItemSerializer(serializers.Serializer):
+    """Serializer for creating a checklist item"""
+
+    description = serializers.CharField()
+    is_required = serializers.BooleanField(default=True)
+    linked_inquiry = serializers.UUIDField(required=False, allow_null=True)
+    linked_assumption_signal = serializers.UUIDField(required=False, allow_null=True)
+
+
+class UpdateChecklistItemSerializer(serializers.Serializer):
+    """Serializer for updating a checklist item"""
+
+    description = serializers.CharField(required=False)
+    is_required = serializers.BooleanField(required=False)
+    is_complete = serializers.BooleanField(required=False)
+    order = serializers.IntegerField(required=False)
+
+
+class UserConfidenceSerializer(serializers.Serializer):
+    """Serializer for setting user confidence"""
+
+    user_confidence = serializers.IntegerField(min_value=0, max_value=100)
+    what_would_change_mind = serializers.CharField(required=False, allow_blank=True)

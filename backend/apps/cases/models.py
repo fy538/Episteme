@@ -4,6 +4,7 @@ Case models - Durable work objects
 import uuid
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 from apps.common.models import TimestampedModel, UUIDModel
 
@@ -41,8 +42,9 @@ class EditFriction(models.TextChoices):
 class Case(UUIDModel, TimestampedModel):
     """
     A Case is the centered workspace for getting something right.
-    
+
     It captures:
+    - Decision frame (question, constraints, success criteria)
     - Current position
     - Assumptions, questions, constraints (via signals in Phase 1)
     - Stakes and confidence
@@ -59,13 +61,48 @@ class Case(UUIDModel, TimestampedModel):
         choices=StakesLevel.choices,
         default=StakesLevel.MEDIUM
     )
-    
+
+    # Decision Frame fields
+    decision_question = models.TextField(
+        blank=True,
+        help_text="Core question being decided (e.g., 'Should we acquire CompanyX?')"
+    )
+    constraints = models.JSONField(
+        default=list,
+        help_text="Constraints on the decision: [{type, description}]"
+    )
+    success_criteria = models.JSONField(
+        default=list,
+        help_text="Success criteria: [{criterion, measurable, target}]"
+    )
+    stakeholders = models.JSONField(
+        default=list,
+        help_text="Stakeholders: [{name, interest, influence}]"
+    )
+
     # Core content
     position = models.TextField(help_text="Current position or thesis")
     confidence = models.FloatField(
         null=True,
         blank=True,
-        help_text="Confidence level 0.0-1.0"
+        help_text="Confidence level 0.0-1.0 (DEPRECATED - use user_confidence)"
+    )
+
+    # User-stated epistemic confidence (replaces computed confidence)
+    user_confidence = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="User's self-assessed confidence (0-100)"
+    )
+    user_confidence_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When user last updated their confidence"
+    )
+    what_would_change_mind = models.TextField(
+        blank=True,
+        help_text="User's answer to 'What would change your mind?'"
     )
     
     # Relationships
@@ -326,3 +363,81 @@ class DocumentCitation(UUIDModel, TimestampedModel):
     
     def __str__(self):
         return f"{self.from_document.title} → {self.to_document.title}"
+
+
+class ReadinessChecklistItem(UUIDModel, TimestampedModel):
+    """
+    User-defined readiness criteria for a case.
+
+    The user defines what "ready to decide" means for them.
+    System provides defaults but user can customize.
+    """
+    case = models.ForeignKey(
+        Case,
+        on_delete=models.CASCADE,
+        related_name='readiness_checklist'
+    )
+
+    description = models.TextField(
+        help_text="What needs to be true/done before deciding"
+    )
+
+    is_required = models.BooleanField(
+        default=True,
+        help_text="Whether this item must be complete to be 'ready'"
+    )
+
+    is_complete = models.BooleanField(
+        default=False,
+        help_text="User marks this complete when satisfied"
+    )
+
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this item was marked complete"
+    )
+
+    # Optional links to related items
+    linked_inquiry = models.ForeignKey(
+        'inquiries.Inquiry',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='readiness_items',
+        help_text="Inquiry that validates this criterion"
+    )
+
+    linked_assumption_signal = models.ForeignKey(
+        'signals.Signal',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='readiness_items',
+        help_text="Assumption signal related to this criterion"
+    )
+
+    order = models.IntegerField(
+        default=0,
+        help_text="Display order"
+    )
+
+    class Meta:
+        ordering = ['order', 'id']
+        indexes = [
+            models.Index(fields=['case', 'order']),
+        ]
+
+    def __str__(self):
+        status = '✓' if self.is_complete else '○'
+        return f"{status} {self.description[:50]}"
+
+
+# Default checklist items for new cases
+DEFAULT_READINESS_CHECKLIST = [
+    {"description": "Decision question is clearly defined", "is_required": True},
+    {"description": "I've considered at least one alternative", "is_required": True},
+    {"description": "Key assumptions are identified", "is_required": True},
+    {"description": "Critical assumptions are validated or risk accepted", "is_required": False},
+    {"description": "I understand what would change my mind", "is_required": False},
+]
