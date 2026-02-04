@@ -5,8 +5,10 @@ This is for READ-TIME processing of signals.
 We don't dedupe at write time - we keep everything raw.
 """
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+import uuid
 from apps.signals.models import Signal
+from apps.common.embeddings import generate_embedding
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -169,5 +171,137 @@ def cluster_signals_by_similarity(
         
         clusters.append(cluster)
         unclustered = remaining
-    
+
     return clusters
+
+
+def search_signals_by_text(
+    query: str,
+    case_id: Optional[uuid.UUID] = None,
+    signal_type: Optional[str] = None,
+    top_k: int = 10,
+    threshold: float = 0.5
+) -> List[Tuple[Signal, float]]:
+    """
+    Search for signals semantically similar to a text query.
+
+    Args:
+        query: Text to search for (will be embedded)
+        case_id: Optional case UUID to scope search
+        signal_type: Optional signal type filter ('claim', 'assumption', 'evidence', etc.)
+        top_k: Maximum number of results to return
+        threshold: Minimum similarity score (0.0-1.0)
+
+    Returns:
+        List of (signal, similarity_score) tuples, sorted by similarity (highest first)
+
+    Example:
+        >>> results = search_signals_by_text("market size", case_id=my_case.id)
+        >>> for signal, score in results:
+        ...     print(f"{score:.2f}: {signal.text[:50]}")
+    """
+    # Generate embedding for query
+    query_embedding = generate_embedding(query)
+    if not query_embedding:
+        return []
+
+    # Build queryset
+    filters = {'embedding__isnull': False}
+    if case_id:
+        filters['case_id'] = case_id
+    if signal_type:
+        filters['signal_type'] = signal_type
+
+    signals = Signal.objects.filter(**filters)
+
+    # Calculate similarities
+    results = []
+    for signal in signals:
+        if signal.embedding:
+            similarity = cosine_similarity(query_embedding, signal.embedding)
+            if similarity >= threshold:
+                results.append((signal, similarity))
+
+    # Sort by similarity (highest first) and limit
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:top_k]
+
+
+def ensure_signal_embedding(signal: Signal, save: bool = True) -> bool:
+    """
+    Ensure a signal has an embedding, generating one if needed.
+
+    Args:
+        signal: Signal instance to embed
+        save: Whether to save the signal after embedding
+
+    Returns:
+        True if embedding exists or was generated, False if generation failed
+    """
+    if signal.embedding:
+        return True
+
+    embedding = generate_embedding(signal.text)
+    if embedding:
+        signal.embedding = embedding
+        if save:
+            signal.save(update_fields=['embedding'])
+        return True
+
+    return False
+
+
+def backfill_embeddings(
+    case_id: Optional[uuid.UUID] = None,
+    batch_size: int = 100,
+    verbose: bool = True
+) -> dict:
+    """
+    Backfill embeddings for signals that don't have them.
+
+    Args:
+        case_id: Optional case UUID to scope backfill
+        batch_size: Number of signals to process at once
+        verbose: Whether to print progress
+
+    Returns:
+        Dict with counts: {'processed': N, 'embedded': N, 'failed': N}
+    """
+    from apps.common.embeddings import generate_embeddings_batch
+
+    filters = {'embedding__isnull': True}
+    if case_id:
+        filters['case_id'] = case_id
+
+    signals = list(Signal.objects.filter(**filters))
+
+    if verbose:
+        print(f"Found {len(signals)} signals without embeddings")
+
+    stats = {'processed': 0, 'embedded': 0, 'failed': 0}
+
+    # Process in batches
+    for i in range(0, len(signals), batch_size):
+        batch = signals[i:i + batch_size]
+        texts = [s.text for s in batch]
+
+        embeddings = generate_embeddings_batch(texts)
+
+        to_update = []
+        for signal, embedding in zip(batch, embeddings):
+            stats['processed'] += 1
+            if embedding:
+                signal.embedding = embedding
+                to_update.append(signal)
+                stats['embedded'] += 1
+            else:
+                stats['failed'] += 1
+
+        # Bulk update
+        if to_update:
+            Signal.objects.bulk_update(to_update, ['embedding'], batch_size=batch_size)
+
+        if verbose:
+            print(f"Processed {stats['processed']}/{len(signals)} signals")
+
+    return stats
