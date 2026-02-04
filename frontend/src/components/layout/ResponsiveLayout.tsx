@@ -104,10 +104,37 @@ export function ResponsiveLayout({
 
   // Desktop/Tablet layout
   return (
-    <div className="flex h-full">
+    <div className="flex h-full relative">
       {/* Left sidebar */}
       {leftSidebar && showLeftSidebar && (
-        <div className="hidden lg:block">{leftSidebar}</div>
+        <div className="hidden lg:block relative">
+          {leftSidebar}
+          {/* Collapse button for left sidebar */}
+          {onToggleLeftSidebar && (
+            <button
+              onClick={onToggleLeftSidebar}
+              className="absolute top-1/2 -right-3 -translate-y-1/2 z-20 w-6 h-12 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-r-lg shadow-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all flex items-center justify-center group"
+              aria-label="Hide conversations"
+            >
+              <svg className="w-3 h-3 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+      
+      {/* Collapsed left sidebar - show button */}
+      {leftSidebar && !showLeftSidebar && onToggleLeftSidebar && (
+        <button
+          onClick={onToggleLeftSidebar}
+          className="hidden lg:flex absolute left-0 top-1/2 -translate-y-1/2 z-20 w-6 h-12 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-r-lg shadow-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all items-center justify-center group"
+          aria-label="Show conversations"
+        >
+          <svg className="w-3 h-3 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
       )}
 
       {/* Main content */}
@@ -115,7 +142,34 @@ export function ResponsiveLayout({
 
       {/* Right sidebar */}
       {rightSidebar && showRightSidebar && (
-        <div className="hidden lg:block">{rightSidebar}</div>
+        <div className="hidden lg:block relative">
+          {rightSidebar}
+          {/* Collapse button for right sidebar */}
+          {onToggleRightSidebar && (
+            <button
+              onClick={onToggleRightSidebar}
+              className="absolute top-1/2 -left-3 -translate-y-1/2 z-20 w-6 h-12 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-l-lg shadow-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all flex items-center justify-center group"
+              aria-label="Hide structure"
+            >
+              <svg className="w-3 h-3 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+      
+      {/* Collapsed right sidebar - show button */}
+      {rightSidebar && !showRightSidebar && onToggleRightSidebar && (
+        <button
+          onClick={onToggleRightSidebar}
+          className="hidden lg:flex absolute right-0 top-1/2 -translate-y-1/2 z-20 w-6 h-12 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-l-lg shadow-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all items-center justify-center group"
+          aria-label="Show structure"
+        >
+          <svg className="w-3 h-3 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import uuid
 import logging
 from typing import Dict, List
 import numpy as np
+from asgiref.sync import sync_to_async
 
 from apps.chat.models import ChatThread
 from apps.signals.models import Signal
@@ -28,7 +29,7 @@ class GraphAnalyzer:
     def __init__(self):
         self.similarity_threshold = 0.80  # For semantic similarity
     
-    async def find_patterns(self, thread_id: uuid.UUID) -> Dict:
+    def find_patterns(self, thread_id: uuid.UUID) -> Dict:
         """
         Find interesting patterns in the graph for a thread.
         

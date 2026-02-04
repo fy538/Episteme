@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { EventSourcePlus } from 'event-source-plus';
 import type { Reflection, BackgroundActivity, CompanionEvent } from '@/lib/types/companion';
 
 export function useReasoningCompanion(threadId: string | null) {
@@ -20,34 +21,53 @@ export function useReasoningCompanion(threadId: string | null) {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
     const eventSourceUrl = `${backendUrl}/api/chat/threads/${threadId}/companion-stream/`;
     
-    let eventSource: EventSource | null = null;
+    console.log('[Companion] Connecting to:', eventSourceUrl);
+    
+    // Use event-source-plus with proper authentication headers
+    const eventSource = new EventSourcePlus(eventSourceUrl, {
+      // LLM-optimized retry strategy: only retry on errors, not after stream ends
+      retryStrategy: 'on-error',
+      maxRetryCount: 5,
+      maxRetryInterval: 8000, // Max 8s between retries
+      
+      // Headers function - gets fresh token on each request/retry
+      headers: () => {
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+          console.error('[Companion] No auth token found');
+          return {};
+        }
+        return {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'text/event-stream',
+        };
+      },
+    });
 
-    try {
-      eventSource = new EventSource(eventSourceUrl, {
-        withCredentials: true
-      });
-
-      eventSource.onopen = () => {
-        setIsActive(true);
-        setError(null);
-      };
-
-      eventSource.onmessage = (event) => {
+    const controller = eventSource.listen({
+      onMessage: (message) => {
+        console.log('[Companion] Raw message received:', message);
         try {
           // Skip heartbeat messages
-          if (event.data.startsWith(':')) {
+          if (message.data && message.data.startsWith(':')) {
             return;
           }
 
-          const data: CompanionEvent = JSON.parse(event.data);
+          const data: CompanionEvent = JSON.parse(message.data);
+          console.log('[Companion] Parsed event:', data.type, 'Delta length:', (data as any).delta?.length);
 
-          if (data.type === 'reflection_chunk') {
-            // Stream token-by-token - append to existing reflection
+          if (data.type === 'status') {
+            // Handle status messages (e.g., "Waiting for conversation to begin...")
+            console.log('[Companion] Status:', (data as any).message);
+            setIsActive(true);
+          } else if (data.type === 'reflection_chunk') {
+            const delta = (data as any).delta || '';
             setReflection(prev => {
               const currentText = prev?.text || '';
+              const newText = currentText + delta;
               return {
                 id: prev?.id || 'streaming',
-                text: currentText + ((data as any).delta || ''),
+                text: newText,
                 trigger_type: prev?.trigger_type || 'periodic',
                 patterns: prev?.patterns || {
                   ungrounded_assumptions: [],
@@ -60,7 +80,7 @@ export function useReasoningCompanion(threadId: string | null) {
               };
             });
           } else if (data.type === 'reflection_complete') {
-            // Finalize reflection with ID and patterns
+            console.log('[Companion] Reflection complete');
             setReflection({
               id: (data as any).id || Date.now().toString(),
               text: data.text || '',
@@ -75,7 +95,6 @@ export function useReasoningCompanion(threadId: string | null) {
               created_at: new Date().toISOString()
             });
             
-            // Update current topic for semantic highlighting
             if ((data as any).current_topic) {
               setCurrentTopic((data as any).current_topic);
             }
@@ -83,30 +102,41 @@ export function useReasoningCompanion(threadId: string | null) {
             setBackgroundActivity(data.activity || null);
           }
         } catch (err) {
-          console.error('Failed to parse companion event:', err);
+          console.error('[Companion] Failed to parse event:', err);
         }
-      };
+      },
 
-      eventSource.onerror = (err) => {
-        console.error('Companion SSE error:', err);
+      onResponse: ({ response }) => {
+        console.log('[Companion] Connection opened, status:', response.status);
+        setIsActive(true);
+        setError(null);
+      },
+
+      onResponseError: ({ response }) => {
+        console.error('[Companion] Response error:', response.status);
+        
+        // Handle different error types
+        if (response.status === 401 || response.status === 403) {
+          setError('Authentication failed. Please log in again.');
+          controller.abort(); // Don't retry auth errors
+        } else {
+          setError(`Connection error (${response.status}). Retrying...`);
+        }
+        setIsActive(false);
+      },
+
+      onRequestError: ({ error }) => {
+        console.error('[Companion] Request error:', error);
         setError('Connection lost. Reconnecting...');
         setIsActive(false);
-        
-        // EventSource automatically reconnects, but we can close and recreate
-        // if we want custom reconnect logic
-      };
-
-    } catch (err) {
-      console.error('Failed to create EventSource:', err);
-      setError('Failed to connect to reasoning companion');
-    }
+      },
+    });
 
     // Cleanup on unmount or threadId change
     return () => {
-      if (eventSource) {
-        eventSource.close();
-        setIsActive(false);
-      }
+      console.log('[Companion] Cleaning up connection');
+      controller.abort();
+      setIsActive(false);
     };
   }, [threadId]);
 

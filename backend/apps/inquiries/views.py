@@ -37,23 +37,25 @@ class InquiryViewSet(viewsets.ModelViewSet):
         return InquirySerializer
     
     def get_queryset(self):
+        from apps.common.utils import is_valid_uuid
+
         queryset = Inquiry.objects.all()
-        
+
         # Filter by case
         case_id = self.request.query_params.get('case', None)
-        if case_id:
+        if case_id and is_valid_uuid(case_id):
             queryset = queryset.filter(case_id=case_id)
-        
+
         # Filter by status
         status_filter = self.request.query_params.get('status', None)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-        
+
         # Filter active only
         active_only = self.request.query_params.get('active', None)
         if active_only == 'true':
             queryset = queryset.filter(status__in=[InquiryStatus.OPEN, InquiryStatus.INVESTIGATING])
-        
+
         return queryset.select_related('case').prefetch_related('related_signals')
     
     @action(detail=True, methods=['get'])
@@ -616,6 +618,74 @@ Return JSON:
         result = asyncio.run(generate())
         return Response(result)
     
+    @action(detail=True, methods=['post'], url_path='update-dependencies')
+    def update_dependencies(self, request, pk=None):
+        """
+        Update inquiry dependencies (blocked_by relationships).
+
+        POST /api/inquiries/{id}/update-dependencies/
+        Body: {"blocked_by": ["inquiry-uuid-1", "inquiry-uuid-2"]}
+
+        Returns: Updated inquiry with dependency information
+        """
+        inquiry = self.get_object()
+        blocked_by_ids = request.data.get('blocked_by', [])
+
+        # Validate that all IDs are valid inquiries in the same case
+        inquiries = Inquiry.objects.filter(
+            id__in=blocked_by_ids,
+            case=inquiry.case
+        ).exclude(id=inquiry.id)  # Can't block itself
+
+        if len(inquiries) != len(blocked_by_ids):
+            return Response(
+                {'error': 'Invalid inquiry IDs or inquiries not in same case'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Prevent circular dependencies
+        for dep in inquiries:
+            if inquiry.id in dep.blocked_by.values_list('id', flat=True):
+                return Response(
+                    {'error': f'Circular dependency detected with inquiry "{dep.title}"'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Update the blocked_by relationship
+        inquiry.blocked_by.set(inquiries)
+
+        serializer = self.get_serializer(inquiry)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def dependency_graph(self, request, pk=None):
+        """
+        Get the full dependency graph for this inquiry's case.
+
+        GET /api/inquiries/{id}/dependency-graph/
+
+        Returns: Graph of all inquiries with their dependencies
+        """
+        inquiry = self.get_object()
+        case_inquiries = Inquiry.objects.filter(case=inquiry.case).prefetch_related('blocked_by')
+
+        graph = []
+        for inq in case_inquiries:
+            graph.append({
+                'id': str(inq.id),
+                'title': inq.title,
+                'status': inq.status,
+                'blocked_by': [str(b.id) for b in inq.blocked_by.all()],
+                'blocks': [str(b.id) for b in inq.blocks.all()],
+                'is_blocked': inq.blocked_by.exclude(status=InquiryStatus.RESOLVED).exists(),
+            })
+
+        return Response({
+            'case_id': str(inquiry.case.id),
+            'graph': graph,
+            'focus_inquiry_id': str(inquiry.id)
+        })
+
     @action(detail=True, methods=['post'])
     async def generate_investigation_plan(self, request, pk=None):
         """
@@ -691,23 +761,25 @@ class EvidenceViewSet(viewsets.ModelViewSet):
         return context
     
     def get_queryset(self):
+        from apps.common.utils import is_valid_uuid
+
         queryset = Evidence.objects.all()
-        
+
         # Filter by inquiry
         inquiry_id = self.request.query_params.get('inquiry')
-        if inquiry_id:
+        if inquiry_id and is_valid_uuid(inquiry_id):
             queryset = queryset.filter(inquiry_id=inquiry_id)
-        
+
         # Filter by direction
         direction = self.request.query_params.get('direction')
         if direction:
             queryset = queryset.filter(direction=direction)
-        
+
         # Filter by document
         document_id = self.request.query_params.get('document')
-        if document_id:
+        if document_id and is_valid_uuid(document_id):
             queryset = queryset.filter(source_document_id=document_id)
-        
+
         return queryset.select_related('inquiry', 'source_document', 'created_by')
     
     @action(detail=False, methods=['post'])
@@ -782,23 +854,25 @@ class ObjectionViewSet(viewsets.ModelViewSet):
         return context
     
     def get_queryset(self):
+        from apps.common.utils import is_valid_uuid
+
         queryset = Objection.objects.all()
-        
+
         # Filter by inquiry
         inquiry_id = self.request.query_params.get('inquiry')
-        if inquiry_id:
+        if inquiry_id and is_valid_uuid(inquiry_id):
             queryset = queryset.filter(inquiry_id=inquiry_id)
-        
+
         # Filter by status
         obj_status = self.request.query_params.get('status')
         if obj_status:
             queryset = queryset.filter(status=obj_status)
-        
+
         # Filter by source
         source = self.request.query_params.get('source')
         if source:
             queryset = queryset.filter(source=source)
-        
+
         return queryset.select_related('inquiry', 'source_document', 'created_by')
     
     @action(detail=True, methods=['post'])

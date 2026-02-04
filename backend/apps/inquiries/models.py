@@ -134,7 +134,16 @@ class Inquiry(UUIDModel, TimestampedModel):
         related_name='is_brief_for_inquiry',
         help_text="Inquiry-level brief document"
     )
-    
+
+    # Dependencies - inquiries that must be resolved before this one
+    blocked_by = models.ManyToManyField(
+        'self',
+        symmetrical=False,
+        related_name='blocks',
+        blank=True,
+        help_text="Inquiries that must be resolved before this one can be resolved"
+    )
+
     class Meta:
         verbose_name_plural = 'inquiries'
         ordering = ['-priority', 'sequence_index']

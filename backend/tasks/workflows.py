@@ -157,8 +157,8 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
         # Accumulate message stats for batching
         thread.accumulate_for_extraction(len(user_message.content))
         
-        # Check if we should trigger batch extraction
-        if should_trigger_batch_extraction(thread, char_threshold=500, turn_threshold=5):
+        # Check if we should trigger batch extraction (2 turns or 30 chars)
+        if should_trigger_batch_extraction(thread, char_threshold=30, turn_threshold=2):
             # Get all unprocessed messages since last extraction
             unprocessed_messages = get_unprocessed_messages(thread)
             
@@ -351,10 +351,65 @@ def generate_chat_title_workflow(thread_id: str):
 
 
 @shared_task
+def generate_signal_embeddings(signal_ids: list):
+    """
+    Generate embeddings for signals (called after unified analysis).
+
+    Args:
+        signal_ids: List of signal IDs to generate embeddings for
+
+    Returns:
+        Dict with status and count
+    """
+    from apps.signals.models import Signal
+
+    try:
+        signals = Signal.objects.filter(id__in=signal_ids)
+        generated = 0
+
+        for signal in signals:
+            # Skip if already has embedding
+            if signal.embedding:
+                continue
+
+            # Generate embedding
+            try:
+                from apps.common.embeddings import generate_embedding
+                embedding = generate_embedding(signal.text)
+                signal.embedding = embedding
+                signal.save(update_fields=['embedding'])
+                generated += 1
+            except Exception as e:
+                logger.warning(f"Failed to generate embedding for signal {signal.id}: {e}")
+                continue
+
+        logger.info(
+            "signal_embeddings_generated",
+            extra={"count": generated, "total": len(signal_ids)}
+        )
+
+        return {
+            'status': 'completed',
+            'generated': generated,
+            'total': len(signal_ids)
+        }
+
+    except Exception:
+        logger.exception(
+            "generate_signal_embeddings_failed",
+            extra={"signal_ids": signal_ids}
+        )
+        return {
+            'status': 'failed',
+            'signal_ids': signal_ids
+        }
+
+
+@shared_task
 def extract_signals_workflow(message_id: str):
     """
     Phase 1: Extract signals from a message
-    
+
     Args:
         message_id: Message to extract signals from
     """

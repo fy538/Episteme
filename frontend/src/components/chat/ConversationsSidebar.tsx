@@ -24,6 +24,7 @@ export function ConversationsSidebar({
   projects,
   threads,
   selectedThreadId,
+  streamingTitleThreadId,
   isLoading,
   onSelect,
   onCreate,
@@ -38,6 +39,7 @@ export function ConversationsSidebar({
   projects: Project[];
   threads: ChatThread[];
   selectedThreadId: string | null;
+  streamingTitleThreadId?: string | null;
   isLoading?: boolean;
   onSelect: (threadId: string) => void;
   onCreate: () => void;
@@ -158,103 +160,104 @@ export function ConversationsSidebar({
               {group.label}
             </h3>
             <AnimatePresence mode="popLayout">
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {group.items.map((thread, index) => {
                   const isSelected = thread.id === selectedThreadId;
                   const title = thread.title || 'New Chat';
                   const isEditing = editingId === thread.id;
                   const isArchived = !!thread.archived;
+                  const isStreamingTitle = streamingTitleThreadId === thread.id;
 
                   const conversationContent = (
                     <div
-                      className={`rounded border px-3 py-2 text-sm ${
-                        isSelected ? 'border-accent-500 bg-white' : 'border-transparent bg-white/60'
+                      className={`rounded-lg h-10 flex items-center px-3 text-sm transition-colors ${
+                        isSelected
+                          ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
+                          : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
                       }`}
                     >
                     {isEditing ? (
-                      <div className="space-y-2">
+                      <div className="flex items-center gap-2 w-full">
                         <Input
                           value={titleDraft}
                           onChange={e => setTitleDraft(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') saveRename(thread.id);
+                            if (e.key === 'Escape') setEditingId(null);
+                          }}
+                          className="h-7 text-sm flex-1"
+                          autoFocus
                           aria-label="Rename conversation"
                         />
-                        <div className="flex gap-2">
-                          <Button size="sm" onClick={() => saveRename(thread.id)}>
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditingId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
+                        <button
+                          onClick={() => saveRename(thread.id)}
+                          className="text-xs text-accent-600 hover:text-accent-700 font-medium"
+                        >
+                          Save
+                        </button>
                       </div>
                     ) : (
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-2 group">
-                          <button
-                            onClick={() => onSelect(thread.id)}
-                            className="text-left flex-1 truncate"
-                            title={title}
-                          >
-                            {title}
-                          </button>
-                          <div className="relative opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuOpenId(menuOpenId === thread.id ? null : thread.id);
-                              }}
-                              className="p-1 hover:bg-neutral-200 rounded"
-                              aria-label="Options"
-                            >
-                              <svg className="w-4 h-4 text-neutral-600" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                              </svg>
-                            </button>
-                            {menuOpenId === thread.id && (
-                              <div className="absolute right-0 mt-1 w-32 bg-white border border-neutral-200 rounded-md shadow-lg z-10">
-                                <button
-                                  onClick={() => { startEditing(thread); setMenuOpenId(null); }}
-                                  className="w-full text-left px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
-                                >
-                                  Rename
-                                </button>
-                                <button
-                                  onClick={() => { handleArchive(thread); setMenuOpenId(null); }}
-                                  className="w-full text-left px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
-                                >
-                                  {isArchived ? 'Unarchive' : 'Archive'}
-                                </button>
-                                <button
-                                  onClick={() => { handleDelete(thread); setMenuOpenId(null); }}
-                                  className="w-full text-left px-3 py-2 text-sm text-error-600 hover:bg-error-50 transition-colors"
-                                >
-                                  Delete
-                                </button>
-                                {!thread.project && (
-                                  <button
-                                    onClick={() => { setMenuOpenId(null); }}
-                                    className="w-full text-left px-3 py-2 text-sm text-accent-600 hover:bg-accent-50 transition-colors border-t border-neutral-100"
-                                  >
-                                    Link to Project →
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        
-                        {/* Project Badge */}
+                      <div className="flex items-center justify-between gap-2 w-full group">
+                        <button
+                          onClick={() => {
+                            if (isSelected && !isStreamingTitle) {
+                              // Click on already selected item to edit
+                              startEditing(thread);
+                            } else {
+                              onSelect(thread.id);
+                            }
+                          }}
+                          className="text-left flex-1 truncate text-sm"
+                          title={isSelected ? 'Click to edit title' : title}
+                        >
+                          {title}
+                          {isStreamingTitle && (
+                            <span className="inline-block ml-1 text-accent-500 animate-pulse">|</span>
+                          )}
+                        </button>
+                        {/* Project indicator dot */}
                         {thread.project && (
-                          <div className="mt-1">
-                            <Badge variant="neutral" className="text-xs">
-                              {projects.find(p => p.id === thread.project)?.title || 'Project'}
-                            </Badge>
-                          </div>
+                          <span
+                            className="w-2 h-2 rounded-full bg-accent-400 flex-shrink-0"
+                            title={projects.find(p => p.id === thread.project)?.title || 'Project'}
+                          />
                         )}
+                        <div className="relative opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenId(menuOpenId === thread.id ? null : thread.id);
+                            }}
+                            className="p-1 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded"
+                            aria-label="Options"
+                          >
+                            <svg className="w-4 h-4 text-neutral-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                            </svg>
+                          </button>
+                          {menuOpenId === thread.id && (
+                            <div className="absolute right-0 mt-1 w-32 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg z-10">
+                              <button
+                                onClick={() => { startEditing(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                              >
+                                Rename
+                              </button>
+                              <button
+                                onClick={() => { handleArchive(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                              >
+                                {isArchived ? 'Unarchive' : 'Archive'}
+                              </button>
+                              <button
+                                onClick={() => { handleDelete(thread); setMenuOpenId(null); }}
+                                className="w-full text-left px-3 py-2 text-sm text-error-600 hover:bg-error-50 dark:hover:bg-error-900/20 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     </div>
@@ -327,7 +330,7 @@ export function ConversationsSidebar({
                 <h4 className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide mb-2">
                   {group.label}
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {group.items.map(thread => {
                     const isSelected = thread.id === selectedThreadId;
                     const title = thread.title || 'New Chat';
@@ -336,58 +339,45 @@ export function ConversationsSidebar({
                     return (
                       <div
                         key={thread.id}
-                        className={`rounded border px-3 py-2 text-sm ${
-                          isSelected ? 'border-accent-500 bg-white' : 'border-transparent bg-white/60'
+                        className={`rounded-lg h-10 flex items-center px-3 text-sm transition-colors opacity-60 ${
+                          isSelected
+                            ? 'bg-accent-100 dark:bg-accent-900/30'
+                            : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
                         }`}
                       >
                         {isEditing ? (
-                          <div className="space-y-2">
+                          <div className="flex items-center gap-2 w-full">
                             <Input
                               value={titleDraft}
                               onChange={e => setTitleDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveRename(thread.id);
+                                if (e.key === 'Escape') setEditingId(null);
+                              }}
+                              className="h-7 text-sm flex-1"
+                              autoFocus
                               aria-label="Rename conversation"
                             />
-                            <div className="flex gap-2">
-                              <Button size="sm" onClick={() => saveRename(thread.id)}>
-                                Save
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setEditingId(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
                           </div>
                         ) : (
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2 w-full group">
                             <button
                               onClick={() => onSelect(thread.id)}
-                              className="text-left flex-1"
+                              className="text-left flex-1 truncate text-sm text-neutral-500"
                               title={title}
                             >
                               {title}
                             </button>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => startEditing(thread)}
-                                className="text-xs text-neutral-500 hover:text-neutral-800"
-                                aria-label="Rename conversation"
-                              >
-                                Rename
-                              </button>
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                               <button
                                 onClick={() => handleArchive(thread)}
-                                className="text-xs text-neutral-500 hover:text-neutral-800"
-                                aria-label="Unarchive conversation"
+                                className="text-[10px] text-neutral-500 hover:text-neutral-700 px-1"
                               >
-                                Unarchive
+                                Restore
                               </button>
                               <button
                                 onClick={() => handleDelete(thread)}
-                                className="text-xs text-error-600 hover:text-error-800"
-                                aria-label="Delete conversation"
+                                className="text-[10px] text-error-500 hover:text-error-700 px-1"
                               >
                                 Delete
                               </button>

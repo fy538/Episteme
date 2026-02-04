@@ -26,12 +26,15 @@ export default function Home() {
     setIsAuthenticated(false);
   }
 
-  // Redirect authenticated users to workspace
+  // Redirect authenticated users to workspace, unauthenticated to login
   useEffect(() => {
     if (isAuthenticated) {
       router.push('/workspace');
+    } else if (!isDevMode) {
+      // Auto-redirect to login in production mode
+      router.push('/login');
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isDevMode, router]);
 
   // Show landing page only for logged-out users
   if (isAuthenticated) {

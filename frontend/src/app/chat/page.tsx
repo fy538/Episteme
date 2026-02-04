@@ -4,11 +4,11 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
-import { ReasoningCompanion } from '@/components/chat/ReasoningCompanion';
+import { CompanionPanel } from '@/components/companion';
 import { GlobalHeader } from '@/components/layout/GlobalHeader';
 import { Button } from '@/components/ui/button';
 import { ResponsiveLayout } from '@/components/layout/ResponsiveLayout';
@@ -19,6 +19,8 @@ import { authAPI } from '@/lib/api/auth';
 import type { ChatThread } from '@/lib/types/chat';
 import { projectsAPI } from '@/lib/api/projects';
 import type { Project } from '@/lib/types/project';
+import type { Signal } from '@/lib/types/signal';
+import type { CompanionSignal, ActiveAction, SuggestedAction } from '@/lib/types/companion';
 import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate';
 import { useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
 import { useIsMobile } from '@/hooks/useResponsive';
@@ -42,9 +44,201 @@ export default function ChatPage() {
   const [networkError, setNetworkError] = useState(false);
   const isMobile = useIsMobile();
 
+  // Companion panel state
+  const [reflection, setReflection] = useState('');
+  const [isReflectionStreaming, setIsReflectionStreaming] = useState(false);
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [activeAction, setActiveAction] = useState<ActiveAction | null>(null);
+
   // Keyboard shortcuts
   useKeyboardShortcut(['Cmd', 'N'], handleCreateThread);
   useKeyboardShortcut(['Cmd', 'B'], () => setShowConversations(prev => !prev));
+
+  // Track assistant response count for auto-title generation
+  const [assistantResponseCount, setAssistantResponseCount] = useState(0);
+  const [streamingTitleThreadId, setStreamingTitleThreadId] = useState<string | null>(null);
+
+  // Reset companion state when thread changes
+  useEffect(() => {
+    setReflection('');
+    setSignals([]);
+    setActiveAction(null);
+    setAssistantResponseCount(0);
+  }, [threadId]);
+
+  // Generate title after 2nd assistant response (streaming)
+  const handleTitleGeneration = useCallback(async () => {
+    if (!threadId) return;
+
+    // Check if thread already has a custom title
+    const thread = threads.find(t => t.id === threadId);
+    if (thread?.title && thread.title !== 'New Chat' && !thread.title.startsWith('Chat ')) {
+      return; // Already has a custom title
+    }
+
+    // Mark as streaming
+    setStreamingTitleThreadId(threadId);
+
+    try {
+      await chatAPI.streamTitle(threadId, {
+        onChunk: (delta) => {
+          // Update title incrementally as it streams
+          setThreads(prev =>
+            prev.map(t => {
+              if (t.id === threadId) {
+                const currentTitle = t.title === 'New Chat' ? '' : (t.title || '');
+                return { ...t, title: currentTitle + delta };
+              }
+              return t;
+            })
+          );
+        },
+        onComplete: (title, generated) => {
+          setStreamingTitleThreadId(null);
+          if (generated && title) {
+            // Ensure final title is set
+            setThreads(prev =>
+              prev.map(t => t.id === threadId ? { ...t, title } : t)
+            );
+            console.log('[Chat] Auto-generated title:', title);
+          }
+        },
+        onError: (error) => {
+          setStreamingTitleThreadId(null);
+          console.error('[Chat] Failed to generate title:', error);
+        },
+      });
+    } catch (err) {
+      setStreamingTitleThreadId(null);
+      console.error('[Chat] Failed to generate title:', err);
+    }
+  }, [threadId, threads]);
+
+  // Unified stream callbacks for ChatInterface
+  const unifiedStreamCallbacks = {
+    onReflectionChunk: useCallback((delta: string) => {
+      setIsReflectionStreaming(true);
+      setReflection(prev => prev + delta);
+    }, []),
+    onReflectionComplete: useCallback((content: string) => {
+      setReflection(content);
+      setIsReflectionStreaming(false);
+    }, []),
+    onSignals: useCallback((newSignals: Signal[]) => {
+      setSignals(prev => {
+        // Merge new signals, avoiding duplicates
+        const existingIds = new Set(prev.map(s => s.id));
+        const unique = newSignals.filter(s => !existingIds.has(s.id));
+        return [...prev, ...unique];
+      });
+    }, []),
+    onMessageComplete: useCallback(() => {
+      setAssistantResponseCount(prev => {
+        const newCount = prev + 1;
+        // Trigger title generation after 2nd response
+        if (newCount === 2) {
+          handleTitleGeneration();
+        }
+        return newCount;
+      });
+    }, [handleTitleGeneration]),
+  };
+
+  // Companion action handlers
+  const handleValidateSignal = useCallback(async (signal: CompanionSignal) => {
+    console.log('[Chat] Validate signal:', signal);
+    // TODO: Implement single signal validation
+    setActiveAction({
+      id: `action-${Date.now()}`,
+      type: 'research_assumption',
+      status: 'running',
+      target: signal.text,
+      targetIds: [signal.id],
+      progress: 0,
+      steps: [
+        { id: '1', label: 'Searching for evidence...', status: 'running' },
+        { id: '2', label: 'Analyzing sources', status: 'pending' },
+        { id: '3', label: 'Forming conclusion', status: 'pending' },
+      ],
+      startedAt: new Date().toISOString(),
+    });
+
+    // Simulate progress for demo
+    setTimeout(() => {
+      setActiveAction(prev => prev ? {
+        ...prev,
+        progress: 50,
+        steps: prev.steps.map((s, i) =>
+          i === 0 ? { ...s, status: 'complete' as const } :
+          i === 1 ? { ...s, status: 'running' as const } : s
+        ),
+      } : null);
+    }, 1500);
+
+    setTimeout(() => {
+      setActiveAction(prev => prev ? {
+        ...prev,
+        status: 'complete',
+        progress: 100,
+        steps: prev.steps.map(s => ({ ...s, status: 'complete' as const })),
+        result: {
+          verdict: 'partial',
+          summary: 'This assumption is partially supported. While there is evidence for the general claim, specific conditions may vary.',
+          sources: [
+            { title: 'Industry Report 2024' },
+            { title: 'Stack Overflow Survey' },
+          ],
+        },
+      } : null);
+    }, 3000);
+  }, []);
+
+  const handleValidateSignals = useCallback(async (signals: CompanionSignal[]) => {
+    console.log('[Chat] Validate multiple signals:', signals);
+    // TODO: Implement batch validation
+    if (signals.length > 0) {
+      handleValidateSignal(signals[0]);
+    }
+  }, [handleValidateSignal]);
+
+  const handleDismissSignal = useCallback(async (signal: CompanionSignal) => {
+    console.log('[Chat] Dismiss signal:', signal);
+    // TODO: Call API to dismiss signal
+    setSignals(prev => prev.filter(s => s.id !== signal.id));
+  }, []);
+
+  const handleSuggestionAction = useCallback(async (action: SuggestedAction) => {
+    console.log('[Chat] Suggestion action:', action);
+    // TODO: Implement action handling based on action.type
+    if (action.type === 'validate_assumptions' && action.targetIds) {
+      const targetSignals = signals
+        .filter(s => action.targetIds?.includes(s.id))
+        .map(s => ({
+          id: s.id,
+          type: s.type,
+          text: s.text || s.content || '',
+          confidence: s.confidence,
+          validationStatus: 'pending' as const,
+          createdAt: s.created_at,
+        }));
+      if (targetSignals.length > 0) {
+        handleValidateSignals(targetSignals);
+      }
+    }
+  }, [signals, handleValidateSignals]);
+
+  const handleDismissSuggestion = useCallback((action: SuggestedAction) => {
+    console.log('[Chat] Dismiss suggestion:', action);
+    // Handled locally in CompanionPanel
+  }, []);
+
+  const handleStopAction = useCallback(() => {
+    setActiveAction(null);
+  }, []);
+
+  const handleDismissActionResult = useCallback(() => {
+    setActiveAction(null);
+  }, []);
 
   // Check auth before loading
   useEffect(() => {
@@ -309,58 +503,66 @@ export default function ChatPage() {
           }}
         />
 
-        <GlobalHeader 
+        <GlobalHeader
           breadcrumbs={[
             { label: 'Chat' },
           ]}
           showNav={true}
         />
-        
-        {/* Role Clarity Banner - Hide on mobile */}
-        <div className="hidden md:block px-6 py-2 bg-accent-50 dark:bg-accent-900/10 border-b border-accent-100 dark:border-accent-800/30">
-          <p className="text-sm text-accent-700 dark:text-accent-300 text-center">
-            Explore ideas, ask questions, think freely — organize into projects when ready
-          </p>
-        </div>
-        
-        <ResponsiveLayout
-          leftSidebar={
-            <ConversationsSidebar
-              projects={projects}
-              threads={threads}
-              selectedThreadId={threadId}
-              isLoading={isLoadingThreads}
-              onSelect={(id) => setThreadId(id)}
-              onCreate={handleCreateThread}
-              onRename={handleRenameThread}
-              onDelete={handleDeleteThread}
-              onArchive={handleArchiveThread}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              showArchived={showArchived}
-              onToggleArchived={() => setShowArchived(prev => !prev)}
-            />
-          }
-          rightSidebar={
-            <ReasoningCompanion 
+
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ResponsiveLayout
+            leftSidebar={
+              <ConversationsSidebar
+                projects={projects}
+                threads={threads}
+                selectedThreadId={threadId}
+                streamingTitleThreadId={streamingTitleThreadId}
+                isLoading={isLoadingThreads}
+                onSelect={(id) => setThreadId(id)}
+                onCreate={handleCreateThread}
+                onRename={handleRenameThread}
+                onDelete={handleDeleteThread}
+                onArchive={handleArchiveThread}
+                searchTerm={searchTerm}
+                onSearchChange={setSearchTerm}
+                showArchived={showArchived}
+                onToggleArchived={() => setShowArchived(prev => !prev)}
+              />
+            }
+            rightSidebar={
+              <CompanionPanel
+                threadId={threadId}
+                caseId={caseId}
+                reflection={reflection}
+                isReflectionStreaming={isReflectionStreaming}
+                signals={signals}
+                activeAction={activeAction}
+                onStopAction={handleStopAction}
+                onDismissActionResult={handleDismissActionResult}
+                onValidateSignal={handleValidateSignal}
+                onValidateSignals={handleValidateSignals}
+                onDismissSignal={handleDismissSignal}
+                onSuggestionAction={handleSuggestionAction}
+                onDismissSuggestion={handleDismissSuggestion}
+              />
+            }
+            showLeftSidebar={showConversations}
+            showRightSidebar={showStructure}
+          >
+            <ChatInterface
               threadId={threadId}
-              caseId={caseId}
+              onToggleLeft={() => setShowConversations(prev => !prev)}
+              onToggleRight={() => setShowStructure(prev => !prev)}
+              leftCollapsed={!showConversations}
+              rightCollapsed={!showStructure}
+              projects={projects}
+              projectId={threadProjectId}
+              onProjectChange={handleChangeThreadProject}
+              unifiedStreamCallbacks={unifiedStreamCallbacks}
             />
-          }
-          showLeftSidebar={showConversations}
-          showRightSidebar={showStructure}
-        >
-          <ChatInterface
-            threadId={threadId}
-            onToggleLeft={() => setShowConversations(prev => !prev)}
-            onToggleRight={() => setShowStructure(prev => !prev)}
-            leftCollapsed={!showConversations}
-            rightCollapsed={!showStructure}
-            projects={projects}
-            projectId={threadProjectId}
-            onProjectChange={handleChangeThreadProject}
-          />
-        </ResponsiveLayout>
+          </ResponsiveLayout>
+        </div>
       </div>
     </ErrorBoundary>
   );

@@ -25,6 +25,8 @@ class SignalViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
+        from apps.common.utils import is_valid_uuid
+
         # Optimize with select_related to avoid N+1 queries
         queryset = Signal.objects.select_related(
             'case',
@@ -36,43 +38,43 @@ class SignalViewSet(viewsets.ModelViewSet):
             'depends_on',
             'contradicts'
         ).all()
-        
+
         # Filter by case
         case_id = self.request.query_params.get('case_id')
-        if case_id:
+        if case_id and is_valid_uuid(case_id):
             queryset = queryset.filter(case_id=case_id)
-        
+
         # Filter by thread
         thread_id = self.request.query_params.get('thread_id')
-        if thread_id:
+        if thread_id and is_valid_uuid(thread_id):
             queryset = queryset.filter(thread_id=thread_id)
-        
+
         # Filter by message_id (new - for frontend optimization)
         message_id = self.request.query_params.get('message_id')
-        if message_id:
+        if message_id and is_valid_uuid(message_id):
             queryset = queryset.filter(span__message_id=message_id)
-        
+
         # Filter by type
         signal_type = self.request.query_params.get('type')
         if signal_type:
             queryset = queryset.filter(type=signal_type)
-        
+
         # Filter dismissed signals
         include_dismissed = self.request.query_params.get('include_dismissed', 'false')
         if include_dismissed.lower() != 'true':
             queryset = queryset.filter(dismissed_at__isnull=True)
-        
+
         # Filter by inquiry
         inquiry_id = self.request.query_params.get('inquiry_id')
-        if inquiry_id:
+        if inquiry_id and is_valid_uuid(inquiry_id):
             queryset = queryset.filter(inquiry_id=inquiry_id)
-        
+
         # Only show signals from user's cases/threads
         queryset = queryset.filter(
             models.Q(case__user=self.request.user) |
             models.Q(thread__user=self.request.user)
         )
-        
+
         return queryset
     
     @action(detail=True, methods=['post'])
@@ -440,3 +442,47 @@ class SignalViewSet(viewsets.ModelViewSet):
                 {'error': 'target_signal_id not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=False, methods=['post'])
+    async def suggest_case_title(self, request):
+        """
+        Generate a suggested title for a case based on signals.
+
+        POST /api/signals/suggest_case_title/
+        {
+            "signal_ids": ["uuid1", "uuid2", ...],
+            "conversation_summary": "optional brief summary"
+        }
+        """
+        from asgiref.sync import sync_to_async
+        from apps.intelligence.title_generator import generate_case_title
+
+        signal_ids = request.data.get('signal_ids', [])
+        conversation_summary = request.data.get('conversation_summary', '')
+
+        if not signal_ids:
+            return Response(
+                {'error': 'signal_ids is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch signals
+        signals_qs = Signal.objects.filter(id__in=signal_ids).values('type', 'text')
+        signals_list = await sync_to_async(list)(signals_qs)
+
+        if not signals_list:
+            return Response(
+                {'error': 'No valid signals found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Generate title
+        title = await generate_case_title(signals_list, conversation_summary)
+
+        if title:
+            return Response({'suggested_title': title})
+
+        return Response(
+            {'error': 'Failed to generate title'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

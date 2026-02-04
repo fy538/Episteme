@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'apps.skills',  # Skills system
     'apps.companion',  # Reasoning companion
     'apps.reasoning',  # Auto-reasoning and knowledge graph
+    'apps.intelligence',  # Unified analysis engine
 ]
 
 MIDDLEWARE = [
@@ -134,6 +135,17 @@ CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
     'http://127.0.0.1:3000',
 ])
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 # Celery Configuration
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')

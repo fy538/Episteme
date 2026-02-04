@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 
@@ -87,8 +87,8 @@ export function LoadingBar({ isLoading, duration = 2000 }: LoadingBarProps) {
 export function useLoadingBar() {
   const [isLoading, setIsLoading] = useState(false);
 
-  const startLoading = () => setIsLoading(true);
-  const stopLoading = () => setIsLoading(false);
+  const startLoading = useCallback(() => setIsLoading(true), []);
+  const stopLoading = useCallback(() => setIsLoading(false), []);
 
   return { isLoading, startLoading, stopLoading };
 }

@@ -38,9 +38,107 @@ export interface BackgroundActivity {
 }
 
 export interface CompanionEvent {
-  type: 'reflection_chunk' | 'reflection_complete' | 'background_update' | 'confidence_change';
+  type: 'reflection_chunk' | 'reflection_complete' | 'background_update' | 'confidence_change' | 'status';
   text?: string;
   delta?: string;  // For streaming chunks
+  message?: string;  // For status events
   activity?: BackgroundActivity;
   patterns?: Reflection['patterns'];
+}
+
+/**
+ * Unified stream state for combined chat + companion streaming
+ */
+export interface UnifiedStreamState {
+  /** Whether unified streaming is enabled */
+  enabled: boolean;
+  /** Current reflection text from unified stream */
+  reflectionText: string;
+  /** Whether reflection is streaming */
+  isReflectionStreaming: boolean;
+  /** Current reflection patterns */
+  patterns: Reflection['patterns'] | null;
+}
+
+/**
+ * Action types that can be performed from the companion
+ */
+export type ActionType =
+  | 'research_assumption'
+  | 'validate_assumptions'
+  | 'organize_questions'
+  | 'create_case'
+  | 'create_inquiry';
+
+/**
+ * Status of a signal (for validation tracking)
+ */
+export type SignalValidationStatus =
+  | 'pending'
+  | 'validating'
+  | 'validated'
+  | 'refuted'
+  | 'partially_true'
+  | 'dismissed';
+
+/**
+ * Enhanced signal with validation info for companion display
+ */
+export interface CompanionSignal {
+  id: string;
+  type: string;
+  text: string;
+  confidence: number;
+  validationStatus: SignalValidationStatus;
+  validationResult?: {
+    verdict: 'true' | 'false' | 'partial';
+    summary: string;
+    sources?: string[];
+  };
+  createdAt: string;
+}
+
+/**
+ * Active action being performed
+ */
+export interface ActiveAction {
+  id: string;
+  type: ActionType;
+  status: 'running' | 'complete' | 'error';
+  target: string;  // What's being acted on (e.g., assumption text)
+  targetIds?: string[];  // Signal IDs if applicable
+  progress: number;  // 0-100
+  steps: ActionStep[];
+  result?: ActionResult;
+  error?: string;
+  startedAt: string;
+}
+
+export interface ActionStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'complete' | 'error';
+}
+
+export interface ActionResult {
+  verdict?: 'true' | 'false' | 'partial';
+  summary: string;
+  details?: string;
+  sources?: Array<{ title: string; url?: string }>;
+  updatedSignals?: string[];  // IDs of signals that were updated
+}
+
+/**
+ * Suggested action based on patterns
+ */
+export interface SuggestedAction {
+  id: string;
+  type: ActionType;
+  label: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  targetIds?: string[];
+  targetCount?: number;
+  /** Suggested title for case/inquiry creation */
+  suggestedTitle?: string;
 }

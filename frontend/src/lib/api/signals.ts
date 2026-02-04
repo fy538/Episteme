@@ -66,4 +66,17 @@ export const signalsAPI = {
       relationship,
     });
   },
+
+  /**
+   * Generate a suggested title for a case based on signals.
+   */
+  async suggestCaseTitle(
+    signalIds: string[],
+    conversationSummary?: string
+  ): Promise<{ suggested_title: string }> {
+    return apiClient.post('/signals/suggest_case_title/', {
+      signal_ids: signalIds,
+      conversation_summary: conversationSummary || '',
+    });
+  },
 };

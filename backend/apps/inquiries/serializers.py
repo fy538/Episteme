@@ -8,11 +8,18 @@ from apps.inquiries.models import Inquiry, Evidence, Objection
 
 class InquirySerializer(serializers.ModelSerializer):
     """Serializer for Inquiry model"""
-    
+
     related_signals_count = serializers.SerializerMethodField()
     is_active = serializers.BooleanField(read_only=True)
     is_resolved = serializers.BooleanField(read_only=True)
-    
+    blocked_by = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Inquiry.objects.all(),
+        required=False
+    )
+    blocked_by_titles = serializers.SerializerMethodField()
+    blocks = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
     class Meta:
         model = Inquiry
         fields = [
@@ -32,12 +39,23 @@ class InquirySerializer(serializers.ModelSerializer):
             'related_signals_count',
             'is_active',
             'is_resolved',
+            # Dependency fields
+            'blocked_by',
+            'blocked_by_titles',
+            'blocks',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'sequence_index']
-    
+
     def get_related_signals_count(self, obj):
         """Count of signals related to this inquiry"""
         return obj.related_signals.count()
+
+    def get_blocked_by_titles(self, obj):
+        """Get titles of blocking inquiries for display"""
+        return [
+            {'id': str(i.id), 'title': i.title, 'status': i.status}
+            for i in obj.blocked_by.all()
+        ]
 
 
 class InquiryListSerializer(serializers.ModelSerializer):

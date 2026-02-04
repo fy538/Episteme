@@ -2,6 +2,7 @@
 Chat URLs
 """
 from django.urls import path, include
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.routers import DefaultRouter
 
 from . import views
@@ -13,5 +14,8 @@ router.register(r'messages', views.MessageViewSet, basename='message')
 urlpatterns = [
     path('', include(router.urls)),
     # Async endpoints (DRF doesn't support async actions, so define separately)
+    # csrf_exempt required because these are raw async views, not DRF views
     path('threads/<uuid:thread_id>/companion-stream/', views.companion_stream, name='companion-stream'),
+    path('threads/<uuid:thread_id>/unified-stream/', csrf_exempt(views.unified_message_stream), name='unified-stream'),
+    path('threads/<uuid:thread_id>/stream-title/', views.stream_title, name='stream-title'),
 ]
