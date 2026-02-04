@@ -210,7 +210,7 @@ def search_signals_by_text(
     if case_id:
         filters['case_id'] = case_id
     if signal_type:
-        filters['signal_type'] = signal_type
+        filters['type'] = signal_type
 
     signals = Signal.objects.filter(**filters)
 

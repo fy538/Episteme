@@ -486,3 +486,232 @@ class SignalViewSet(viewsets.ModelViewSet):
             {'error': 'Failed to generate title'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+    @action(detail=False, methods=['post'])
+    def search(self, request):
+        """
+        Semantic search for signals using embeddings.
+
+        POST /api/signals/search/
+        {
+            "query": "What are the market size assumptions?",
+            "case_id": "uuid",  // optional - scope to a case
+            "signal_type": "assumption",  // optional - filter by type
+            "top_k": 10,  // optional, default 10
+            "threshold": 0.5  // optional, default 0.5
+        }
+
+        Returns signals semantically similar to the query, ranked by similarity.
+        """
+        from .similarity import search_signals_by_text
+
+        query = request.data.get('query')
+        if not query:
+            return Response(
+                {'error': 'query is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        case_id = request.data.get('case_id')
+        signal_type = request.data.get('signal_type')
+        top_k = request.data.get('top_k', 10)
+        threshold = request.data.get('threshold', 0.5)
+
+        # Validate case access if provided
+        if case_id:
+            from apps.cases.models import Case
+            try:
+                Case.objects.get(id=case_id, user=request.user)
+            except Case.DoesNotExist:
+                return Response(
+                    {'error': 'Case not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        # Perform semantic search
+        results = search_signals_by_text(
+            query=query,
+            case_id=case_id,
+            signal_type=signal_type,
+            top_k=top_k,
+            threshold=threshold
+        )
+
+        # Format response
+        response_data = []
+        for signal, similarity in results:
+            # Only include signals the user has access to
+            if signal.case and signal.case.user != request.user:
+                continue
+            if signal.thread and signal.thread.user != request.user:
+                continue
+
+            response_data.append({
+                'signal': self.get_serializer(signal).data,
+                'similarity': round(similarity, 3),
+            })
+
+        return Response({
+            'query': query,
+            'results': response_data,
+            'count': len(response_data),
+        })
+
+    @action(detail=False, methods=['post'])
+    def search_across_cases(self, request):
+        """
+        Search for similar signals across all user's cases.
+
+        POST /api/signals/search_across_cases/
+        {
+            "query": "market expansion strategy",
+            "top_k": 20,  // optional, default 20
+            "threshold": 0.6  // optional, default 0.6
+        }
+
+        Useful for finding related patterns across different decisions.
+        """
+        from .similarity import search_signals_by_text
+
+        query = request.data.get('query')
+        if not query:
+            return Response(
+                {'error': 'query is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        top_k = request.data.get('top_k', 20)
+        threshold = request.data.get('threshold', 0.6)
+
+        # Search without case_id filter
+        results = search_signals_by_text(
+            query=query,
+            case_id=None,  # Search all
+            signal_type=None,
+            top_k=top_k * 2,  # Get more, we'll filter by access
+            threshold=threshold
+        )
+
+        # Group by case, filtering by user access
+        cases_seen = {}
+        response_data = []
+
+        for signal, similarity in results:
+            # Check access
+            if signal.case:
+                if signal.case.user != request.user:
+                    continue
+                case_id = str(signal.case.id)
+                case_title = signal.case.title or 'Untitled'
+            elif signal.thread:
+                if signal.thread.user != request.user:
+                    continue
+                case_id = None
+                case_title = 'No Case'
+            else:
+                continue
+
+            if len(response_data) >= top_k:
+                break
+
+            # Track cases for summary
+            if case_id:
+                if case_id not in cases_seen:
+                    cases_seen[case_id] = {'title': case_title, 'count': 0}
+                cases_seen[case_id]['count'] += 1
+
+            response_data.append({
+                'signal': self.get_serializer(signal).data,
+                'similarity': round(similarity, 3),
+                'case_id': case_id,
+                'case_title': case_title,
+            })
+
+        return Response({
+            'query': query,
+            'results': response_data,
+            'count': len(response_data),
+            'cases_summary': cases_seen,
+        })
+
+    @action(detail=False, methods=['post'])
+    def deduplicate(self, request):
+        """
+        Get deduplicated signals for a case using embedding similarity.
+
+        POST /api/signals/deduplicate/
+        {
+            "case_id": "uuid",
+            "threshold": 0.90,  // optional, default 0.90
+            "signal_type": "evidence"  // optional
+        }
+
+        Returns representative signals, with duplicates grouped.
+        """
+        from .similarity import cluster_signals_by_similarity
+
+        case_id = request.data.get('case_id')
+        if not case_id:
+            return Response(
+                {'error': 'case_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate case access
+        from apps.cases.models import Case
+        try:
+            case = Case.objects.get(id=case_id, user=request.user)
+        except Case.DoesNotExist:
+            return Response(
+                {'error': 'Case not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        threshold = request.data.get('threshold', 0.90)
+        signal_type = request.data.get('signal_type')
+
+        # Get signals for case
+        filters = {'case': case, 'dismissed_at__isnull': True}
+        if signal_type:
+            filters['type'] = signal_type
+
+        signals = list(Signal.objects.filter(**filters).order_by('-created_at'))
+
+        if not signals:
+            return Response({
+                'clusters': [],
+                'total_signals': 0,
+                'unique_clusters': 0,
+                'duplicates_found': 0,
+            })
+
+        # Cluster by similarity
+        clusters = cluster_signals_by_similarity(signals, threshold=threshold)
+
+        # Format response
+        cluster_data = []
+        duplicates_count = 0
+
+        for cluster in clusters:
+            # Sort cluster by confidence, then recency
+            sorted_cluster = sorted(
+                cluster,
+                key=lambda s: (s.confidence or 0, s.created_at),
+                reverse=True
+            )
+            representative = sorted_cluster[0]
+            duplicates = sorted_cluster[1:]
+            duplicates_count += len(duplicates)
+
+            cluster_data.append({
+                'representative': self.get_serializer(representative).data,
+                'duplicates': self.get_serializer(duplicates, many=True).data,
+                'cluster_size': len(cluster),
+            })
+
+        return Response({
+            'clusters': cluster_data,
+            'total_signals': len(signals),
+            'unique_clusters': len(clusters),
+            'duplicates_found': duplicates_count,
+        })

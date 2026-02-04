@@ -6,6 +6,8 @@ Identifies:
 - Claims that can be linked to existing evidence
 - Unsubstantiated claims that need evidence
 - Confidence levels for linked claims
+
+Uses embeddings for fast pre-filtering, then LLM for precise matching.
 """
 import json
 import asyncio
@@ -14,6 +16,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
 from apps.common.llm_providers import get_llm_provider
+from apps.common.embeddings import generate_embedding
+from apps.signals.similarity import cosine_similarity
 
 
 @dataclass
@@ -151,12 +155,52 @@ Return ONLY the JSON array."""
     return asyncio.run(extract())
 
 
+def _prefilter_signals_by_embedding(
+    claim_text: str,
+    signals: List[Dict[str, Any]],
+    top_k: int = 5,
+    threshold: float = 0.4
+) -> List[Dict[str, Any]]:
+    """
+    Pre-filter signals using embedding similarity.
+
+    Returns top_k signals most similar to the claim, sorted by similarity.
+    This reduces the number of signals sent to the LLM.
+    """
+    claim_embedding = generate_embedding(claim_text)
+    if not claim_embedding:
+        # Fall back to returning first signals if embedding fails
+        return signals[:top_k]
+
+    scored_signals = []
+    for signal in signals:
+        signal_embedding = signal.get('embedding')
+        if signal_embedding:
+            similarity = cosine_similarity(claim_embedding, signal_embedding)
+            if similarity >= threshold:
+                scored_signals.append((signal, similarity))
+
+    # Sort by similarity descending
+    scored_signals.sort(key=lambda x: x[1], reverse=True)
+
+    # Return top_k signals
+    return [s for s, _ in scored_signals[:top_k]]
+
+
 def _link_claims_to_signals(
     claims: List[Dict[str, Any]],
     signals: List[Dict[str, Any]],
-    provider
+    provider,
+    use_embeddings: bool = True
 ) -> List[Dict[str, Any]]:
-    """Link extracted claims to available signals."""
+    """Link extracted claims to available signals.
+
+    Args:
+        claims: List of claims to link
+        signals: List of signals to match against
+        provider: LLM provider
+        use_embeddings: If True, pre-filter signals using embeddings (faster, cheaper)
+    """
 
     if not claims:
         return []
@@ -174,13 +218,41 @@ def _link_claims_to_signals(
             for claim in claims
         ]
 
-    # Format signals for matching
-    signals_text = "\n".join([
-        f"[{i}] Type: {s.get('signal_type', 'unknown')}\n"
-        f"    Content: {s.get('content', '')[:200]}\n"
-        f"    ID: {s.get('id', '')}"
-        for i, s in enumerate(signals[:20])
-    ])
+    # If using embeddings, pre-filter signals for each claim
+    if use_embeddings:
+        # Pre-compute filtered signals for each claim
+        claim_signals_map = {}
+        for i, claim in enumerate(claims):
+            claim_text = claim.get('text', '')
+            filtered = _prefilter_signals_by_embedding(claim_text, signals, top_k=5)
+            claim_signals_map[i] = filtered
+
+        # Use union of all filtered signals for LLM prompt
+        all_filtered_indices = set()
+        for i in claim_signals_map:
+            for sig in claim_signals_map[i]:
+                idx = next((j for j, s in enumerate(signals) if s.get('id') == sig.get('id')), None)
+                if idx is not None:
+                    all_filtered_indices.add(idx)
+
+        # Create filtered signals list maintaining original indices
+        filtered_signals = [(i, signals[i]) for i in sorted(all_filtered_indices)]
+
+        # Format only the filtered signals
+        signals_text = "\n".join([
+            f"[{i}] Type: {s.get('type', s.get('signal_type', 'unknown'))}\n"
+            f"    Content: {s.get('text', s.get('content', ''))[:200]}\n"
+            f"    ID: {s.get('id', '')}"
+            for i, s in filtered_signals
+        ])
+    else:
+        # Original behavior: use first 20 signals
+        signals_text = "\n".join([
+            f"[{i}] Type: {s.get('type', s.get('signal_type', 'unknown'))}\n"
+            f"    Content: {s.get('text', s.get('content', ''))[:200]}\n"
+            f"    ID: {s.get('id', '')}"
+            for i, s in enumerate(signals[:20])
+        ])
 
     claims_text = "\n".join([
         f"[{i}] {c.get('text', '')}"
@@ -257,7 +329,7 @@ Return ONLY the JSON array."""
                         if sig_idx < len(signals):
                             linked.append({
                                 'signal_id': signals[sig_idx].get('id'),
-                                'signal_type': signals[sig_idx].get('signal_type'),
+                                'signal_type': signals[sig_idx].get('type', signals[sig_idx].get('signal_type')),
                                 'relevance': link.get('relevance', 0.5),
                                 'excerpt': link.get('excerpt', '')
                             })
@@ -403,7 +475,7 @@ def create_inline_citations(
 
             # Build footnote
             sources = [
-                f"{s.get('signal_type', 'signal')}: {s.get('excerpt', '')[:50]}..."
+                f"{s.get('type', s.get('signal_type', 'signal'))}: {s.get('excerpt', '')[:50]}..."
                 for s in claim.get('linked_signals', [])[:2]
             ]
             footnotes.append(f"[^{i}]: {'; '.join(sources)}")
