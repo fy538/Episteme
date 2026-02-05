@@ -5,6 +5,79 @@ from django.db import models
 from apps.common.models import UUIDModel, TimestampedModel
 
 
+class SessionReceiptType(models.TextChoices):
+    """Types of session accomplishments"""
+    CASE_CREATED = 'case_created', 'Case Created'
+    SIGNALS_EXTRACTED = 'signals_extracted', 'Signals Extracted'
+    INQUIRY_RESOLVED = 'inquiry_resolved', 'Inquiry Resolved'
+    EVIDENCE_ADDED = 'evidence_added', 'Evidence Added'
+    RESEARCH_COMPLETED = 'research_completed', 'Research Completed'
+
+
+class SessionReceipt(UUIDModel, TimestampedModel):
+    """
+    Record of accomplishments during a chat session.
+
+    Tracks key events like case creation, inquiry resolution, etc.
+    Displayed in the companion panel to show what was achieved.
+    """
+    thread = models.ForeignKey(
+        'chat.ChatThread',
+        on_delete=models.CASCADE,
+        related_name='session_receipts',
+        help_text="Thread this receipt belongs to"
+    )
+
+    receipt_type = models.CharField(
+        max_length=30,
+        choices=SessionReceiptType.choices,
+        help_text="Type of accomplishment"
+    )
+
+    title = models.CharField(
+        max_length=200,
+        help_text="Brief title describing the accomplishment"
+    )
+
+    detail = models.TextField(
+        blank=True,
+        help_text="Additional details about the accomplishment"
+    )
+
+    related_case = models.ForeignKey(
+        'cases.Case',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='session_receipts',
+        help_text="Related case if applicable"
+    )
+
+    related_inquiry = models.ForeignKey(
+        'inquiries.Inquiry',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='session_receipts',
+        help_text="Related inquiry if applicable"
+    )
+
+    session_started_at = models.DateTimeField(
+        help_text="When the current session started (for grouping receipts)"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['thread', '-created_at']),
+            models.Index(fields=['thread', 'session_started_at']),
+            models.Index(fields=['receipt_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.receipt_type}: {self.title}"
+
+
 class ReflectionTriggerType(models.TextChoices):
     """What triggered the reflection"""
     USER_MESSAGE = 'user_message', 'User Message'

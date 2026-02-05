@@ -113,7 +113,8 @@ def _build_suggestion_text(
             
             if skill_names:
                 suggestion += f"\n**Using skills**: {', '.join(skill_names)}\n"
-        except:
+        except Exception:
+            # Skill names are optional enhancement, continue without them
             pass
     
     # Add confidence and reasoning

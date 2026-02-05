@@ -1,5 +1,5 @@
 /**
- * Chat page with structure sidebar
+ * Chat page with structure sidebar and mode-aware companion
  */
 
 'use client';
@@ -8,7 +8,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationsSidebar } from '@/components/chat/ConversationsSidebar';
-import { CompanionPanel } from '@/components/companion';
+import { ReasoningCompanion } from '@/components/chat/ReasoningCompanion';
+import { ChatModeHeader } from '@/components/chat/ChatModeHeader';
 import { GlobalHeader } from '@/components/layout/GlobalHeader';
 import { Button } from '@/components/ui/button';
 import { ResponsiveLayout } from '@/components/layout/ResponsiveLayout';
@@ -16,14 +17,23 @@ import { NetworkErrorBanner } from '@/components/ui/network-error-banner';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { chatAPI } from '@/lib/api/chat';
 import { authAPI } from '@/lib/api/auth';
-import type { ChatThread } from '@/lib/types/chat';
+import { casesAPI } from '@/lib/api/cases';
+import { inquiriesAPI } from '@/lib/api/inquiries';
+import type { ChatThread, InlineActionCard, ActionHint } from '@/lib/types/chat';
 import { projectsAPI } from '@/lib/api/projects';
 import type { Project } from '@/lib/types/project';
+import type { EvidenceLandscape } from '@/lib/types/case';
 import type { Signal } from '@/lib/types/signal';
-import type { CompanionSignal, ActiveAction, SuggestedAction } from '@/lib/types/companion';
+import type {
+  CompanionState,
+  SessionReceipt,
+  BackgroundWorkItem,
+} from '@/lib/types/companion';
 import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate';
 import { useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
 import { useIsMobile } from '@/hooks/useResponsive';
+import { useChatMode } from '@/hooks/useChatMode';
+import type { InlineCardActions } from '@/components/chat/cards/InlineActionCardRenderer';
 
 export default function ChatPage() {
   const router = useRouter();
@@ -48,7 +58,61 @@ export default function ChatPage() {
   const [reflection, setReflection] = useState('');
   const [isReflectionStreaming, setIsReflectionStreaming] = useState(false);
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [activeAction, setActiveAction] = useState<ActiveAction | null>(null);
+
+  // Mode system
+  const {
+    mode,
+    transitionToCase,
+    focusOnInquiry,
+    exitFocus,
+    exitCase,
+  } = useChatMode({
+    threadId,
+    initialCaseId: caseId,
+    initialCaseName: threads.find(t => t.id === threadId)?.title,
+  });
+
+  // Inline action cards
+  const [inlineCards, setInlineCards] = useState<InlineActionCard[]>([]);
+
+  // Session receipts (loaded from backend)
+  const [sessionReceipts, setSessionReceipts] = useState<SessionReceipt[]>([]);
+
+  // Background work tracking
+  const [backgroundWork, setBackgroundWork] = useState<{
+    inProgress: BackgroundWorkItem[];
+    justCompleted: BackgroundWorkItem[];
+  }>({ inProgress: [], justCompleted: [] });
+
+  // Track last assistant message ID for inline cards
+  const [lastAssistantMessageId, setLastAssistantMessageId] = useState<string | null>(null);
+
+  // Case evidence landscape for real CaseState data
+  const [evidenceLandscape, setEvidenceLandscape] = useState<EvidenceLandscape | null>(null);
+
+  // Build full companion state (always defined)
+  const companionState: CompanionState = {
+    mode,
+    thinking: {
+      content: reflection,
+      isStreaming: isReflectionStreaming,
+    },
+    status: backgroundWork,
+    sessionReceipts,
+    caseState: caseId ? {
+      caseId,
+      caseName: mode.caseName || 'Untitled Case',
+      inquiries: {
+        open: evidenceLandscape?.inquiries.open ?? 0,
+        resolved: evidenceLandscape?.inquiries.resolved ?? 0,
+      },
+      assumptions: {
+        validated: evidenceLandscape?.assumptions.validated ?? 0,
+        unvalidated: evidenceLandscape?.assumptions.untested ?? 0,
+      },
+      evidenceGaps: evidenceLandscape?.unlinked_claims.length ?? 0,
+    } : undefined,
+  };
 
   // Keyboard shortcuts
   useKeyboardShortcut(['Cmd', 'N'], handleCreateThread);
@@ -62,8 +126,54 @@ export default function ChatPage() {
   useEffect(() => {
     setReflection('');
     setSignals([]);
-    setActiveAction(null);
     setAssistantResponseCount(0);
+    setInlineCards([]);
+    setSessionReceipts([]);
+    setBackgroundWork({ inProgress: [], justCompleted: [] });
+    setLastAssistantMessageId(null);
+    setEvidenceLandscape(null);
+  }, [threadId]);
+
+  // Fetch evidence landscape when case is selected
+  useEffect(() => {
+    async function loadEvidenceLandscape() {
+      if (!caseId) {
+        setEvidenceLandscape(null);
+        return;
+      }
+
+      try {
+        const landscape = await casesAPI.getEvidenceLandscape(caseId);
+        setEvidenceLandscape(landscape);
+      } catch (err) {
+        console.error('[Chat] Failed to load evidence landscape:', err);
+      }
+    }
+
+    loadEvidenceLandscape();
+  }, [caseId]);
+
+  // Fetch session receipts when thread changes
+  useEffect(() => {
+    async function loadSessionReceipts() {
+      if (!threadId) return;
+
+      try {
+        const receipts = await chatAPI.getSessionReceipts(threadId);
+        setSessionReceipts(receipts.map(r => ({
+          id: r.id,
+          type: r.type as SessionReceipt['type'],
+          title: r.title,
+          detail: r.detail,
+          timestamp: r.timestamp,
+          relatedCaseId: r.relatedCaseId,
+        })));
+      } catch (err) {
+        console.error('[Chat] Failed to load session receipts:', err);
+      }
+    }
+
+    loadSessionReceipts();
   }, [threadId]);
 
   // Generate title after 2nd assistant response (streaming)
@@ -100,7 +210,7 @@ export default function ChatPage() {
             setThreads(prev =>
               prev.map(t => t.id === threadId ? { ...t, title } : t)
             );
-            console.log('[Chat] Auto-generated title:', title);
+            // Title generated successfully
           }
         },
         onError: (error) => {
@@ -113,6 +223,91 @@ export default function ChatPage() {
       console.error('[Chat] Failed to generate title:', err);
     }
   }, [threadId, threads]);
+
+  // Inline card handlers (must be defined before unifiedStreamCallbacks)
+  const addInlineCard = useCallback((card: Omit<InlineActionCard, 'id' | 'createdAt'>) => {
+    const newCard: InlineActionCard = {
+      ...card,
+      id: `card-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setInlineCards(prev => [...prev, newCard]);
+  }, []);
+
+  const dismissInlineCard = useCallback((cardId: string) => {
+    setInlineCards(prev =>
+      prev.map(c => c.id === cardId ? { ...c, dismissed: true } : c)
+    );
+  }, []);
+
+  // Handle AI action hints - convert to inline cards
+  const handleActionHints = useCallback((hints: ActionHint[]) => {
+    if (!hints || hints.length === 0 || !lastAssistantMessageId) return;
+
+    for (const hint of hints) {
+      // Map action hint types to inline card types
+      let cardType: InlineActionCard['type'] | null = null;
+      let cardData: Record<string, unknown> = {};
+
+      switch (hint.type) {
+        case 'suggest_case':
+          // Only suggest case in casual mode
+          if (mode.mode !== 'casual') continue;
+          // Check if we already have a case creation prompt
+          if (inlineCards.some(c => c.type === 'case_creation_prompt' && !c.dismissed)) continue;
+
+          cardType = 'case_creation_prompt';
+          cardData = {
+            signalCount: (hint.data.signal_count as number) || signals.length,
+            suggestedTitle: hint.data.suggested_title as string,
+            aiReason: hint.reason,
+          };
+          break;
+
+        case 'suggest_inquiry':
+          cardType = 'inquiry_focus_prompt';
+          cardData = {
+            inquiryId: '', // Will be created if user accepts
+            inquiryTitle: (hint.data.question as string) || '',
+            matchedTopic: (hint.data.topic as string) || '',
+            aiReason: hint.reason,
+          };
+          break;
+
+        case 'suggest_evidence':
+          // Only in case mode
+          if (mode.mode === 'casual') continue;
+          cardType = 'evidence_suggestion';
+          cardData = {
+            evidenceText: hint.data.text as string,
+            direction: (hint.data.direction as string) || 'neutral',
+            suggestedInquiryId: hint.data.inquiry_id as string,
+            aiReason: hint.reason,
+          };
+          break;
+
+        case 'suggest_resolution':
+          // Only if we have an inquiry
+          if (!hint.data.inquiry_id) continue;
+          cardType = 'inquiry_resolution';
+          cardData = {
+            inquiryId: hint.data.inquiry_id as string,
+            inquiryTitle: (hint.data.inquiry_title as string) || 'Inquiry',
+            suggestedConclusion: hint.data.suggested_conclusion as string,
+            aiReason: hint.reason,
+          };
+          break;
+      }
+
+      if (cardType) {
+        addInlineCard({
+          type: cardType,
+          afterMessageId: lastAssistantMessageId,
+          data: cardData,
+        });
+      }
+    }
+  }, [mode.mode, signals.length, lastAssistantMessageId, inlineCards, addInlineCard]);
 
   // Unified stream callbacks for ChatInterface
   const unifiedStreamCallbacks = {
@@ -132,7 +327,13 @@ export default function ChatPage() {
         return [...prev, ...unique];
       });
     }, []),
-    onMessageComplete: useCallback(() => {
+    onActionHints: handleActionHints,
+    onMessageComplete: useCallback((messageId?: string) => {
+      // Track the last assistant message ID for inline cards
+      if (messageId) {
+        setLastAssistantMessageId(messageId);
+      }
+
       setAssistantResponseCount(prev => {
         const newCount = prev + 1;
         // Trigger title generation after 2nd response
@@ -144,100 +345,157 @@ export default function ChatPage() {
     }, [handleTitleGeneration]),
   };
 
-  // Companion action handlers
-  const handleValidateSignal = useCallback(async (signal: CompanionSignal) => {
-    console.log('[Chat] Validate signal:', signal);
-    // TODO: Implement single signal validation
-    setActiveAction({
-      id: `action-${Date.now()}`,
-      type: 'research_assumption',
-      status: 'running',
-      target: signal.text,
-      targetIds: [signal.id],
-      progress: 0,
-      steps: [
-        { id: '1', label: 'Searching for evidence...', status: 'running' },
-        { id: '2', label: 'Analyzing sources', status: 'pending' },
-        { id: '3', label: 'Forming conclusion', status: 'pending' },
-      ],
-      startedAt: new Date().toISOString(),
-    });
+  // Handle case creation from inline card
+  const handleCreateCaseFromCard = useCallback(async (suggestedTitle?: string) => {
+    if (!threadId) return;
 
-    // Simulate progress for demo
-    setTimeout(() => {
-      setActiveAction(prev => prev ? {
-        ...prev,
-        progress: 50,
-        steps: prev.steps.map((s, i) =>
-          i === 0 ? { ...s, status: 'complete' as const } :
-          i === 1 ? { ...s, status: 'running' as const } : s
-        ),
-      } : null);
-    }, 1500);
+    try {
+      const title = suggestedTitle || 'New Decision';
 
-    setTimeout(() => {
-      setActiveAction(prev => prev ? {
-        ...prev,
-        status: 'complete',
-        progress: 100,
-        steps: prev.steps.map(s => ({ ...s, status: 'complete' as const })),
-        result: {
-          verdict: 'partial',
-          summary: 'This assumption is partially supported. While there is evidence for the general claim, specific conditions may vary.',
-          sources: [
-            { title: 'Industry Report 2024' },
-            { title: 'Stack Overflow Survey' },
-          ],
-        },
-      } : null);
-    }, 3000);
-  }, []);
+      // Create case via API
+      const { case: newCase } = await casesAPI.createCase(title, threadProjectId || undefined);
 
-  const handleValidateSignals = useCallback(async (signals: CompanionSignal[]) => {
-    console.log('[Chat] Validate multiple signals:', signals);
-    // TODO: Implement batch validation
-    if (signals.length > 0) {
-      handleValidateSignal(signals[0]);
-    }
-  }, [handleValidateSignal]);
+      // Update thread to link to this case
+      await chatAPI.updateThread(threadId, { primary_case: newCase.id });
 
-  const handleDismissSignal = useCallback(async (signal: CompanionSignal) => {
-    console.log('[Chat] Dismiss signal:', signal);
-    // TODO: Call API to dismiss signal
-    setSignals(prev => prev.filter(s => s.id !== signal.id));
-  }, []);
+      // Update local state
+      setCaseId(newCase.id);
 
-  const handleSuggestionAction = useCallback(async (action: SuggestedAction) => {
-    console.log('[Chat] Suggestion action:', action);
-    // TODO: Implement action handling based on action.type
-    if (action.type === 'validate_assumptions' && action.targetIds) {
-      const targetSignals = signals
-        .filter(s => action.targetIds?.includes(s.id))
-        .map(s => ({
-          id: s.id,
-          type: s.type,
-          text: s.text || s.content || '',
-          confidence: s.confidence,
-          validationStatus: 'pending' as const,
-          createdAt: s.created_at,
-        }));
-      if (targetSignals.length > 0) {
-        handleValidateSignals(targetSignals);
+      // Transition to case mode
+      transitionToCase(newCase.id, newCase.title);
+
+      // Add session receipt
+      setSessionReceipts(prev => [{
+        id: `receipt-${Date.now()}`,
+        type: 'case_created',
+        title: `Case created: ${newCase.title}`,
+        timestamp: new Date().toISOString(),
+        relatedCaseId: newCase.id,
+      }, ...prev]);
+
+      // Dismiss the case creation card
+      const caseCard = inlineCards.find(c => c.type === 'case_creation_prompt' && !c.dismissed);
+      if (caseCard) {
+        dismissInlineCard(caseCard.id);
       }
+    } catch (err) {
+      console.error('Failed to create case:', err);
     }
-  }, [signals, handleValidateSignals]);
+  }, [threadId, threadProjectId, transitionToCase, inlineCards, dismissInlineCard]);
 
-  const handleDismissSuggestion = useCallback((action: SuggestedAction) => {
-    console.log('[Chat] Dismiss suggestion:', action);
-    // Handled locally in CompanionPanel
+  // Handle inquiry focus from inline card
+  const handleFocusInquiry = useCallback((inquiryId: string, inquiryTitle?: string) => {
+    focusOnInquiry(inquiryId, inquiryTitle || 'Inquiry');
+  }, [focusOnInquiry]);
+
+  // Handle resolving an inquiry
+  const handleResolveInquiry = useCallback(async (inquiryId: string, conclusion?: string) => {
+    if (!conclusion) {
+      console.warn('[Chat] No conclusion provided for inquiry resolution');
+      return;
+    }
+
+    try {
+      // Pass threadId for backend receipt recording
+      const resolvedInquiry = await inquiriesAPI.resolve(inquiryId, conclusion, threadId || undefined);
+
+      // Add local session receipt for immediate UI feedback
+      setSessionReceipts(prev => [{
+        id: `receipt-${Date.now()}`,
+        type: 'inquiry_resolved',
+        title: `Resolved: ${resolvedInquiry.title || 'Inquiry'}`,
+        detail: conclusion.slice(0, 100),
+        timestamp: new Date().toISOString(),
+        relatedCaseId: caseId || undefined,
+      }, ...prev]);
+
+      // Refresh evidence landscape to update counts
+      if (caseId) {
+        const landscape = await casesAPI.getEvidenceLandscape(caseId);
+        setEvidenceLandscape(landscape);
+      }
+
+      // Dismiss the resolution card
+      const resolutionCard = inlineCards.find(
+        c => c.type === 'inquiry_resolution' &&
+        (c.data as { inquiryId?: string })?.inquiryId === inquiryId &&
+        !c.dismissed
+      );
+      if (resolutionCard) {
+        dismissInlineCard(resolutionCard.id);
+      }
+    } catch (err) {
+      console.error('Failed to resolve inquiry:', err);
+    }
+  }, [threadId, caseId, inlineCards, dismissInlineCard]);
+
+  // Handle adding more evidence to an inquiry
+  const handleAddMoreEvidence = useCallback((inquiryId: string) => {
+    // Navigate to the inquiry detail page for adding evidence
+    if (caseId) {
+      router.push(`/workspace/cases/${caseId}?inquiry=${inquiryId}&action=add-evidence`);
+    }
+  }, [caseId, router]);
+
+  // Handle viewing research results
+  const handleViewResearchResults = useCallback((researchId: string) => {
+    // Navigate to research results - future feature
+    // router.push(`/research/${researchId}`);
   }, []);
 
-  const handleStopAction = useCallback(() => {
-    setActiveAction(null);
+  // Handle adding research to case
+  const handleAddResearchToCase = useCallback(async (researchId: string) => {
+    // Will be implemented with research feature
   }, []);
 
-  const handleDismissActionResult = useCallback(() => {
-    setActiveAction(null);
+  // Handle adding evidence from chat
+  const handleAddEvidence = useCallback((inquiryId?: string, direction?: string) => {
+    if (!inquiryId) {
+      console.warn('[Chat] No inquiry ID for evidence');
+      return;
+    }
+    // Navigate to inquiry with evidence context
+    if (caseId) {
+      router.push(`/workspace/cases/${caseId}?inquiry=${inquiryId}&action=add-evidence&direction=${direction || 'neutral'}`);
+    }
+  }, [caseId, router]);
+
+  // Inline card actions object
+  const inlineCardActions: InlineCardActions = {
+    onCreateCase: handleCreateCaseFromCard,
+    onFocusInquiry: handleFocusInquiry,
+    onDismissCard: dismissInlineCard,
+    onAddEvidence: handleAddEvidence,
+    onResolveInquiry: handleResolveInquiry,
+    onAddMoreEvidence: handleAddMoreEvidence,
+    onViewResearchResults: handleViewResearchResults,
+    onAddResearchToCase: handleAddResearchToCase,
+  };
+
+  // Companion panel handlers
+  const handleViewCase = useCallback(() => {
+    if (caseId) {
+      router.push(`/cases/${caseId}`);
+    }
+  }, [caseId, router]);
+
+  const handleViewInquiries = useCallback(() => {
+    if (caseId) {
+      router.push(`/cases/${caseId}?tab=inquiries`);
+    }
+  }, [caseId, router]);
+
+  const handleReceiptClick = useCallback((receipt: SessionReceipt) => {
+    if (receipt.relatedCaseId) {
+      router.push(`/cases/${receipt.relatedCaseId}`);
+    }
+  }, [router]);
+
+  const handleDismissCompleted = useCallback((id: string) => {
+    setBackgroundWork(prev => ({
+      ...prev,
+      justCompleted: prev.justCompleted.filter(w => w.id !== id),
+    }));
   }, []);
 
   // Check auth before loading
@@ -531,36 +789,45 @@ export default function ChatPage() {
               />
             }
             rightSidebar={
-              <CompanionPanel
+              <ReasoningCompanion
                 threadId={threadId}
                 caseId={caseId}
-                reflection={reflection}
-                isReflectionStreaming={isReflectionStreaming}
-                signals={signals}
-                activeAction={activeAction}
-                onStopAction={handleStopAction}
-                onDismissActionResult={handleDismissActionResult}
-                onValidateSignal={handleValidateSignal}
-                onValidateSignals={handleValidateSignals}
-                onDismissSignal={handleDismissSignal}
-                onSuggestionAction={handleSuggestionAction}
-                onDismissSuggestion={handleDismissSuggestion}
+                companionState={companionState}
+                onViewCase={handleViewCase}
+                onViewInquiries={handleViewInquiries}
+                onReceiptClick={handleReceiptClick}
+                onDismissCompleted={handleDismissCompleted}
               />
             }
             showLeftSidebar={showConversations}
             showRightSidebar={showStructure}
           >
-            <ChatInterface
-              threadId={threadId}
-              onToggleLeft={() => setShowConversations(prev => !prev)}
-              onToggleRight={() => setShowStructure(prev => !prev)}
-              leftCollapsed={!showConversations}
-              rightCollapsed={!showStructure}
-              projects={projects}
-              projectId={threadProjectId}
-              onProjectChange={handleChangeThreadProject}
-              unifiedStreamCallbacks={unifiedStreamCallbacks}
-            />
+            <div className="flex flex-col h-full">
+              {/* Mode Header - shows current context */}
+              {mode.mode !== 'casual' && (
+                <ChatModeHeader
+                  mode={mode}
+                  threadTitle={threads.find(t => t.id === threadId)?.title}
+                  onExitFocus={exitFocus}
+                  onExitCase={exitCase}
+                  onViewCase={handleViewCase}
+                />
+              )}
+
+              <ChatInterface
+                threadId={threadId}
+                onToggleLeft={() => setShowConversations(prev => !prev)}
+                onToggleRight={() => setShowStructure(prev => !prev)}
+                leftCollapsed={!showConversations}
+                rightCollapsed={!showStructure}
+                projects={projects}
+                projectId={threadProjectId}
+                onProjectChange={handleChangeThreadProject}
+                unifiedStreamCallbacks={unifiedStreamCallbacks}
+                inlineCards={inlineCards}
+                inlineCardActions={inlineCardActions}
+              />
+            </div>
           </ResponsiveLayout>
         </div>
       </div>

@@ -18,6 +18,7 @@ import { SettingsModal } from '@/components/settings/SettingsModal';
 import { CommandPalette, useCommandPalette, type Command } from '@/components/ui/CommandPalette';
 import { DiffViewer } from '@/components/ui/DiffViewer';
 import { Button } from '@/components/ui/button';
+import { ReadinessChecklist, type ReadinessChecklistItemData, type ChecklistProgress } from '@/components/readiness';
 import { casesAPI } from '@/lib/api/cases';
 import { inquiriesAPI } from '@/lib/api/inquiries';
 import { documentsAPI } from '@/lib/api/documents';
@@ -26,7 +27,7 @@ import { projectsAPI } from '@/lib/api/projects';
 import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
 import type { Project } from '@/lib/types/project';
 
-type ViewMode = 'brief' | 'inquiry' | 'inquiry-dashboard' | 'document';
+type ViewMode = 'brief' | 'inquiry' | 'inquiry-dashboard' | 'readiness' | 'document';
 
 export default function CaseWorkspacePage({
   params,
@@ -52,6 +53,15 @@ export default function CaseWorkspacePage({
   
   // Integration preview state
   const [integrationPreview, setIntegrationPreview] = useState<any>(null);
+
+  // Readiness checklist state
+  const [checklistItems, setChecklistItems] = useState<ReadinessChecklistItemData[]>([]);
+  const [checklistProgress, setChecklistProgress] = useState<ChecklistProgress>({
+    completed: 0,
+    required: 0,
+    required_completed: 0,
+    total: 0
+  });
 
   useEffect(() => {
     loadWorkspace();
@@ -99,10 +109,31 @@ export default function CaseWorkspacePage({
         console.error('Failed to load projects:', error);
         setProjects([]);
       }
+
+      // Load readiness checklist
+      await loadChecklist();
     } catch (error) {
       console.error('Failed to load workspace:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadChecklist() {
+    try {
+      const response = await fetch(`/api/cases/${params.caseId}/readiness-checklist/`);
+      if (!response.ok) throw new Error('Failed to load checklist');
+
+      const data = await response.json();
+      setChecklistItems(data.items || []);
+      setChecklistProgress(data.progress || {
+        completed: 0,
+        required: 0,
+        required_completed: 0,
+        total: 0
+      });
+    } catch (error) {
+      console.error('Failed to load checklist:', error);
     }
   }
 
@@ -180,6 +211,14 @@ export default function CaseWorkspacePage({
       keywords: ['back', 'brief', 'case'],
       action: () => handleBackToBrief(),
       shortcut: 'Esc',
+    },
+    {
+      id: 'view-readiness',
+      label: 'View decision readiness',
+      category: 'navigation',
+      keywords: ['readiness', 'checklist', 'ready', 'complete'],
+      action: () => setViewMode('readiness'),
+      shortcut: 'Cmd+R',
     },
     // Actions
     {
@@ -265,6 +304,31 @@ export default function CaseWorkspacePage({
               onViewDashboard={() => setViewMode('inquiry-dashboard')}
               onRefresh={loadWorkspace}
             />
+          ) : viewMode === 'readiness' ? (
+            <div className="max-w-4xl mx-auto p-8">
+              <div className="mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl tracking-tight font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+                      Decision Readiness
+                    </h1>
+                    <p className="text-neutral-600 dark:text-neutral-400">
+                      Complete these items before deciding with confidence
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={handleBackToBrief}>
+                    Back to Brief
+                  </Button>
+                </div>
+              </div>
+
+              <ReadinessChecklist
+                caseId={params.caseId}
+                items={checklistItems}
+                progress={checklistProgress}
+                onRefresh={loadChecklist}
+              />
+            </div>
           ) : viewMode === 'inquiry-dashboard' ? (
             <div className="max-w-4xl mx-auto p-8">
               <div className="mb-6">
@@ -282,7 +346,7 @@ export default function CaseWorkspacePage({
                   </Button>
                 </div>
               </div>
-              
+
               <InquiryDashboard
                 caseId={params.caseId}
                 onStartInquiry={(inquiryId) => {

@@ -25,7 +25,7 @@ export function PullToRefresh({
   const y = useMotionValue(0);
   const prefersReducedMotion = useReducedMotion();
 
-  const handleDragEnd = async (_: any, info: PanInfo) => {
+  const handleDragEnd = async (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     setIsPulling(false);
 
     if (info.offset.y > threshold && !isRefreshing) {

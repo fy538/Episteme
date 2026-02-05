@@ -15,5 +15,6 @@ urlpatterns = [
     path('', include(router.urls)),
     # Async endpoints (DRF doesn't support async actions, so define separately)
     # csrf_exempt required because these are raw async views, not DRF views
+    path('threads/<uuid:thread_id>/unified-stream/', views.unified_stream, name='unified-stream'),
     path('threads/<uuid:thread_id>/companion-stream/', views.companion_stream, name='companion-stream'),
 ]

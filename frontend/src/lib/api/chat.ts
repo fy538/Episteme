@@ -121,7 +121,33 @@ export const chatAPI = {
   },
 
   /**
-   * Send message with unified streaming (response + reflection + signals)
+   * Get session receipts for a thread
+   */
+  async getSessionReceipts(
+    threadId: string,
+    options?: { sessionOnly?: boolean; limit?: number }
+  ): Promise<Array<{
+    id: string;
+    type: string;
+    title: string;
+    detail?: string;
+    timestamp: string;
+    relatedCaseId?: string;
+    relatedInquiryId?: string;
+  }>> {
+    const params = new URLSearchParams();
+    if (options?.sessionOnly !== undefined) {
+      params.set('session_only', String(options.sessionOnly));
+    }
+    if (options?.limit !== undefined) {
+      params.set('limit', String(options.limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return apiClient.get(`/chat/threads/${threadId}/session_receipts/${suffix}`);
+  },
+
+  /**
+   * Send message with unified streaming (response + reflection + signals + action hints)
    */
   async sendUnifiedStream(
     threadId: string,
@@ -132,7 +158,8 @@ export const chatAPI = {
       onResponseComplete?: (content: string) => void;
       onReflectionComplete?: (content: string) => void;
       onSignals?: (signals: any[]) => void;
-      onDone?: (result: { messageId?: string; reflectionId?: string; signalsCount?: number }) => void;
+      onActionHints?: (hints: any[]) => void;
+      onDone?: (result: { messageId?: string; reflectionId?: string; signalsCount?: number; actionHintsCount?: number }) => void;
       onError?: (error: string) => void;
     },
     signal?: AbortSignal
@@ -157,11 +184,15 @@ export const chatAPI = {
           case 'signals':
             callbacks.onSignals?.(data?.signals || []);
             break;
+          case 'action_hints':
+            callbacks.onActionHints?.(data?.action_hints || []);
+            break;
           case 'done':
             callbacks.onDone?.({
               messageId: data?.message_id,
               reflectionId: data?.reflection_id,
               signalsCount: data?.signals_count || 0,
+              actionHintsCount: data?.action_hints_count || 0,
             });
             break;
           case 'error':

@@ -4,12 +4,32 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inquiriesAPI } from '@/lib/api/inquiries';
 
+/** Inquiry item in dashboard */
+export interface DashboardInquiry {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Evidence item in summary */
+export interface EvidenceItem {
+  id: string;
+  text: string;
+  description?: string;
+  source?: string;
+  credibility?: number;
+  direction: 'supporting' | 'contradicting' | 'neutral';
+}
+
 export interface InquiryDashboardData {
   by_status: {
-    open: any[];
-    investigating: any[];
-    resolved: any[];
-    archived: any[];
+    open: DashboardInquiry[];
+    investigating: DashboardInquiry[];
+    resolved: DashboardInquiry[];
+    archived: DashboardInquiry[];
   };
   summary: {
     total: number;
@@ -27,9 +47,9 @@ export interface InquiryDashboardData {
 }
 
 export interface EvidenceSummaryData {
-  supporting: any[];
-  contradicting: any[];
-  neutral: any[];
+  supporting: EvidenceItem[];
+  contradicting: EvidenceItem[];
+  neutral: EvidenceItem[];
   summary: {
     total_evidence: number;
     supporting_count: number;

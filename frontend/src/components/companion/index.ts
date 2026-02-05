@@ -1,16 +1,16 @@
 /**
  * Companion Panel Components
  *
- * A vertical dashboard for meta-cognitive awareness:
- * - ReflectionSection: Streaming thinking commentary
- * - ActivitySection: Action progress and results
- * - SignalsSection: Interactive signal list
- * - SuggestionsSection: Contextual action suggestions
+ * Section components for the mode-aware companion sidebar:
+ * - ThinkingSection: Mode-aware reflection display
+ * - StatusSection: Background work tracking
+ * - SessionReceiptsSection: Session accomplishments timeline
+ * - CaseStateSection: Case summary when in case mode
+ *
+ * The main companion component is ReasoningCompanion (in chat/).
  */
 
-export { CompanionPanel } from './CompanionPanel';
-export { ReflectionSection } from './ReflectionSection';
-export { ActivitySection } from './ActivitySection';
-export { SignalsSection } from './SignalsSection';
-export { SuggestionsSection } from './SuggestionsSection';
-export { SignalItem } from './SignalItem';
+export { ThinkingSection } from './ThinkingSection';
+export { StatusSection } from './StatusSection';
+export { SessionReceiptsSection } from './SessionReceiptsSection';
+export { CaseStateSection } from './CaseStateSection';

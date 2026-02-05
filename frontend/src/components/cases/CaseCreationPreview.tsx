@@ -20,7 +20,7 @@ interface CaseCreationPreviewProps {
     background_summary: string;
     confidence: number;
   };
-  onConfirm: (edits?: any) => void;
+  onConfirm: (edits?: { title?: string; position?: string }) => void;
   onDismiss: () => void;
   isCreating?: boolean;
 }

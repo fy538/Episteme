@@ -8,6 +8,9 @@ Provides continuous background analysis of case documents:
 - Claim verification
 """
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 import json
 import asyncio
 from typing import Dict, Any, List, Optional
@@ -116,7 +119,7 @@ You provide actionable, specific feedback."""
             result['content_hash'] = get_content_hash(content)
             return result
         except Exception as e:
-            print(f"Failed to parse analysis: {e}")
+            logger.warning(f"Failed to parse analysis: {e}")
             return {
                 'analyzed_at': datetime.utcnow().isoformat(),
                 'content_hash': get_content_hash(content),

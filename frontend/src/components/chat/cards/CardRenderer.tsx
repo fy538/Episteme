@@ -10,7 +10,10 @@ interface Props {
 }
 
 export function CardRenderer({ card, onAction }: Props) {
-  switch (card.type) {
+  // Extract type for use in default case (TypeScript loses track after exhaustive switch)
+  const cardType = card.type;
+
+  switch (cardType) {
     case 'card_signal_extraction':
       return <SignalExtractionCard card={card} onAction={onAction} />;
     
@@ -40,7 +43,7 @@ export function CardRenderer({ card, onAction }: Props) {
       return (
         <div className="p-4 border rounded bg-neutral-50 dark:bg-neutral-800">
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Unknown card type: {(card as any).type}
+            Unknown card type: {cardType}
           </p>
         </div>
       );

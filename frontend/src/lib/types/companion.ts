@@ -1,144 +1,110 @@
 /**
  * Type definitions for Reasoning Companion
+ *
+ * Core types for the two-voice chat experience:
+ * - Chat modes (casual, case, inquiry_focus)
+ * - Session receipts (accomplishments tracking)
+ * - Background work items
+ * - Case state summary
+ * - Full companion panel state
  */
 
-export interface Reflection {
+// ===== Chat Mode System =====
+
+/**
+ * Chat modes determining the context and behavior
+ */
+export type ChatMode = 'casual' | 'case' | 'inquiry_focus';
+
+/**
+ * Context for the current chat mode
+ */
+export interface ModeContext {
+  mode: ChatMode;
+  caseId?: string;
+  caseName?: string;
+  inquiryId?: string;
+  inquiryTitle?: string;
+}
+
+// ===== Session Receipts =====
+
+/**
+ * Types of session accomplishments that can be recorded
+ */
+export type SessionReceiptType =
+  | 'case_created'
+  | 'signals_extracted'
+  | 'inquiry_resolved'
+  | 'evidence_added'
+  | 'research_completed';
+
+/**
+ * A record of something accomplished during the session
+ */
+export interface SessionReceipt {
   id: string;
-  text: string;
-  trigger_type: 'user_message' | 'document_upload' | 'contradiction_detected' | 'periodic' | 'confidence_change';
-  patterns: {
-    ungrounded_assumptions: Array<{ id: string; text: string; mentioned_times: number }>;
-    contradictions: Array<{ signal_id: string; signal_text: string; contradicts_id: string; contradicts_text: string }>;
-    strong_claims: Array<{ id: string; text: string; evidence_count: number; avg_confidence: number }>;
-    recurring_themes: Array<{ theme: string; count: number; signal_ids: string[] }>;
-    missing_considerations: Array<{ id: string; text: string }>;
-  };
-  created_at: string;
+  type: SessionReceiptType;
+  title: string;
+  timestamp: string;
+  detail?: string;
+  relatedCaseId?: string;
 }
 
-export interface BackgroundActivity {
-  signals_extracted: {
-    count: number;
-    by_type: Record<string, Array<{ text: string; status: string }>>;
-    items: Array<{ text: string; type: string }>;
-  };
-  evidence_linked: {
-    count: number;
-    sources: string[];
-  };
-  connections_built: {
-    count: number;
-  };
-  confidence_updates: Array<{
-    inquiry_id: string;
-    title: string;
-    old: number | null;
-    new: number;
-  }>;
-}
-
-export interface CompanionEvent {
-  type: 'reflection_chunk' | 'reflection_complete' | 'background_update' | 'confidence_change' | 'status';
-  text?: string;
-  delta?: string;  // For streaming chunks
-  message?: string;  // For status events
-  activity?: BackgroundActivity;
-  patterns?: Reflection['patterns'];
-}
+// ===== Background Work =====
 
 /**
- * Unified stream state for combined chat + companion streaming
+ * Types of background work
  */
-export interface UnifiedStreamState {
-  /** Whether unified streaming is enabled */
-  enabled: boolean;
-  /** Current reflection text from unified stream */
-  reflectionText: string;
-  /** Whether reflection is streaming */
-  isReflectionStreaming: boolean;
-  /** Current reflection patterns */
-  patterns: Reflection['patterns'] | null;
-}
+export type BackgroundWorkType = 'research' | 'analysis' | 'extraction';
 
 /**
- * Action types that can be performed from the companion
+ * An item representing work happening in the background
  */
-export type ActionType =
-  | 'research_assumption'
-  | 'validate_assumptions'
-  | 'organize_questions'
-  | 'create_case'
-  | 'create_inquiry';
-
-/**
- * Status of a signal (for validation tracking)
- */
-export type SignalValidationStatus =
-  | 'pending'
-  | 'validating'
-  | 'validated'
-  | 'refuted'
-  | 'partially_true'
-  | 'dismissed';
-
-/**
- * Enhanced signal with validation info for companion display
- */
-export interface CompanionSignal {
+export interface BackgroundWorkItem {
   id: string;
-  type: string;
-  text: string;
-  confidence: number;
-  validationStatus: SignalValidationStatus;
-  validationResult?: {
-    verdict: 'true' | 'false' | 'partial';
-    summary: string;
-    sources?: string[];
+  type: BackgroundWorkType;
+  title: string;
+  status: 'running' | 'completed';
+  progress?: number;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+// ===== Case State =====
+
+/**
+ * Summary of case state when in case mode
+ */
+export interface CaseState {
+  caseId: string;
+  caseName: string;
+  inquiries: {
+    open: number;
+    resolved: number;
   };
-  createdAt: string;
+  assumptions: {
+    validated: number;
+    unvalidated: number;
+  };
+  evidenceGaps: number;
 }
+
+// ===== Companion State =====
 
 /**
- * Active action being performed
+ * Full state for the companion panel
  */
-export interface ActiveAction {
-  id: string;
-  type: ActionType;
-  status: 'running' | 'complete' | 'error';
-  target: string;  // What's being acted on (e.g., assumption text)
-  targetIds?: string[];  // Signal IDs if applicable
-  progress: number;  // 0-100
-  steps: ActionStep[];
-  result?: ActionResult;
-  error?: string;
-  startedAt: string;
-}
-
-export interface ActionStep {
-  id: string;
-  label: string;
-  status: 'pending' | 'running' | 'complete' | 'error';
-}
-
-export interface ActionResult {
-  verdict?: 'true' | 'false' | 'partial';
-  summary: string;
-  details?: string;
-  sources?: Array<{ title: string; url?: string }>;
-  updatedSignals?: string[];  // IDs of signals that were updated
-}
-
-/**
- * Suggested action based on patterns
- */
-export interface SuggestedAction {
-  id: string;
-  type: ActionType;
-  label: string;
-  description: string;
-  priority: 'high' | 'medium' | 'low';
-  targetIds?: string[];
-  targetCount?: number;
-  /** Suggested title for case/inquiry creation */
-  suggestedTitle?: string;
+export interface CompanionState {
+  mode: ModeContext;
+  thinking: {
+    content: string;
+    isStreaming: boolean;
+  };
+  status: {
+    inProgress: BackgroundWorkItem[];
+    justCompleted: BackgroundWorkItem[];
+  };
+  sessionReceipts: SessionReceipt[];
+  caseState?: CaseState;
 }

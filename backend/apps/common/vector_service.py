@@ -1,9 +1,23 @@
 """
 Vector database service - abstraction for Pinecone/Weaviate
 
-Provides vector storage and semantic search for document chunks.
+DEPRECATED: This module is deprecated in favor of pgvector.
+Use apps/common/embedding_service.py with EMBEDDING_BACKEND='pgvector' instead.
+
+pgvector provides 28x faster vector search with no external dependencies,
+using native PostgreSQL HNSW indexes.
+
+This module is kept for backward compatibility during migration.
 """
 import os
+import warnings
+
+warnings.warn(
+    "vector_service.py is deprecated. Use embedding_service.py with "
+    "EMBEDDING_BACKEND='pgvector' for better performance and no external dependencies.",
+    DeprecationWarning,
+    stacklevel=2
+)
 from typing import List, Dict, Any, Optional
 from pinecone import Pinecone, ServerlessSpec
 

@@ -87,6 +87,37 @@ Return empty array [] if no clear signals found.
 []
 </signals>"""
 
+    # Add action hints section
+    base += """
+
+<action_hints>
+Based on the conversation context, suggest ONE helpful action IF appropriate.
+Return a JSON array with at most one action hint. Return empty [] if no action is warranted.
+
+Available action types:
+- "suggest_case": When conversation has substantial decision/problem framing (5+ signals, clear goals)
+- "suggest_inquiry": When a specific question needs focused investigation
+- "suggest_evidence": When mentioned evidence should be formally tracked
+- "suggest_resolution": When there's enough evidence to resolve an open inquiry
+
+Each hint should have:
+- "type": One of the action types above
+- "reason": Brief explanation (1 sentence) of why this action is helpful now
+- "data": Type-specific payload (see examples)
+
+Examples:
+[{{"type": "suggest_case", "reason": "You've outlined a complex decision with multiple constraints.", "data": {{"suggested_title": "Career transition decision", "signal_count": 7}}}}]
+
+[{{"type": "suggest_inquiry", "reason": "The question about salary benchmarks deserves focused research.", "data": {{"question": "What are competitive salary ranges for senior engineers in NYC?", "topic": "salary benchmarks"}}}}]
+
+[{{"type": "suggest_evidence", "reason": "This data point could support your cost analysis.", "data": {{"text": "Current cloud costs are $5k/month", "direction": "supporting"}}}}]
+
+Return [] if:
+- The conversation is just getting started
+- There's no clear action that would help right now
+- You already suggested an action recently
+</action_hints>"""
+
     # Add context about current patterns if available
     if config.patterns:
         patterns_context = _format_patterns_context(config.patterns)
@@ -174,42 +205,3 @@ def _format_signals_context(signals: List[Dict]) -> str:
         parts.append(f"{sig_type}s:\n" + "\n".join(type_signals))
 
     return "\n".join(parts)
-
-
-def build_action_hints(thread_context: Dict) -> str:
-    """
-    Build action hints to weave into response naturally.
-
-    When the assistant detects certain patterns, it can naturally
-    incorporate suggestions into the response.
-
-    Args:
-        thread_context: Context about the thread state
-
-    Returns:
-        Action hints string (or empty)
-    """
-    hints = []
-
-    # Check for case suggestion
-    if thread_context.get('should_suggest_case'):
-        hints.append(
-            "If appropriate, naturally suggest that this decision "
-            "might benefit from more structured tracking."
-        )
-
-    # Check for research suggestion
-    if thread_context.get('has_ungrounded_assumptions'):
-        hints.append(
-            "If appropriate, gently note that some assumptions "
-            "could benefit from validation."
-        )
-
-    # Check for inquiry suggestion
-    if thread_context.get('has_open_questions', 0) > 3:
-        hints.append(
-            "If appropriate, suggest organizing the open questions "
-            "into a focused investigation."
-        )
-
-    return "\n".join(hints) if hints else ""

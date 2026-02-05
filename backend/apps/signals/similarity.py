@@ -4,7 +4,10 @@ Similarity search and deduplication using embeddings
 This is for READ-TIME processing of signals.
 We don't dedupe at write time - we keep everything raw.
 """
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from typing import List, Tuple, Optional
 import uuid
 from apps.signals.models import Signal
@@ -276,7 +279,7 @@ def backfill_embeddings(
     signals = list(Signal.objects.filter(**filters))
 
     if verbose:
-        print(f"Found {len(signals)} signals without embeddings")
+        logger.info(f"Found {len(signals)} signals without embeddings")
 
     stats = {'processed': 0, 'embedded': 0, 'failed': 0}
 
@@ -302,6 +305,6 @@ def backfill_embeddings(
             Signal.objects.bulk_update(to_update, ['embedding'], batch_size=batch_size)
 
         if verbose:
-            print(f"Processed {stats['processed']}/{len(signals)} signals")
+            logger.info(f"Processed {stats['processed']}/{len(signals)} signals")
 
     return stats

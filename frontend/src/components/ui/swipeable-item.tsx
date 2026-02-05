@@ -41,7 +41,7 @@ export function SwipeableItem({
   const leftActionOpacity = useTransform(x, [-threshold, 0], [1, 0]);
   const rightActionOpacity = useTransform(x, [0, threshold], [0, 1]);
 
-  const handleDragEnd = (_: any, info: PanInfo) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     setIsDragging(false);
     
     if (info.offset.x < -threshold && onSwipeLeft) {

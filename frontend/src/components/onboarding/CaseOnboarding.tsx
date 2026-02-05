@@ -90,7 +90,7 @@ export function CaseOnboarding({ caseId, onStartInquiry, onDismiss }: CaseOnboar
                     Key Inquiries
                   </p>
                   <ul className="mt-1 space-y-1">
-                    {auto_created.inquiries.slice(0, 3).map((inquiry: any) => (
+                    {auto_created.inquiries.slice(0, 3).map((inquiry: { id: string; title: string }) => (
                       <li key={inquiry.id} className="text-sm text-neutral-600">
                         • {inquiry.title}
                       </li>

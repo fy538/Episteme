@@ -8,6 +8,9 @@ Handles complex tasks like:
 - "Restructure the brief to follow a different format"
 """
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import uuid
 from typing import Dict, Any, List, Optional
@@ -213,7 +216,7 @@ Return ONLY the JSON array."""
                 step['new_content'] = None
             return steps
         except Exception as e:
-            print(f"Failed to parse plan: {e}")
+            logger.warning(f"Failed to parse plan: {e}")
             return []
 
     return asyncio.run(generate())
@@ -281,7 +284,7 @@ Return ONLY the JSON object."""
 
             return json.loads(response_text)
         except Exception as e:
-            print(f"Failed to execute step: {e}")
+            logger.warning(f"Failed to execute step: {e}")
             return {'changed': False, 'new_content': content, 'error': str(e)}
 
     return asyncio.run(execute())
@@ -355,7 +358,7 @@ Return ONLY the JSON object."""
 
             return json.loads(response_text)
         except Exception as e:
-            print(f"Failed to parse review: {e}")
+            logger.warning(f"Failed to parse review: {e}")
             return {'score': 70, 'notes': 'Review completed', 'refinements': []}
 
     return asyncio.run(review())

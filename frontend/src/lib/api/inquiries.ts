@@ -35,8 +35,11 @@ export const inquiriesAPI = {
     return apiClient.post('/inquiries/', data);
   },
 
-  async resolve(inquiryId: string, conclusion: string): Promise<Inquiry> {
-    return apiClient.post(`/inquiries/${inquiryId}/resolve/`, { conclusion });
+  async resolve(inquiryId: string, conclusion: string, threadId?: string): Promise<Inquiry> {
+    return apiClient.post(`/inquiries/${inquiryId}/resolve/`, {
+      conclusion,
+      thread_id: threadId,
+    });
   },
 
   async update(inquiryId: string, data: Partial<Inquiry>): Promise<Inquiry> {

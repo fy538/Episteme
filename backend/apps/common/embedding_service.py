@@ -122,36 +122,210 @@ class PostgreSQLJSONBackend(EmbeddingBackend):
 class PgVectorBackend(EmbeddingBackend):
     """
     Store embeddings in pgvector (Phase 3)
-    
+
     Pros:
     - 28x faster than external vector DBs (research-backed)
     - Native PostgreSQL (no extra infrastructure)
     - HNSW index for O(log n) search
-    
+
     Cons:
     - Requires pgvector extension
     - Migration needed from JSON
-    
+
     Use when: >50-100K chunks or query latency becomes issue
     """
-    
+
+    # Default embedding dimension (sentence-transformers)
+    EMBEDDING_DIM = 384
+
     def __init__(self):
-        # Check if pgvector is available
-        try:
-            import pgvector
-            self.available = True
-        except ImportError:
-            self.available = False
-    
-    def store_embedding(self, chunk_id, embedding, metadata):
-        """Store in vector column"""
-        # Phase 3: Implement when needed
-        raise NotImplementedError("pgvector backend not yet implemented")
-    
-    def search_similar(self, query_embedding, top_k, filters):
-        """Vector similarity search with HNSW index"""
-        # Phase 3: Implement when needed
-        raise NotImplementedError("pgvector backend not yet implemented")
+        """Initialize and check pgvector availability"""
+        from django.db import connection
+        self.connection = connection
+        self._extension_available = None
+        self._vector_column_exists = None
+
+    @property
+    def extension_available(self) -> bool:
+        """Check if pgvector extension is available in PostgreSQL"""
+        if self._extension_available is None:
+            try:
+                with self.connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')"
+                    )
+                    self._extension_available = cursor.fetchone()[0]
+            except Exception:
+                self._extension_available = False
+        return self._extension_available
+
+    @property
+    def vector_column_exists(self) -> bool:
+        """Check if embedding_vector column exists on DocumentChunk"""
+        if self._vector_column_exists is None:
+            try:
+                with self.connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'projects_documentchunk'
+                            AND column_name = 'embedding_vector'
+                        )
+                    """)
+                    self._vector_column_exists = cursor.fetchone()[0]
+            except Exception:
+                self._vector_column_exists = False
+        return self._vector_column_exists
+
+    def ensure_setup(self) -> bool:
+        """
+        Ensure pgvector is set up. Call this before any operation.
+
+        Returns True if ready, False if not available.
+        """
+        if not self.extension_available:
+            return False
+
+        # Create vector column if it doesn't exist
+        if not self.vector_column_exists:
+            self._create_vector_column()
+            self._vector_column_exists = True
+
+        return True
+
+    def _create_vector_column(self):
+        """Add embedding_vector column and HNSW index"""
+        with self.connection.cursor() as cursor:
+            # Add vector column
+            cursor.execute(f"""
+                ALTER TABLE projects_documentchunk
+                ADD COLUMN IF NOT EXISTS embedding_vector vector({self.EMBEDDING_DIM})
+            """)
+
+            # Create HNSW index for fast cosine similarity search
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS documentchunk_embedding_hnsw_idx
+                ON projects_documentchunk
+                USING hnsw (embedding_vector vector_cosine_ops)
+            """)
+
+    def store_embedding(
+        self,
+        chunk_id: uuid.UUID,
+        embedding: List[float],
+        metadata: Dict[str, Any]
+    ) -> None:
+        """Store embedding in vector column"""
+        if not self.ensure_setup():
+            raise RuntimeError("pgvector extension not available")
+
+        # Convert list to vector format
+        embedding_str = '[' + ','.join(str(x) for x in embedding) + ']'
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE projects_documentchunk
+                SET embedding_vector = %s::vector
+                WHERE id = %s
+                """,
+                [embedding_str, str(chunk_id)]
+            )
+
+    def search_similar(
+        self,
+        query_embedding: List[float],
+        top_k: int,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[uuid.UUID, float]]:
+        """
+        Vector similarity search using HNSW index.
+
+        Uses cosine distance (1 - similarity) for ordering.
+        Returns similarity scores (higher is better).
+        """
+        if not self.ensure_setup():
+            raise RuntimeError("pgvector extension not available")
+
+        # Convert query to vector format
+        query_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+
+        # Build SQL with optional filters
+        sql = """
+            SELECT id, 1 - (embedding_vector <=> %s::vector) as similarity
+            FROM projects_documentchunk
+            WHERE embedding_vector IS NOT NULL
+        """
+        params = [query_str]
+
+        if filters:
+            if 'document_id' in filters:
+                sql += " AND document_id = %s"
+                params.append(filters['document_id'])
+            if 'case_id' in filters:
+                sql += " AND document_id IN (SELECT id FROM projects_document WHERE case_id = %s)"
+                params.append(filters['case_id'])
+
+        sql += " ORDER BY embedding_vector <=> %s::vector LIMIT %s"
+        params.extend([query_str, top_k])
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            results = cursor.fetchall()
+
+        return [(uuid.UUID(str(row[0])), float(row[1])) for row in results]
+
+    def delete_embeddings(self, chunk_ids: List[uuid.UUID]) -> None:
+        """Clear vector embeddings"""
+        if not self.ensure_setup():
+            return
+
+        if not chunk_ids:
+            return
+
+        placeholders = ','.join(['%s'] * len(chunk_ids))
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE projects_documentchunk
+                SET embedding_vector = NULL
+                WHERE id IN ({placeholders})
+                """,
+                [str(cid) for cid in chunk_ids]
+            )
+
+    def migrate_from_json(self, batch_size: int = 1000) -> int:
+        """
+        Migrate embeddings from JSON field to vector column.
+
+        Call this to migrate existing data in batches.
+        Returns number of migrated chunks in this batch.
+        """
+        if not self.ensure_setup():
+            raise RuntimeError("pgvector extension not available")
+
+        from apps.projects.models import DocumentChunk
+
+        # Find chunks with JSON embedding but no vector embedding yet
+        # Use raw SQL to check for NULL vector column
+        with self.connection.cursor() as cursor:
+            cursor.execute(f"""
+                SELECT id, embedding
+                FROM projects_documentchunk
+                WHERE embedding IS NOT NULL
+                  AND embedding != '[]'::jsonb
+                  AND (embedding_vector IS NULL)
+                LIMIT %s
+            """, [batch_size])
+            chunks = cursor.fetchall()
+
+        migrated = 0
+        for chunk_id, embedding in chunks:
+            if embedding and len(embedding) == self.EMBEDDING_DIM:
+                self.store_embedding(uuid.UUID(str(chunk_id)), embedding, {})
+                migrated += 1
+
+        return migrated
 
 
 class PineconeBackend(EmbeddingBackend):
@@ -297,6 +471,23 @@ class EmbeddingService:
     def delete_chunk_embeddings(self, chunk_ids: List[uuid.UUID]) -> None:
         """Delete embeddings for chunks"""
         self.backend.delete_embeddings(chunk_ids)
+
+    def migrate_to_pgvector(self, batch_size: int = 1000) -> int:
+        """
+        Migrate embeddings from JSON to pgvector.
+
+        Only works when using pgvector backend.
+        Returns number of migrated chunks.
+        """
+        if not isinstance(self.backend, PgVectorBackend):
+            raise ValueError("Migration only works with pgvector backend")
+        return self.backend.migrate_from_json(batch_size)
+
+    def is_pgvector_available(self) -> bool:
+        """Check if pgvector is available and ready to use"""
+        if isinstance(self.backend, PgVectorBackend):
+            return self.backend.extension_available
+        return False
 
 
 # Singleton instance

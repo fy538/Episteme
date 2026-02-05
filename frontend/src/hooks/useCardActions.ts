@@ -24,13 +24,7 @@ export function useCardActions() {
           return apiClient.post(`/chat/threads/${threadId}/organize_questions/`, {
             question_ids: action.payload.question_ids || action.payload.signal_ids
           });
-        
-        case 'create_inquiry_from_questions':
-          return apiClient.post('/inquiries/', {
-            thread_id: threadId,
-            questions: action.payload.questions
-          });
-        
+
         case 'create_case_from_thread':
           return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
         
@@ -51,22 +45,19 @@ export function useCardActions() {
           return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
         
         case 'stop_agent':
-          // TODO: Implement agent stop endpoint
-          console.warn('Stop agent not yet implemented');
+          // Agent stop endpoint - not yet implemented
           return Promise.resolve({});
-        
+
         case 'view_agent_results':
-          // TODO: Navigate to agent results
-          console.warn('View agent results not yet implemented');
+          // Navigate to agent results - not yet implemented
           return Promise.resolve({});
-        
+
         case 'apply_research_to_case':
-          // TODO: Apply research to case
-          console.warn('Apply research to case not yet implemented');
+          // Apply research to case - not yet implemented
           return Promise.resolve({});
-        
+
         default:
-          console.warn('Unknown action type:', action.action_type);
+          // Unknown action type - no-op
           return Promise.resolve({});
       }
     },

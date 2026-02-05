@@ -31,7 +31,7 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
 
     try {
       const result = await artifactsAPI.generateResearch(caseId, topic);
-      console.log('Research generation started:', result.task_id);
+      // Research generation started
       
       // Poll for completion (simplified)
       setTimeout(() => {
@@ -55,7 +55,7 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
 
     try {
       const result = await artifactsAPI.generateCritique(caseId, selectedSignalId);
-      console.log('Critique generation started:', result.task_id);
+      // Critique generation started
       
       setTimeout(() => {
         setIsGenerating(false);
@@ -75,7 +75,7 @@ export function GenerationPanel({ caseId, onGenerated }: GenerationPanelProps) {
 
     try {
       const result = await artifactsAPI.generateBrief(caseId);
-      console.log('Brief generation started:', result.task_id);
+      // Brief generation started
       
       setTimeout(() => {
         setIsGenerating(false);

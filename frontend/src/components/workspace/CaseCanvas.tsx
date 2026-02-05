@@ -171,8 +171,8 @@ export function CaseCanvas({
           setReadinessOpen(false);
         }}
         onCreateInquiry={(text) => {
-          // Navigate to create inquiry
-          console.log('Create inquiry from blind spot:', text);
+          // Create inquiry from blind spot
+          onCreateInquiryFromText(text);
           setReadinessOpen(false);
         }}
       />

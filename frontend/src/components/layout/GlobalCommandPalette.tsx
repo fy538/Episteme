@@ -102,8 +102,7 @@ export function GlobalCommandPalette({ children }: GlobalCommandPaletteProps) {
       category: 'actions',
       keywords: ['new', 'create', 'case'],
       action: () => {
-        // Would trigger case creation modal
-        console.log('Create case');
+        // Case creation modal - to be implemented
       },
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -136,8 +135,7 @@ export function GlobalCommandPalette({ children }: GlobalCommandPaletteProps) {
       category: 'search',
       keywords: ['search', 'find', 'cases'],
       action: () => {
-        // Would trigger case search
-        console.log('Search cases');
+        // Case search - to be implemented
       },
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

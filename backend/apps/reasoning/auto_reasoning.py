@@ -204,7 +204,8 @@ Respond in JSON format:
             else:
                 # Fallback
                 return {'type': 'NEUTRAL', 'confidence': 0.5, 'reasoning': 'Parse error'}
-        except:
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"Failed to parse relationship analysis: {e}")
             return {'type': 'NEUTRAL', 'confidence': 0.5, 'reasoning': 'Parse error'}
     
     async def _create_support_link(

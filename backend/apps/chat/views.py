@@ -413,70 +413,163 @@ Return ONLY valid JSON:
     def organize_questions(self, request, pk=None):
         """
         Organize questions into an inquiry.
-        
+
         POST /api/chat/threads/{id}/organize_questions/
-        Body: {"question_ids": ["uuid1", "uuid2"]}
+        Body: {
+            "question_ids": ["uuid1", "uuid2"],
+            "title": "Optional custom title"
+        }
+
+        Returns the created inquiry.
         """
         from apps.signals.models import Signal
-        
+        from apps.inquiries.services import InquiryService
+        from apps.inquiries.models import ElevationReason
+        from apps.inquiries.serializers import InquirySerializer
+        from apps.companion.receipts import SessionReceiptService
+
         thread = self.get_object()
         question_ids = request.data.get('question_ids', [])
-        
+        custom_title = request.data.get('title')
+
         if not question_ids:
             return Response(
                 {'error': 'question_ids required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Get questions
-        questions = Signal.objects.filter(
+
+        # Check if thread has a case
+        if not thread.primary_case:
+            return Response(
+                {'error': 'Thread must be linked to a case before organizing questions into inquiries'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        case = thread.primary_case
+
+        # Get questions - accept both 'question' and 'Question' types
+        questions = list(Signal.objects.filter(
             id__in=question_ids,
             thread=thread,
-            type='question'
-        )
-        
-        if not questions.exists():
+            type__iexact='question'
+        ))
+
+        if not questions:
             return Response(
                 {'error': 'No valid questions found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # TODO: Actually create inquiry
-        # For now, just acknowledge
-        
+
+        # Determine inquiry title
+        if custom_title:
+            title = custom_title
+        elif len(questions) == 1:
+            title = questions[0].text
+        else:
+            # Use first question as title, note the others in description
+            title = questions[0].text
+
+        # Build description from multiple questions
+        if len(questions) > 1:
+            description = "Combined from questions:\n" + "\n".join(
+                f"- {q.text}" for q in questions
+            )
+        else:
+            description = ""
+
+        # Create inquiry
+        inquiry = InquiryService.create_inquiry(
+            case=case,
+            title=title,
+            elevation_reason=ElevationReason.USER_CREATED,
+            description=description,
+            source='organize_questions',
+            user=request.user,
+            origin_signal_id=questions[0].id if questions else None,
+        )
+
+        # Link all question signals to the inquiry
+        for question in questions:
+            question.inquiry = inquiry
+            question.save(update_fields=['inquiry'])
+
+        # Record session receipt
+        SessionReceiptService.record(
+            thread_id=thread.id,
+            receipt_type='inquiry_created',
+            title=f'Inquiry created: {title[:50]}{"..." if len(title) > 50 else ""}',
+            detail=f'Organized from {len(questions)} question{"s" if len(questions) != 1 else ""}',
+            related_case_id=case.id,
+            related_inquiry_id=inquiry.id,
+        )
+
         return Response({
-            'status': 'questions_organized',
+            'status': 'inquiry_created',
+            'inquiry': InquirySerializer(inquiry).data,
             'question_count': len(questions),
-            'message': 'Questions ready to be organized into inquiry'
         })
     
     @action(detail=True, methods=['post'])
     def dismiss_suggestion(self, request, pk=None):
         """
         Dismiss a suggestion/intervention.
-        
+
         POST /api/chat/threads/{id}/dismiss_suggestion/
         Body: {"type": "organize_questions"}
         """
         from .interventions import InterventionService
-        
+
         thread = self.get_object()
         suggestion_type = request.data.get('type')
-        
+
         if not suggestion_type:
             return Response(
                 {'error': 'type required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Mark suggestion as dismissed
         InterventionService.dismiss_suggestion(thread, suggestion_type)
-        
+
         return Response({
             'status': 'dismissed',
             'type': suggestion_type
         })
-    
+
+    @action(detail=True, methods=['get'])
+    def session_receipts(self, request, pk=None):
+        """
+        Get session receipts for this thread.
+
+        GET /api/chat/threads/{id}/session_receipts/
+
+        Query params:
+        - session_only: true (default) to get current session only (last 4 hours)
+        - limit: max number of receipts (default 50)
+
+        Returns: List of session receipts for the companion panel
+        """
+        from apps.companion.receipts import SessionReceiptService
+        from apps.companion.serializers import SessionReceiptSerializer
+
+        thread = self.get_object()
+        session_only = request.query_params.get('session_only', 'true').lower() == 'true'
+        limit = int(request.query_params.get('limit', '50'))
+
+        if session_only:
+            receipts = SessionReceiptService.get_session_receipts(
+                thread_id=thread.id,
+                limit=limit
+            )
+        else:
+            receipts = SessionReceiptService.get_all_thread_receipts(
+                thread_id=thread.id,
+                limit=limit
+            )
+
+        serializer = SessionReceiptSerializer(receipts, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['post'])
     async def create_case_from_analysis(self, request, pk=None):
         """
@@ -634,6 +727,167 @@ Return ONLY valid JSON:
         response["Access-Control-Allow-Credentials"] = "true"
         
         return response
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+async def unified_stream(request, thread_id):
+    """
+    Unified streaming endpoint for chat response + reflection + signals + action hints.
+
+    Uses the UnifiedAnalysisEngine to generate a single LLM response with
+    sectioned output that streams to the client.
+
+    POST /api/chat/threads/{thread_id}/unified-stream/
+    {
+        "content": "User message content"
+    }
+
+    Streams:
+    - response_chunk: Chat response tokens
+    - reflection_chunk: Reflection tokens
+    - response_complete: Full response
+    - reflection_complete: Full reflection
+    - signals: Extracted signals array
+    - action_hints: AI-suggested actions
+    - done: Completion with IDs
+    - error: Error message
+    """
+    import uuid as uuid_module
+
+    # Get thread and verify ownership
+    thread = await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=request.user)
+    )()
+
+    # Get message content from request body
+    content = request.data.get('content', '')
+    if not content:
+        return Response(
+            {'error': 'Message content is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Create user message first
+    user_message = await sync_to_async(ChatService.create_user_message)(
+        thread_id=thread.id,
+        content=content,
+        user=request.user
+    )
+
+    async def event_stream():
+        """Generator for SSE events using UnifiedAnalysisEngine"""
+        from apps.intelligence.engine import UnifiedAnalysisEngine, StreamEventType
+        from apps.intelligence.handlers import UnifiedAnalysisHandler
+
+        correlation_id = uuid_module.uuid4()
+        engine = UnifiedAnalysisEngine()
+
+        # Build conversation context
+        messages = await sync_to_async(list)(
+            Message.objects.filter(thread=thread)
+            .order_by('-created_at')[:10]
+        )
+        conversation_context = "\n\n".join([
+            f"{m.role.upper()}: {m.content}"
+            for m in reversed(messages)
+        ])
+
+        # Track content for post-processing
+        response_content = ""
+        reflection_content = ""
+        signals_json = ""
+        action_hints_json = ""
+        extraction_enabled = True
+
+        try:
+            async for event in engine.analyze_simple(
+                thread=thread,
+                user_message=content,
+                conversation_context=conversation_context
+            ):
+                if event.type == StreamEventType.RESPONSE_CHUNK:
+                    response_content += event.data
+                    payload = json.dumps({"delta": event.data})
+                    yield f"event: response_chunk\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.REFLECTION_CHUNK:
+                    reflection_content += event.data
+                    payload = json.dumps({"delta": event.data})
+                    yield f"event: reflection_chunk\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.RESPONSE_COMPLETE:
+                    response_content = event.data
+                    payload = json.dumps({"content": event.data})
+                    yield f"event: response_complete\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.REFLECTION_COMPLETE:
+                    reflection_content = event.data
+                    payload = json.dumps({"content": event.data})
+                    yield f"event: reflection_complete\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.SIGNALS_COMPLETE:
+                    signals = event.data.get('signals', [])
+                    signals_json = event.data.get('raw', '[]')
+                    extraction_enabled = event.data.get('extraction_enabled', True)
+                    payload = json.dumps({"signals": signals})
+                    yield f"event: signals\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.ACTION_HINTS_COMPLETE:
+                    action_hints = event.data.get('action_hints', [])
+                    action_hints_json = event.data.get('raw', '[]')
+                    payload = json.dumps({"action_hints": action_hints})
+                    yield f"event: action_hints\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.ERROR:
+                    error_msg = event.data.get('error', 'Unknown error')
+                    payload = json.dumps({"error": error_msg})
+                    yield f"event: error\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.DONE:
+                    extraction_enabled = event.data.get('extraction_enabled', True)
+                    # Don't yield done yet - we need to save first
+
+            # Post-process: save message, reflection, signals
+            result = await UnifiedAnalysisHandler.handle_completion(
+                thread=thread,
+                user=request.user,
+                response_content=response_content,
+                reflection_content=reflection_content,
+                signals_json=signals_json,
+                model_key='chat',
+                extraction_was_enabled=extraction_enabled,
+                correlation_id=correlation_id
+            )
+
+            # Now yield done event with IDs
+            done_payload = json.dumps({
+                "message_id": result.get('message_id'),
+                "reflection_id": result.get('reflection_id'),
+                "signals_count": result.get('signals_count', 0),
+                "action_hints_count": len(json.loads(action_hints_json or '[]'))
+            })
+            yield f"event: done\ndata: {done_payload}\n\n"
+
+        except Exception as e:
+            logger.exception(
+                "unified_stream_error",
+                extra={"thread_id": str(thread.id), "error": str(e)}
+            )
+            error_payload = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_payload}\n\n"
+
+    # Create streaming response
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+
+    # CORS headers
+    origin = request.headers.get("Origin", "http://localhost:3000")
+    response["Access-Control-Allow-Origin"] = origin
+    response["Access-Control-Allow-Credentials"] = "true"
+
+    return response
 
 
 @api_view(['GET'])

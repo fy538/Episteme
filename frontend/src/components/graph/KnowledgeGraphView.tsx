@@ -28,7 +28,7 @@ interface GraphData {
     type: string;
     label: string;
     confidence?: number;
-    data: any;
+    data: Record<string, unknown>;
   }>;
   edges: Array<{
     id: string;

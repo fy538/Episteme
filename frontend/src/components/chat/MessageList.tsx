@@ -1,10 +1,10 @@
 /**
- * Message list component - displays chat messages
+ * Message list component - displays chat messages with inline action cards
  */
 
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import type { Message as MessageType } from '@/lib/types/chat';
+import type { Message as MessageType, InlineActionCard } from '@/lib/types/chat';
 import type { CardAction } from '@/lib/types/cards';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
@@ -12,6 +12,7 @@ import { SignalHighlighter, type HighlightedSignal } from './SignalHighlighter';
 import { useSignalsForMessage, useDismissSignal } from '@/hooks/useSignals';
 import { useUserPreferences } from '@/hooks/usePreferences';
 import { CardRenderer } from './cards/CardRenderer';
+import { InlineActionCardRenderer, type InlineCardActions } from './cards/InlineActionCardRenderer';
 import { MessageListSkeleton } from '@/components/ui/skeleton';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 
@@ -180,6 +181,8 @@ export function MessageList({
   onCreateEvidence,
   onCardAction,
   isLoading,
+  inlineCards = [],
+  inlineCardActions = {},
 }: {
   messages: MessageType[];
   isWaitingForResponse?: boolean;
@@ -189,6 +192,10 @@ export function MessageList({
   onCreateEvidence?: (content: string) => void;
   onCardAction?: (action: CardAction, messageId: string) => void;
   isLoading?: boolean;
+  /** Inline action cards to display after messages */
+  inlineCards?: InlineActionCard[];
+  /** Actions for inline cards */
+  inlineCardActions?: InlineCardActions;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -210,17 +217,34 @@ export function MessageList({
     );
   }
 
+  // Get cards for a specific message
+  const getCardsForMessage = (messageId: string) => {
+    return inlineCards.filter(
+      (card) => card.afterMessageId === messageId && !card.dismissed
+    );
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
       {messages.map((message, index) => (
-        <Message
-          key={message.id}
-          message={message}
-          index={index}
-          onAddToBrief={onAddToBrief}
-          onCreateEvidence={onCreateEvidence}
-          onCardAction={onCardAction}
-        />
+        <div key={message.id}>
+          <Message
+            message={message}
+            index={index}
+            onAddToBrief={onAddToBrief}
+            onCreateEvidence={onCreateEvidence}
+            onCardAction={onCardAction}
+          />
+
+          {/* Inline action cards after this message */}
+          {getCardsForMessage(message.id).map((card) => (
+            <InlineActionCardRenderer
+              key={card.id}
+              card={card}
+              actions={inlineCardActions}
+            />
+          ))}
+        </div>
       ))}
       {isWaitingForResponse && !isStreaming && (
         <div className="flex justify-start">

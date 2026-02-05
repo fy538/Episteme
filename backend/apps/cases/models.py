@@ -422,10 +422,72 @@ class ReadinessChecklistItem(UUIDModel, TimestampedModel):
         help_text="Display order"
     )
 
+    # AI-generated context
+    why_important = models.TextField(
+        blank=True,
+        help_text="AI explanation of why this item matters for the decision"
+    )
+
+    created_by_ai = models.BooleanField(
+        default=False,
+        help_text="Whether this item was AI-generated"
+    )
+
+    # Auto-completion tracking
+    completion_note = models.TextField(
+        blank=True,
+        help_text="Note about how/why this was completed (especially for auto-completion)"
+    )
+
+    # Phase 2: Hierarchical structure
+    parent = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='children',
+        help_text="Parent item (for nested/dependent items)"
+    )
+
+    item_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('validation', 'Validate Assumption'),
+            ('investigation', 'Complete Investigation'),
+            ('analysis', 'Perform Analysis'),
+            ('stakeholder', 'Stakeholder Input'),
+            ('alternative', 'Evaluate Alternative'),
+            ('criteria', 'Define Criteria'),
+            ('custom', 'Custom'),
+        ],
+        default='custom',
+        help_text="Type of readiness item"
+    )
+
+    # Phase 2: Blocking dependencies
+    # Note: blocks relationship means "this item blocks other items from being completed"
+    # Use item.blocks.all() to get items this blocks
+    # Use item.blocked_by.all() to get items blocking this one
+    blocks = models.ManyToManyField(
+        'self',
+        symmetrical=False,
+        related_name='blocked_by',
+        blank=True,
+        help_text="Items that cannot be completed until this one is done"
+    )
+
+    # Must be defined after all fields
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Store original completion state for signal detection
+        self._original_is_complete = self.is_complete if self.pk else False
+
     class Meta:
-        ordering = ['order', 'id']
+        ordering = ['parent__order', 'order', 'id']  # Parents first, then children
         indexes = [
             models.Index(fields=['case', 'order']),
+            models.Index(fields=['case', 'parent']),
+            models.Index(fields=['item_type']),
         ]
 
     def __str__(self):

@@ -1,7 +1,11 @@
 """
 Case views
 """
+import logging
+
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -49,7 +53,7 @@ class CaseViewSet(viewsets.ModelViewSet):
         """Create a new case with auto-generated brief"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         case, case_brief = CaseService.create_case(
             user=request.user,
             title=serializer.validated_data['title'],
@@ -58,7 +62,20 @@ class CaseViewSet(viewsets.ModelViewSet):
             thread_id=serializer.validated_data.get('thread_id'),
             project_id=serializer.validated_data.get('project_id'),  # Phase 2
         )
-        
+
+        # Record session receipt if created from a thread
+        thread_id = serializer.validated_data.get('thread_id')
+        if thread_id:
+            try:
+                from apps.companion.receipts import SessionReceiptService
+                SessionReceiptService.record_case_created(
+                    thread_id=thread_id,
+                    case=case
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to record case creation receipt: {e}")
+
         return Response(
             {
                 'case': CaseSerializer(case).data,
@@ -714,6 +731,79 @@ _What actions follow from this decision?_
             'items': ReadinessChecklistItemSerializer(items, many=True).data
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='readiness-checklist/generate')
+    def generate_checklist(self, request, pk=None):
+        """
+        Generate AI-powered checklist items for this case.
+
+        POST /api/cases/{id}/readiness-checklist/generate/
+
+        Analyzes case context (assumptions, inquiries, decision question)
+        and creates smart checklist items. Does not replace existing items.
+        """
+        from apps.cases.checklist_service import generate_smart_checklist
+        import asyncio
+
+        case = self.get_object()
+
+        # Generate items based on case context
+        items_data = asyncio.run(generate_smart_checklist(case))
+
+        # Create checklist items in two passes: parents first, then children
+        import logging
+        logger = logging.getLogger(__name__)
+
+        created_items = []
+        parent_map = {}  # description -> created parent item
+        max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or -1
+
+        # Debug: Log what we're receiving
+        logger.info(f"View received {len(items_data)} items")
+        for item in items_data:
+            logger.debug(f"  - {item['description'][:40]}: parent_matched={item.get('parent_description_matched')}")
+
+        # Pass 1: Create parent items (items with no parent_description_matched)
+        for idx, item_data in enumerate(items_data):
+            if not item_data.get('parent_description_matched'):
+                item = ReadinessChecklistItem.objects.create(
+                    case=case,
+                    description=item_data['description'],
+                    is_required=item_data.get('is_required', True),
+                    why_important=item_data.get('why_important', ''),
+                    linked_inquiry_id=item_data.get('linked_inquiry_id'),
+                    item_type=item_data.get('item_type', 'custom'),
+                    order=max_order + idx + 1,
+                    created_by_ai=True,
+                    parent=None,  # Explicitly no parent
+                )
+                created_items.append(item)
+                parent_map[item_data['description']] = item
+
+        # Pass 2: Create child items (items with parent_description_matched)
+        child_order = len(created_items)
+        for item_data in items_data:
+            parent_desc = item_data.get('parent_description_matched')
+            if parent_desc and parent_desc in parent_map:
+                parent_item = parent_map[parent_desc]
+                item = ReadinessChecklistItem.objects.create(
+                    case=case,
+                    description=item_data['description'],
+                    is_required=item_data.get('is_required', True),
+                    why_important=item_data.get('why_important', ''),
+                    linked_inquiry_id=item_data.get('linked_inquiry_id'),
+                    item_type=item_data.get('item_type', 'custom'),
+                    order=max_order + child_order + 1,
+                    created_by_ai=True,
+                    parent=parent_item,
+                )
+                created_items.append(item)
+                child_order += 1
+
+        return Response({
+            'message': f'Generated {len(created_items)} checklist items ({len(parent_map)} parents, {len(created_items) - len(parent_map)} children)',
+            'items': ReadinessChecklistItemSerializer(created_items, many=True, context={'include_children': True}).data
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'], url_path='suggest-inquiries')
     def suggest_inquiries(self, request, pk=None):
         """
@@ -1112,8 +1202,9 @@ Return JSON:
             import json
             try:
                 return json.loads(full_response)
-            except:
+            except (json.JSONDecodeError, ValueError) as e:
                 # Fallback: append to end
+                logger.warning(f"Failed to parse document insertion response: {e}")
                 return {
                     "updated_content": f"{document.content_markdown}\n\n{content_to_add}\n\n[^chat]",
                     "insertion_section": "End of document",
@@ -1581,7 +1672,8 @@ Return ONLY the JSON array, no other text.
                             break
                 
                 return assumptions
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to extract assumptions: {e}")
                 return []
         
         assumptions = asyncio.run(generate())

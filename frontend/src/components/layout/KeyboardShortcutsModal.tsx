@@ -10,6 +10,9 @@ import { Dialog } from '@/components/ui/dialog';
 import { KeyboardShortcutsHelp } from '@/components/ui/keyboard-shortcut';
 import { GLOBAL_SHORTCUTS } from '@/hooks/useGlobalKeyboard';
 
+// Custom event name for triggering keyboard help
+const SHOW_KEYBOARD_HELP_EVENT = 'show-keyboard-help';
+
 export function KeyboardShortcutsModal() {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -18,8 +21,8 @@ export function KeyboardShortcutsModal() {
       setIsOpen(true);
     }
 
-    window.addEventListener('show-keyboard-help' as any, handleShowHelp);
-    return () => window.removeEventListener('show-keyboard-help' as any, handleShowHelp);
+    window.addEventListener(SHOW_KEYBOARD_HELP_EVENT, handleShowHelp);
+    return () => window.removeEventListener(SHOW_KEYBOARD_HELP_EVENT, handleShowHelp);
   }, []);
 
   return (

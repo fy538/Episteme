@@ -10,6 +10,9 @@ Identifies:
 Uses embeddings for fast pre-filtering, then LLM for precise matching.
 """
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
@@ -149,7 +152,7 @@ Return ONLY the JSON array."""
 
             return claims
         except Exception as e:
-            print(f"Failed to extract claims: {e}")
+            logger.warning(f"Failed to extract claims: {e}")
             return []
 
     return asyncio.run(extract())
@@ -354,7 +357,7 @@ Return ONLY the JSON array."""
 
             return result
         except Exception as e:
-            print(f"Failed to link claims: {e}")
+            logger.warning(f"Failed to link claims: {e}")
             # Return claims without links
             return [
                 {

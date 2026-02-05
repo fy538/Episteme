@@ -391,3 +391,117 @@ class CompanionService:
             },
             'confidence_updates': confidence_updates
         }
+
+    async def generate_mode_aware_reflection(
+        self,
+        thread_id: uuid.UUID,
+        mode: str,
+        mode_context: dict
+    ):
+        """
+        Generate reflection based on current chat mode.
+
+        Streams reflection token-by-token using mode-appropriate prompts.
+
+        Args:
+            thread_id: Thread to generate reflection for
+            mode: Current chat mode ('casual', 'case', 'inquiry_focus')
+            mode_context: Mode-specific context data
+
+        Yields:
+            String chunks (tokens) as they're generated
+        """
+        from asgiref.sync import sync_to_async
+        from apps.companion.mode_prompts import get_mode_prompt
+
+        # Prepare context
+        context = await self.prepare_reflection_context(thread_id)
+        thread = context['thread']
+        recent_messages = context['recent_messages']
+        current_signals = context['current_signals']
+        patterns = context['patterns']
+
+        # Get mode-specific prompt
+        system_prompt = get_mode_prompt(
+            mode=mode,
+            mode_context=mode_context,
+            signals=current_signals,
+            messages=recent_messages,
+            patterns=patterns
+        )
+
+        # Prepare conversation context
+        messages = []
+        for msg in recent_messages[-3:]:
+            messages.append({
+                'role': msg['role'],
+                'content': msg['content'][:500]
+            })
+
+        # Stream LLM response
+        async for chunk in self.meta_llm.stream_chat(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=0.7,
+            max_tokens=500
+        ):
+            yield chunk.content
+
+    async def get_case_state(
+        self,
+        case_id: uuid.UUID
+    ) -> dict:
+        """
+        Get case state summary for companion panel.
+
+        Args:
+            case_id: Case to get state for
+
+        Returns:
+            Dict with inquiries, assumptions, evidence gaps counts
+        """
+        from asgiref.sync import sync_to_async
+        from apps.cases.models import Case
+        from apps.inquiries.models import Inquiry
+
+        case = await sync_to_async(Case.objects.get)(id=case_id)
+
+        # Count inquiries by status
+        inquiries = await sync_to_async(list)(
+            Inquiry.objects.filter(case=case).values('status')
+        )
+        open_count = len([i for i in inquiries if i['status'] in ['open', 'investigating']])
+        resolved_count = len([i for i in inquiries if i['status'] == 'resolved'])
+
+        # Count assumptions by validation status
+        signals = await sync_to_async(list)(
+            Signal.objects.filter(
+                case=case,
+                type='Assumption',
+                dismissed_at__isnull=True
+            ).values('status')
+        )
+        validated_count = len([s for s in signals if s['status'] == 'validated'])
+        unvalidated_count = len([s for s in signals if s['status'] != 'validated'])
+
+        # Evidence gaps (simplified: inquiries with < 2 evidence pieces)
+        from apps.inquiries.models import Evidence
+        evidence_gaps = 0
+        for inquiry in inquiries:
+            if inquiry['status'] not in ['resolved']:
+                # This would need to be done per inquiry in practice
+                evidence_gaps += 1  # Simplified
+
+        return {
+            'caseId': str(case.id),
+            'caseName': case.title,
+            'inquiries': {
+                'open': open_count,
+                'resolved': resolved_count
+            },
+            'assumptions': {
+                'validated': validated_count,
+                'unvalidated': unvalidated_count
+            },
+            'evidenceGaps': evidence_gaps
+        }

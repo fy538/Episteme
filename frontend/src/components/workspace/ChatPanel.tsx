@@ -22,7 +22,7 @@ interface ChatPanelProps {
   onCreateCase?: () => void;
   hideCollapse?: boolean;  // For standalone chat mode
   briefId?: string;  // Current brief for "Add to Brief" action
-  onIntegrationPreview?: (result: any) => void;
+  onIntegrationPreview?: (result: Record<string, unknown>) => void;
 }
 
 export function ChatPanel({ 
@@ -182,9 +182,9 @@ export function ChatPanel({
           },
           controller.signal
         );
-      } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          console.error('Stream error:', error);
+      } catch (error) {
+        if (error instanceof Error && error.name !== 'AbortError') {
+          // Stream error occurred
           setMessages(prev => prev.filter(m => m.id !== tempAssistantId));
         }
         setIsWaitingForResponse(false);

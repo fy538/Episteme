@@ -163,6 +163,9 @@ class CardBuilder:
         Returns:
             Dict ready for structured_content field
         """
+        # Extract question IDs from detected_context
+        question_ids = [q['id'] for q in detected_context.get('questions', [])]
+
         prompts = {
             'organize_questions': {
                 'heading': "Organize Your Questions?",
@@ -172,8 +175,8 @@ class CardBuilder:
                     CardAction(
                         id='create_inquiry',
                         label='Create Inquiry',
-                        action_type='create_inquiry_from_questions',
-                        payload=detected_context,
+                        action_type='organize_questions',
+                        payload={'question_ids': question_ids},
                         variant='primary'
                     ),
                     CardAction(

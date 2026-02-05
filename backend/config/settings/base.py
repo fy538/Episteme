@@ -238,15 +238,14 @@ AI_MODELS = {
     'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-4o-mini'),
 }
 
-# Embedding Backend (Phase 2)
+# Embedding Backend (Phase 2/3)
 EMBEDDING_BACKEND = env('EMBEDDING_BACKEND', default='postgresql')
-# Options: 'postgresql' (default), 'pgvector' (future), 'pinecone' (legacy)
+# Options:
+#   'postgresql' (default) - JSON column, linear scan, good for <100K chunks
+#   'pgvector' - Vector column with HNSW index, 28x faster, requires pgvector extension
+#   'pinecone' (legacy) - External vector DB, for backward compatibility
 
 # Pinecone (legacy - for backward compatibility during migration)
-PINECONE_API_KEY = env('PINECONE_API_KEY', default='')
-PINECONE_ENVIRONMENT = env('PINECONE_ENVIRONMENT', default='us-east-1')
-
-# Vector Database (Phase 2 - Document Search)
 PINECONE_API_KEY = env('PINECONE_API_KEY', default='')
 PINECONE_ENVIRONMENT = env('PINECONE_ENVIRONMENT', default='us-east-1')
 

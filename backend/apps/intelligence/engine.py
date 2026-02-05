@@ -34,6 +34,7 @@ class StreamEventType(Enum):
     RESPONSE_COMPLETE = "response_complete"
     REFLECTION_COMPLETE = "reflection_complete"
     SIGNALS_COMPLETE = "signals_complete"
+    ACTION_HINTS_COMPLETE = "action_hints_complete"
     ERROR = "error"
     DONE = "done"
 
@@ -156,6 +157,7 @@ class UnifiedAnalysisEngine:
         response_complete = False
         reflection_complete = False
         signals_complete = False
+        action_hints_complete = False
 
         try:
             # Stream from LLM
@@ -231,6 +233,35 @@ class UnifiedAnalysisEngine:
                                 )
                         # Note: parser._create_chunk() already accumulates signals content
 
+                    elif parsed.section == Section.ACTION_HINTS:
+                        if parsed.is_complete:
+                            action_hints_complete = True
+                            # Get full action hints buffer
+                            hints_buffer = parser.get_action_hints_buffer()
+                            # Parse and emit
+                            try:
+                                hints_data = json.loads(hints_buffer) if hints_buffer.strip() else []
+                                yield StreamEvent(
+                                    type=StreamEventType.ACTION_HINTS_COMPLETE,
+                                    data={
+                                        'action_hints': hints_data,
+                                        'raw': hints_buffer
+                                    },
+                                    section=Section.ACTION_HINTS
+                                )
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse action hints JSON: {e}")
+                                yield StreamEvent(
+                                    type=StreamEventType.ACTION_HINTS_COMPLETE,
+                                    data={
+                                        'action_hints': [],
+                                        'raw': hints_buffer,
+                                        'error': str(e)
+                                    },
+                                    section=Section.ACTION_HINTS
+                                )
+                        # Note: parser._create_chunk() already accumulates action hints content
+
             # Flush any remaining content
             remaining = parser.flush()
             for parsed in remaining:
@@ -281,6 +312,22 @@ class UnifiedAnalysisEngine:
                     section=Section.SIGNALS
                 )
 
+            if not action_hints_complete:
+                hints_buffer = parser.get_action_hints_buffer()
+                try:
+                    hints_data = json.loads(hints_buffer) if hints_buffer.strip() else []
+                except json.JSONDecodeError:
+                    hints_data = []
+
+                yield StreamEvent(
+                    type=StreamEventType.ACTION_HINTS_COMPLETE,
+                    data={
+                        'action_hints': hints_data,
+                        'raw': hints_buffer
+                    },
+                    section=Section.ACTION_HINTS
+                )
+
             # Final done event with all content
             yield StreamEvent(
                 type=StreamEventType.DONE,
@@ -288,6 +335,7 @@ class UnifiedAnalysisEngine:
                     'response': response_content,
                     'reflection': reflection_content,
                     'signals_raw': parser.get_signals_buffer(),
+                    'action_hints_raw': parser.get_action_hints_buffer(),
                     'extraction_enabled': should_extract,
                     'extraction_reason': extraction_rules.reason if extraction_rules else 'forced'
                 }

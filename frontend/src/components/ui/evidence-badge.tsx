@@ -12,11 +12,11 @@ export interface EvidenceBadgeProps extends React.HTMLAttributes<HTMLDivElement>
 }
 
 const evidenceStyles: Record<EvidenceType, string> = {
-  metric: 'bg-primary-100 text-primary-700 border-primary-200',
-  benchmark: 'bg-purple-100 text-purple-700 border-purple-200',
-  fact: 'bg-success-100 text-success-700 border-success-200',
-  claim: 'bg-warning-100 text-warning-700 border-warning-200',
-  quote: 'bg-pink-100 text-pink-700 border-pink-200',
+  metric: 'bg-primary-100 text-primary-700 border-primary-200 dark:bg-primary-900/50 dark:text-primary-300 dark:border-primary-700',
+  benchmark: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/50 dark:text-purple-300 dark:border-purple-700',
+  fact: 'bg-success-100 text-success-700 border-success-200 dark:bg-success-900/50 dark:text-success-300 dark:border-success-700',
+  claim: 'bg-warning-100 text-warning-700 border-warning-200 dark:bg-warning-900/50 dark:text-warning-300 dark:border-warning-700',
+  quote: 'bg-pink-100 text-pink-700 border-pink-200 dark:bg-pink-900/50 dark:text-pink-300 dark:border-pink-700',
 };
 
 const evidenceLabels: Record<EvidenceType, string> = {

@@ -1,7 +1,11 @@
 """
 Views for Inquiry endpoints
 """
+import logging
+
 from rest_framework import viewsets, status
+
+logger = logging.getLogger(__name__)
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -82,29 +86,44 @@ class InquiryViewSet(viewsets.ModelViewSet):
     def resolve(self, request, pk=None):
         """
         Resolve an inquiry with a conclusion.
-        
+
         POST /inquiries/{id}/resolve/
         Body: {
             "conclusion": "PostgreSQL handles current load but not projected peak",
-            "conclusion_confidence": 0.85
+            "conclusion_confidence": 0.85,
+            "thread_id": "uuid"  # Optional: for session receipt recording
         }
         """
         inquiry = self.get_object()
-        
+
         conclusion = request.data.get('conclusion')
         conclusion_confidence = request.data.get('conclusion_confidence')
-        
+        thread_id = request.data.get('thread_id')
+
         if not conclusion:
             return Response(
                 {'error': 'Conclusion is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         inquiry.conclusion = conclusion
         inquiry.conclusion_confidence = conclusion_confidence
         inquiry.status = InquiryStatus.RESOLVED
         inquiry.save()
-        
+
+        # Record session receipt if thread_id provided
+        if thread_id:
+            try:
+                from apps.companion.receipts import SessionReceiptService
+                SessionReceiptService.record_inquiry_resolved(
+                    thread_id=thread_id,
+                    inquiry=inquiry,
+                    conclusion=conclusion
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to record inquiry resolution receipt: {e}")
+
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
     
@@ -606,8 +625,9 @@ Return JSON:
             
             try:
                 return json.loads(full_response)
-            except:
+            except (json.JSONDecodeError, ValueError) as e:
                 # Fallback
+                logger.warning(f"Failed to parse brief update response: {e}")
                 fallback_content = f"{brief.content_markdown}\n\n## Updated based on: {inquiry.title}\n\n{inquiry.conclusion}\n\n[[inquiry:{inquiry.id}]]"
                 return {
                     "updated_content": fallback_content,
@@ -786,7 +806,7 @@ class EvidenceViewSet(viewsets.ModelViewSet):
     def cite_document(self, request):
         """
         Create evidence by citing a document or specific chunks.
-        
+
         POST /api/evidence/cite_document/
         {
             "inquiry_id": "uuid",
@@ -794,22 +814,24 @@ class EvidenceViewSet(viewsets.ModelViewSet):
             "chunk_ids": ["uuid1", "uuid2"],  // optional
             "evidence_text": "User's interpretation",
             "direction": "supports",
-            "strength": 0.8
+            "strength": 0.8,
+            "thread_id": "uuid"  // optional: for session receipt recording
         }
         """
         inquiry_id = request.data.get('inquiry_id')
         document_id = request.data.get('document_id')
         chunk_ids = request.data.get('chunk_ids', [])
-        
+        thread_id = request.data.get('thread_id')
+
         if not inquiry_id or not document_id:
             return Response(
                 {'error': 'inquiry_id and document_id are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Determine evidence type
         evidence_type = 'document_chunks' if chunk_ids else 'document_full'
-        
+
         # Create evidence
         serializer = EvidenceCreateSerializer(
             data={
@@ -824,10 +846,26 @@ class EvidenceViewSet(viewsets.ModelViewSet):
             },
             context={'request': request}
         )
-        
+
         serializer.is_valid(raise_exception=True)
         evidence = serializer.save()
-        
+
+        # Record session receipt if thread_id provided
+        if thread_id:
+            try:
+                from apps.companion.receipts import SessionReceiptService
+                inquiry = Inquiry.objects.get(id=inquiry_id)
+                direction = request.data.get('direction', 'neutral')
+                SessionReceiptService.record_evidence_added(
+                    thread_id=thread_id,
+                    inquiry=inquiry,
+                    evidence_count=1,
+                    direction=direction
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to record evidence addition receipt: {e}")
+
         return Response(
             EvidenceSerializer(evidence).data,
             status=status.HTTP_201_CREATED

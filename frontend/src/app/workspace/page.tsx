@@ -137,9 +137,7 @@ export default function WorkspaceDashboard() {
   }
 
   async function handleCreateInquiry() {
-    // TODO: Implement inquiry creation modal
-    console.log('Create inquiry for project:', selectedProjectId);
-    // For now, navigate to inquiries page
+    // Navigate to inquiries page - modal creation can be added later
     router.push('/workspace/inquiries');
   }
 
@@ -153,8 +151,7 @@ export default function WorkspaceDashboard() {
   }
 
   function handleUploadDocument() {
-    // TODO: Implement document upload modal
-    console.log('Upload document for project:', selectedProjectId);
+    // Document upload modal - feature coming soon
     alert('Document upload coming soon!');
   }
 

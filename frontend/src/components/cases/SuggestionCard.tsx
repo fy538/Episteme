@@ -94,7 +94,7 @@ export type Suggestion =
 
 interface SuggestionCardProps {
   suggestion: Suggestion;
-  onAccept: (suggestion: Suggestion, edited?: any) => Promise<void>;
+  onAccept: (suggestion: Suggestion, edited?: string | Record<string, unknown>) => Promise<void>;
   onReject: (suggestion: Suggestion) => void;
   isLoading?: boolean;
 }
@@ -252,7 +252,7 @@ export function SuggestionList({
   isLoading = false,
 }: {
   suggestions: Suggestion[];
-  onAccept: (suggestion: Suggestion, edited?: any) => Promise<void>;
+  onAccept: (suggestion: Suggestion, edited?: string | Record<string, unknown>) => Promise<void>;
   onReject: (suggestion: Suggestion) => void;
   onAcceptAll?: () => Promise<void>;
   onDismissAll?: () => void;

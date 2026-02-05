@@ -8,6 +8,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Signal } from '@/lib/types/signal';
 
+interface ActionHint {
+  type: string;
+  reason: string;
+  data: Record<string, unknown>;
+}
+
 interface UnifiedStreamState {
   /** Current response content (streaming) */
   response: string;
@@ -15,6 +21,8 @@ interface UnifiedStreamState {
   reflection: string;
   /** Extracted signals (after stream completes) */
   signals: Signal[];
+  /** AI-suggested action hints */
+  actionHints: ActionHint[];
   /** Whether currently streaming */
   isStreaming: boolean;
   /** Whether response section is complete */
@@ -40,11 +48,14 @@ interface UseUnifiedStreamOptions {
   onReflectionComplete?: (content: string) => void;
   /** Called when signals are extracted */
   onSignals?: (signals: Signal[]) => void;
+  /** Called when action hints are received */
+  onActionHints?: (hints: ActionHint[]) => void;
   /** Called when stream is done */
   onDone?: (result: {
     messageId: string | null;
     reflectionId: string | null;
     signalsCount: number;
+    actionHintsCount: number;
   }) => void;
   /** Called on error */
   onError?: (error: string) => void;
@@ -58,6 +69,7 @@ export function useUnifiedStream(
     response: '',
     reflection: '',
     signals: [],
+    actionHints: [],
     isStreaming: false,
     isResponseComplete: false,
     isReflectionComplete: false,
@@ -88,6 +100,7 @@ export function useUnifiedStream(
         response: '',
         reflection: '',
         signals: [],
+        actionHints: [],
         isStreaming: true,
         isResponseComplete: false,
         isReflectionComplete: false,
@@ -210,6 +223,15 @@ export function useUnifiedStream(
                   optionsRef.current.onSignals?.(signals);
                   break;
 
+                case 'action_hints':
+                  const actionHints = data.action_hints || [];
+                  setState((prev) => ({
+                    ...prev,
+                    actionHints,
+                  }));
+                  optionsRef.current.onActionHints?.(actionHints);
+                  break;
+
                 case 'done':
                   setState((prev) => ({
                     ...prev,
@@ -221,6 +243,7 @@ export function useUnifiedStream(
                     messageId: data.message_id,
                     reflectionId: data.reflection_id,
                     signalsCount: data.signals_count || 0,
+                    actionHintsCount: data.action_hints_count || 0,
                   });
                   break;
 
@@ -287,6 +310,7 @@ export function useUnifiedStream(
       response: '',
       reflection: '',
       signals: [],
+      actionHints: [],
       isStreaming: false,
       isResponseComplete: false,
       isReflectionComplete: false,

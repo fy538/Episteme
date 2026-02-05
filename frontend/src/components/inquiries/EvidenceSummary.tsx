@@ -13,7 +13,7 @@ import * as React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useEvidenceSummary } from '@/hooks/useInquiryDashboard';
+import { useEvidenceSummary, type EvidenceItem } from '@/hooks/useInquiryDashboard';
 
 interface EvidenceSummaryProps {
   inquiryId: string;
@@ -217,10 +217,10 @@ export function EvidenceSummary({ inquiryId, onResolve }: EvidenceSummaryProps) 
 
 function EvidenceList({ title, evidence, variant }: {
   title: string;
-  evidence: any[];
+  evidence: EvidenceItem[];
   variant: 'success' | 'error' | 'neutral';
 }) {
-  const headerClass = 
+  const headerClass =
     variant === 'success' ? 'text-success-900' :
     variant === 'error' ? 'text-error-900' :
     'text-neutral-900';
@@ -231,7 +231,7 @@ function EvidenceList({ title, evidence, variant }: {
         {title} ({evidence.length})
       </h4>
       <div className="space-y-2">
-        {evidence.map((item: any, idx: number) => (
+        {evidence.map((item, idx) => (
           <div
             key={idx}
             className="p-3 bg-white border border-neutral-200 rounded-md text-sm"

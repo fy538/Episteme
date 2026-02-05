@@ -3,7 +3,10 @@ Skill context injection for agents
 
 Builds skill context to inject into agent system prompts.
 """
+import logging
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 from .models import Skill
 from .parser import parse_skill_md
 
@@ -46,7 +49,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
             parsed = parse_skill_md(version.skill_md_content)
         except Exception as e:
             # Skip skills with parsing errors
-            print(f"Warning: Failed to parse skill '{skill.name}': {e}")
+            logger.warning(f"Failed to parse skill '{skill.name}': {e}")
             continue
         
         # Add markdown body to system prompt

@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useIsMobile } from '@/hooks/useResponsive';
 import { MobileSidebar } from './MobileSidebar';
 import { Button } from '@/components/ui/button';
+import { ThemeToggleIcon } from '@/components/ui/theme-toggle-icon';
 
 interface ResponsiveLayoutProps {
   leftSidebar?: React.ReactNode;
@@ -56,6 +57,9 @@ export function ResponsiveLayout({
           )}
 
           <div className="flex-1" />
+
+          {/* Theme toggle */}
+          <ThemeToggleIcon />
 
           {rightSidebar && (
             <button

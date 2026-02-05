@@ -8,6 +8,9 @@ Generates actionable suggestions for brief content based on:
 - Confidence improvements
 """
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import uuid
 from typing import List, Dict, Any, Optional
@@ -84,7 +87,7 @@ Your suggestions are actionable and specific. Each suggestion includes:
 
             return suggestions[:max_suggestions]
         except Exception as e:
-            print(f"Failed to parse suggestions: {e}")
+            logger.warning(f"Failed to parse suggestions: {e}")
             return []
 
     return asyncio.run(generate())

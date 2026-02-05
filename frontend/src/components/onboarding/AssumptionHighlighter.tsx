@@ -174,7 +174,6 @@ export function AssumptionHighlighter({
 }
 
 // Helper function (matches design system pattern)
-function cn(...inputs: any[]) {
-  const clsx = (...args: any[]) => args.filter(Boolean).join(' ');
-  return clsx(inputs);
+function cn(...inputs: (string | boolean | undefined | null)[]) {
+  return inputs.filter(Boolean).join(' ');
 }

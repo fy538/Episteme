@@ -1,21 +1,126 @@
 # Product Vision & UX Design - Episteme
 
+## The Problem: AI Chat Fails High-Stakes Decisions
+
+You face a difficult decision. You open ChatGPT. An hour later, you've had a pleasant conversation and feel... okay? Maybe?
+
+**This is the failure mode of AI chat today:**
+
+### The Agreeable Companion
+You talk through a problem for 30 minutes. The AI validates your thinking, offers encouraging responses, and you leave feeling confident. But you've just had your existing beliefs reflected back at you. The blind spots you walked in with? Still there.
+
+### The On-Demand Critic
+You realize the chat is too agreeable, so you ask it to critique your proposal. It generates an equally compelling counter-argument. Now you're more confused than when you started. How do you weigh these perspectives? Which concerns are real? The AI doesn't know either.
+
+### The Research Dump
+You ask for deep research. ChatGPT produces a 6-page PDF report. It looks impressive. You read it once, maybe skim it again, and then it sits in your downloads folder forever. Did it actually change your decision? Did it address what *you* specifically needed to resolve?
+
+### The RAG Black Box
+You upload your documents. The AI pulls chunks, generates responses. But you have no way to evaluate: What did it actually consider? What did it miss? Where is the reasoning strong vs. weak? When sources conflict, who's right?
+
+**The common thread: These tools give you *output* without giving you *clarity*.**
+
+You get answers without understanding. Research without integration. Critique without structure. And at the end, you still don't know: *Am I ready to decide? What am I missing? Can I trust this reasoning?*
+
+---
+
+## The Insight: Structure Enables Confidence
+
+The problem isn't that AI is unhelpful. It's that **chat is the wrong interface for rigorous thinking.**
+
+Chat is linear. Thinking is structured.
+Chat disappears. Decisions need persistence.
+Chat gives answers. You need to understand *what questions matter*.
+
+**The solution is structure.**
+
+Not structure imposed on you (fill out this form). Structure that *emerges* from your thinking and makes your reasoning *visible*.
+
+When you can see:
+- What questions need to be answered
+- What evidence supports each position
+- Where sources conflict or agree
+- What assumptions remain untested
+- What blind spots have been surfaced
+
+...then you can actually evaluate whether you're ready to decide.
+
+**Structure transforms vague confidence into grounded confidence.**
+
+---
+
+## The Aha Moment: From Uncertain to Prepared
+
+The core value Episteme delivers is a cognitive transformation:
+
+```
+BEFORE                              AFTER
+─────────────────────────────────   ─────────────────────────────────
+"I've been thinking about this"     "I can see exactly what I need to resolve"
+"ChatGPT agreed with me"            "I know where my reasoning is strong and weak"
+"I have a lot of research"          "My research is integrated and contributing"
+"I asked for critique"              "My blind spots have been surfaced and mapped"
+"I feel okay about this"            "I'm prepared to decide—or I know what would make me ready"
+```
+
+**This is the aha moment:** The user goes from scattered thinking to structured understanding. From vague confidence to grounded confidence. From "I talked about it" to "I'm prepared."
+
+The aha happens when:
+1. **Blind spots surface** — Something you didn't consider becomes visible
+2. **Structure appears** — Your messy thinking gets organized into clear questions
+3. **Tensions become transparent** — Conflicting sources/perspectives are laid out, not hidden
+4. **Readiness becomes measurable** — You can see what's addressed and what remains
+
+---
+
 ## What We're Building
 
-**Not another ChatGPT clone.**  
-**A workspace for rigorous, high-stakes decision-making.**
+**Episteme is a workspace for high-stakes decision-making.**
 
-Episteme helps you:
-- Come prepared for important decisions
-- Structure your thinking over time
-- Consider multiple perspectives systematically
-- Build evidence-based arguments
-- Track trade-offs and reconcile conflicts
-- Keep all research connected and useful (nothing goes to trash)
+Not another ChatGPT clone. Not a research tool that dumps PDFs. A system that helps you *think through* important decisions with structure, clarity, and grounded confidence.
+
+### Two Layers Working Together
+
+| Chat Companion | Case Structure |
+|----------------|----------------|
+| Micro-level | Macro-level |
+| Real-time reflection | Reasoning scaffolding |
+| "Have you considered...?" | "Here's what you need to address" |
+| Moment-to-moment thinking | Persistent, evolving structure |
+| Conversational | Visual, structural |
+
+**Chat** is where you think out loud, explore ideas, request research.
+**Case** is where structure crystallizes—where blind spots become visible, where evidence links to claims, where readiness becomes measurable.
+
+They work together. Chat surfaces things. Case makes them structural and persistent.
+
+### What Makes This Different
+
+| Other Tools | Episteme |
+|-------------|----------|
+| 6-page PDF dump | Living structure you work with |
+| RAG pulls chunks → generates response | Evidence explicitly linked to claims you can inspect |
+| AI agrees or critiques on demand | AI collaborates on readiness—"here's what's still uncertain" |
+| Output you read once | Artifact you iterate on, version, and ultimately trust |
+| Hidden reasoning | Transparent reasoning you can trace |
+
+### The Core Concept: Case Readiness
+
+A **Case** isn't just a container for notes. It's a reasoning structure with a measurable state:
+
+- **Inquiries**: The key questions that need to be answered
+- **Evidence**: What supports or challenges each position
+- **Blind Spots**: What you haven't considered (surfaced by AI)
+- **Tensions**: Where sources or perspectives conflict
+- **Readiness**: Are you prepared to decide? What's missing?
+
+The AI doesn't just answer questions—it collaborates with you to build this structure, surface what's missing, and help you understand when you're actually ready.
+
+---
 
 ## Core Philosophy
 
-### Different from ChatGPT
+### Episteme vs. ChatGPT
 
 | ChatGPT | Episteme |
 |---------|----------|
@@ -23,14 +128,16 @@ Episteme helps you:
 | One-off conversations | Persistent reasoning workspace |
 | Gives answers | Structures questions |
 | No accountability | Traceable reasoning |
-| Research disappears | Research contributes |
-| Single perspective | Multiple perspectives |
+| Research disappears | Research integrates and contributes |
+| Single perspective | Multiple perspectives, tensions surfaced |
+| Hidden reasoning | Visible, inspectable reasoning |
+| Vague confidence | Grounded confidence |
 
-### Like Cursor + Notion + Roam
+### Design Influences
 
-- **Like Cursor**: Background agents, inline suggestions, non-invasive
+- **Like Cursor**: Background agents, inline suggestions, non-invasive assistance
 - **Like Notion**: Document editing first-class, low friction
-- **Like Roam**: Bidirectional links, knowledge graph
+- **Like Roam**: Bidirectional links, knowledge graph, everything connected
 
 ## User Experience: Chat + Document Workspace
 
@@ -449,41 +556,49 @@ Read-only: Uploaded sources (reference)
 
 ## The Aha Moments
 
+The aha moment is the core value proposition. It's the cognitive transformation from uncertain to prepared.
+
+### The Primary Aha: "Now I can see what I need to address"
+
+This is the moment when scattered thinking becomes structured understanding:
+- You've been circling a decision for days
+- You open your Case and see: 3 inquiries, 2 resolved, 1 with unaddressed tensions
+- You realize *exactly* what needs to happen before you can decide
+- The path from "uncertain" to "ready" becomes clear
+
+### Supporting Aha Moments
+
+**"I didn't realize I was missing this"**
+- You thought your analysis was complete
+- The system surfaces a blind spot: "No evidence addresses scalability beyond 2 years"
+- You realize this is actually critical to your decision
+- What was invisible becomes actionable
+
+**"I can see where sources disagree"**
+- You uploaded 3 research papers and had 2 AI research sessions
+- Instead of a blended summary, you see: "Source A and Source B conflict on cost projections"
+- The tension is transparent, not hidden
+- You can actually evaluate who to trust
+
 **"My research is actually contributing"**
 - Generate research on PostgreSQL
-- System suggests citations
-- You approve
-- Research findings become evidence in your brief
-- Research shows "Cited 5 times, contributed 3 evidence items"
+- System links findings to specific inquiries as evidence
+- Research shows "Linked to 3 inquiries, supporting 2 claims, challenging 1"
+- Nothing goes to the downloads folder to die
 
-**"I can see all perspectives"**
-- Your position: PostgreSQL for performance
-- Tech Lead: BigQuery for cost
-- Finance: BigQuery for budget
-- Customer: Either, just fast
-- All structured, comparable, with evidence
+**"I know how ready I am"**
+- Readiness isn't a feeling—it's visible
+- Case shows: "2 of 3 inquiries resolved, 1 blind spot unaddressed, 2 tensions need resolution"
+- You can tell stakeholders exactly what's left
+- You can decide to proceed *or* know precisely what would increase confidence
 
-**"My assumptions are being challenged"**
-- You assume latency is critical
-- Critique agent surfaces: "No evidence for this assumption"
-- Creates objection automatically
-- You realize you need user testing
-
-**"I have a complete brief, not just chat history"**
-- Walk into meeting with:
-  - Case Brief (polished)
-  - All research (organized)
-  - Multiple perspectives (analyzed)
-  - Trade-offs (clear)
-  - Evidence (cited)
-  - Next steps (defined)
-
-**"Everything is connected"**
-- Research cites sources
-- Brief cites research
-- Evidence links to inquiries
-- Inquiries roll up to case
-- Nothing is lost
+**"I have structure, not just chat history"**
+- Walk into a meeting with:
+  - Clear inquiries (what questions we answered)
+  - Linked evidence (what supports each position)
+  - Surfaced tensions (where we see disagreement)
+  - Addressed blind spots (what we almost missed)
+  - Traceable reasoning (why we believe what we believe)
 
 ## UX Principles
 
@@ -671,32 +786,43 @@ Not rigid forms:
 
 ## The Complete Vision
 
-**You open Episteme when:**
-- Facing high-stakes decision
-- Need to come prepared
-- Multiple perspectives to consider
-- Research to consolidate
-- Arguments to build
+### You open Episteme when:
+- You face a decision that matters
+- You need to think it through, not just get an answer
+- You want to understand what you're missing
+- You need to integrate research from multiple sources
+- You want confidence you can trace back to reasons
 
-**You work by:**
-- Chatting to think
-- Generating research
-- Editing briefs
-- Reviewing suggestions
-- Addressing critiques
+### You work by:
+- **Chatting** to think out loud (micro-level, real-time)
+- **Building Cases** to structure your reasoning (macro-level, persistent)
+- **Linking evidence** to claims so reasoning is traceable
+- **Surfacing blind spots** so you see what you missed
+- **Addressing tensions** so conflicts are resolved, not hidden
 
-**You walk away with:**
-- Complete brief
-- All research organized
-- Multiple perspectives considered
-- Evidence cited
-- Trade-offs clear
-- Next steps defined
-- Confidence in decision
+### You walk away with:
+- **Clarity**: You know exactly what questions matter and what's been addressed
+- **Structure**: Your thinking is organized, not scattered across chat logs
+- **Grounded confidence**: You can trace your conclusion back to evidence
+- **Readiness**: You know you're prepared—or you know precisely what's left
 
-**Not ChatGPT thinking for you.**  
-**Your thinking, structured, challenged, and validated.**
+### The transformation:
+
+```
+BEFORE EPISTEME                     WITH EPISTEME
+─────────────────────────────────   ─────────────────────────────────
+Talked to ChatGPT for an hour       Built a Case I can actually use
+Feel okay, I guess?                 Know exactly where I stand
+Have research somewhere             Research is linked and contributing
+Asked for critique, got confused    Tensions are visible and addressable
+Don't know what I'm missing         Blind spots have been surfaced
+Vague confidence                    Grounded confidence
+```
+
+**Not ChatGPT thinking for you.**
+**Structure that helps you think clearly.**
+**Clarity that lets you decide confidently.**
 
 ---
 
-This is the vision. Ready to build.
+This is the vision.

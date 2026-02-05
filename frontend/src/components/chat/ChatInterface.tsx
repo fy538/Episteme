@@ -11,20 +11,27 @@
 
 'use client';
 
-import { useState, useEffect, startTransition, useCallback } from 'react';
+import { useState, useEffect, startTransition, useCallback, useRef } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { chatAPI } from '@/lib/api/chat';
-import type { Message } from '@/lib/types/chat';
+import type { Message, InlineActionCard, ActionHint } from '@/lib/types/chat';
 import type { CardAction } from '@/lib/types/cards';
 import type { Signal } from '@/lib/types/signal';
+import type { InlineCardActions } from './cards/InlineActionCardRenderer';
 import { useCardActions } from '@/hooks/useCardActions';
+
+import { TIMEOUT } from '@/lib/constants';
 
 // Feature flag for unified streaming - can be toggled for rollout
 const USE_UNIFIED_STREAM = true;
+
+// Timeout constants for streaming (from centralized constants)
+const TTFT_TIMEOUT_MS = TIMEOUT.TTFT;
+const TOTAL_STREAM_TIMEOUT_MS = TIMEOUT.STREAM_TOTAL;
 
 export interface UnifiedStreamCallbacks {
   /** Called when reflection content updates */
@@ -33,8 +40,10 @@ export interface UnifiedStreamCallbacks {
   onReflectionComplete?: (content: string) => void;
   /** Called when signals are extracted */
   onSignals?: (signals: Signal[]) => void;
+  /** Called when action hints are received from AI */
+  onActionHints?: (hints: ActionHint[]) => void;
   /** Called when assistant message is complete (for title generation tracking) */
-  onMessageComplete?: () => void;
+  onMessageComplete?: (messageId?: string) => void;
 }
 
 export function ChatInterface({
@@ -47,6 +56,8 @@ export function ChatInterface({
   projectId,
   onProjectChange,
   unifiedStreamCallbacks,
+  inlineCards = [],
+  inlineCardActions = {},
 }: {
   threadId: string;
   onToggleLeft?: () => void;
@@ -58,6 +69,10 @@ export function ChatInterface({
   onProjectChange?: (projectId: string | null) => void;
   /** Callbacks for unified stream events (reflection, signals) */
   unifiedStreamCallbacks?: UnifiedStreamCallbacks;
+  /** Inline action cards to display after messages */
+  inlineCards?: InlineActionCard[];
+  /** Actions for inline cards */
+  inlineCardActions?: InlineCardActions;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -67,6 +82,24 @@ export function ChatInterface({
   const [error, setError] = useState<string | null>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [ttft, setTtft] = useState<number | null>(null);
+  const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
+
+  // Refs for timeout tracking (need to persist across renders without re-triggering)
+  const ttftTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const totalTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const firstTokenReceivedRef = useRef(false);
+
+  // Helper to clear all stream-related timeouts
+  const clearStreamTimeouts = useCallback(() => {
+    if (ttftTimeoutRef.current) {
+      clearTimeout(ttftTimeoutRef.current);
+      ttftTimeoutRef.current = null;
+    }
+    if (totalTimeoutRef.current) {
+      clearTimeout(totalTimeoutRef.current);
+      totalTimeoutRef.current = null;
+    }
+  }, []);
 
   // Card actions hook
   const { executeAction, isExecuting } = useCardActions();
@@ -166,10 +199,33 @@ export function ChatInterface({
     setPendingSince(requestStart);
     setError(null);
     setTtft(null);
+    setLastFailedMessage(null);
+    firstTokenReceivedRef.current = false;
+    clearStreamTimeouts();
 
     // Create AbortController for cancellation
     const controller = new AbortController();
     setAbortController(controller);
+
+    // Set up TTFT timeout - abort if no first token within 30s
+    ttftTimeoutRef.current = setTimeout(() => {
+      if (!firstTokenReceivedRef.current && !controller.signal.aborted) {
+        console.warn(`[Chat] TTFT timeout: no response after ${TTFT_TIMEOUT_MS}ms`);
+        setLastFailedMessage(content);
+        setError(`Response timed out. The server didn't respond within ${TTFT_TIMEOUT_MS / 1000} seconds.`);
+        controller.abort();
+      }
+    }, TTFT_TIMEOUT_MS);
+
+    // Set up total stream timeout - abort if stream takes too long
+    totalTimeoutRef.current = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        console.warn(`[Chat] Total stream timeout: stream exceeded ${TOTAL_STREAM_TIMEOUT_MS}ms`);
+        setLastFailedMessage(content);
+        setError(`Stream timed out after ${TOTAL_STREAM_TIMEOUT_MS / 1000} seconds.`);
+        controller.abort();
+      }
+    }, TOTAL_STREAM_TIMEOUT_MS);
 
     try {
       const now = new Date().toISOString();
@@ -199,20 +255,24 @@ export function ChatInterface({
       setMessages(prev => [...prev, optimisticUserMessage, optimisticAssistantMessage]);
       setIsStreaming(true);
 
-      let firstTokenReceived = false;
-
       try {
         await chatAPI.sendUnifiedStream(
           threadId,
           content,
           {
             onResponseChunk: (delta) => {
-              // Track TTFT (time to first token)
-              if (!firstTokenReceived) {
+              // Track TTFT (time to first token) and clear TTFT timeout
+              if (!firstTokenReceivedRef.current) {
+                firstTokenReceivedRef.current = true;
                 const ttftMs = Date.now() - requestStart;
                 setTtft(ttftMs);
-                console.log(`[Chat] Unified TTFT: ${ttftMs}ms`);
-                firstTokenReceived = true;
+                // TTFT tracked
+
+                // Clear TTFT timeout - we got our first token
+                if (ttftTimeoutRef.current) {
+                  clearTimeout(ttftTimeoutRef.current);
+                  ttftTimeoutRef.current = null;
+                }
               }
 
               // Use startTransition to batch rapid token updates (non-urgent)
@@ -234,10 +294,15 @@ export function ChatInterface({
               unifiedStreamCallbacks?.onReflectionComplete?.(content);
             },
             onSignals: (signals) => {
-              console.log(`[Chat] Extracted ${signals.length} signals`);
+              // Signals extracted
               unifiedStreamCallbacks?.onSignals?.(signals as Signal[]);
             },
+            onActionHints: (hints) => {
+              // Action hints received
+              unifiedStreamCallbacks?.onActionHints?.(hints);
+            },
             onDone: (result) => {
+              clearStreamTimeouts();
               setIsWaitingForResponse(false);
               setIsStreaming(false);
               setPendingSince(null);
@@ -254,13 +319,15 @@ export function ChatInterface({
                 );
               }
 
-              // Notify parent that message is complete (for title generation)
-              unifiedStreamCallbacks?.onMessageComplete?.();
+              // Notify parent that message is complete (for title generation and inline cards)
+              unifiedStreamCallbacks?.onMessageComplete?.(result.messageId);
 
-              console.log(`[Chat] Unified stream complete: message=${result.messageId}, signals=${result.signalsCount}`);
+              // Stream complete
             },
             onError: (errorMsg) => {
               console.error('[Chat] Unified stream error:', errorMsg);
+              clearStreamTimeouts();
+              setLastFailedMessage(content);
               setError(errorMsg);
               setIsStreaming(false);
               setIsWaitingForResponse(false);
@@ -269,9 +336,13 @@ export function ChatInterface({
           controller.signal
         );
       } catch (streamError) {
-        // Check if aborted by user
+        clearStreamTimeouts();
+
+        // Check if aborted - could be user-initiated or timeout
         if (streamError instanceof Error && streamError.name === 'AbortError') {
-          console.log('[Chat] Unified stream aborted by user');
+          // Timeout aborts are handled in the timeout callbacks which set error state
+          // User-initiated aborts (via stop button) don't need error handling here
+          // Stream aborted
           setIsStreaming(false);
           setIsWaitingForResponse(false);
           setPendingSince(null);
@@ -280,11 +351,14 @@ export function ChatInterface({
 
         // Fallback to legacy streaming if unified isn't available
         console.warn('[Chat] Unified streaming failed, falling back to legacy.', streamError);
+        setLastFailedMessage(content);
         throw streamError;
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      setError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      clearStreamTimeouts();
+      setLastFailedMessage(content);
+      setError(err instanceof Error ? err.message : 'Failed to send message. Please try again.');
       setIsWaitingForResponse(false);
       setIsStreaming(false);
       setPendingSince(null);
@@ -292,7 +366,7 @@ export function ChatInterface({
       setIsLoading(false);
       setAbortController(null);
     }
-  }, [threadId, unifiedStreamCallbacks]);
+  }, [threadId, unifiedStreamCallbacks, clearStreamTimeouts]);
 
   /**
    * Send message using legacy streaming (separate LLM call)
@@ -348,7 +422,7 @@ export function ChatInterface({
             if (!firstTokenReceived) {
               const ttftMs = Date.now() - requestStart;
               setTtft(ttftMs);
-              console.log(`[Chat] TTFT: ${ttftMs}ms`);
+              // TTFT tracked
               firstTokenReceived = true;
             }
 
@@ -390,7 +464,7 @@ export function ChatInterface({
       } catch (streamError) {
         // Check if aborted by user
         if (streamError instanceof Error && streamError.name === 'AbortError') {
-          console.log('[Chat] Stream aborted by user');
+          // Stream aborted by user
           setIsStreaming(false);
           setIsWaitingForResponse(false);
           setPendingSince(null);
@@ -428,7 +502,8 @@ export function ChatInterface({
 
   function handleStopGeneration() {
     if (abortController) {
-      console.log('[Chat] Aborting stream');
+      // Aborting stream
+      clearStreamTimeouts();
       abortController.abort();
       setAbortController(null);
       setIsStreaming(false);
@@ -442,8 +517,24 @@ export function ChatInterface({
     }
   }
 
+  function handleRetry() {
+    if (lastFailedMessage) {
+      const messageToRetry = lastFailedMessage;
+      setError(null);
+      setLastFailedMessage(null);
+
+      // Remove any failed optimistic messages before retrying
+      setMessages(prev =>
+        prev.filter(msg => !msg.id.startsWith('local-'))
+      );
+
+      // Retry the message
+      handleSendMessage(messageToRetry);
+    }
+  }
+
   function handleCardAction(action: CardAction, messageId: string) {
-    console.log('[Chat] Card action:', action.action_type, messageId);
+    // Card action executed
 
     executeAction({
       action,
@@ -485,12 +576,25 @@ export function ChatInterface({
       </div>
       {error && (
         <div className="bg-error-50 border-l-4 border-error-500 p-4 mx-4 mt-4">
-          <div className="flex">
+          <div className="flex items-start">
             <div className="flex-1">
               <p className="text-sm text-error-700">{error}</p>
+              {lastFailedMessage && (
+                <button
+                  onClick={handleRetry}
+                  className="mt-2 text-sm font-medium text-error-700 hover:text-error-900 underline"
+                >
+                  Retry message
+                </button>
+              )}
             </div>
             <button
-              onClick={() => setError(null)}
+              onClick={() => {
+                setError(null);
+                setLastFailedMessage(null);
+                // Also clean up any orphaned local messages
+                setMessages(prev => prev.filter(msg => !msg.id.startsWith('local-')));
+              }}
               className="ml-4 text-error-700 hover:text-error-900"
             >
               ✕
@@ -504,6 +608,8 @@ export function ChatInterface({
         isStreaming={isStreaming}
         ttft={ttft}
         onCardAction={handleCardAction}
+        inlineCards={inlineCards}
+        inlineCardActions={inlineCardActions}
       />
       <MessageInput
         onSend={handleSendMessage}

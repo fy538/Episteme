@@ -17,6 +17,7 @@ class Section(Enum):
     RESPONSE = "response"
     REFLECTION = "reflection"
     SIGNALS = "signals"
+    ACTION_HINTS = "action_hints"
 
 
 @dataclass
@@ -46,7 +47,8 @@ class SectionedStreamParser:
     MARKERS = [
         '<response>', '</response>',
         '<reflection>', '</reflection>',
-        '<signals>', '</signals>'
+        '<signals>', '</signals>',
+        '<action_hints>', '</action_hints>'
     ]
 
     # Maximum marker length for buffer safety
@@ -56,6 +58,7 @@ class SectionedStreamParser:
         self.current_section = Section.NONE
         self.buffer = ""
         self.signals_buffer = ""
+        self.action_hints_buffer = ""
 
     def parse(self, chunk: str) -> List[ParsedChunk]:
         """
@@ -111,9 +114,11 @@ class SectionedStreamParser:
                 section_name = marker[1:-1]
                 self.current_section = self._get_section(section_name)
 
-                # Reset signals buffer on new signals section
+                # Reset buffers on new JSON sections
                 if self.current_section == Section.SIGNALS:
                     self.signals_buffer = ""
+                elif self.current_section == Section.ACTION_HINTS:
+                    self.action_hints_buffer = ""
 
             # Remove processed portion from buffer
             self.buffer = self.buffer[end:]
@@ -186,13 +191,17 @@ class SectionedStreamParser:
             return Section.REFLECTION
         elif name == 'signals':
             return Section.SIGNALS
+        elif name == 'action_hints':
+            return Section.ACTION_HINTS
         return Section.NONE
 
     def _create_chunk(self, content: str) -> ParsedChunk:
         """Create a ParsedChunk for current section"""
-        # For signals, accumulate in buffer
+        # For JSON sections, accumulate in buffer
         if self.current_section == Section.SIGNALS:
             self.signals_buffer += content
+        elif self.current_section == Section.ACTION_HINTS:
+            self.action_hints_buffer += content
 
         return ParsedChunk(
             section=self.current_section,
@@ -203,6 +212,10 @@ class SectionedStreamParser:
     def get_signals_buffer(self) -> str:
         """Get accumulated signals content for JSON parsing"""
         return self.signals_buffer
+
+    def get_action_hints_buffer(self) -> str:
+        """Get accumulated action hints content for JSON parsing"""
+        return self.action_hints_buffer
 
     def flush(self) -> List[ParsedChunk]:
         """

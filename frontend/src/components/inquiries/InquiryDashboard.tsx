@@ -13,7 +13,7 @@ import * as React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useInquiryDashboard, useStartInvestigation } from '@/hooks/useInquiryDashboard';
+import { useInquiryDashboard, useStartInvestigation, type DashboardInquiry } from '@/hooks/useInquiryDashboard';
 
 interface InquiryDashboardProps {
   caseId: string;
@@ -150,7 +150,6 @@ export function InquiryDashboard({ caseId, onStartInquiry, onViewInquiry }: Inqu
             statusColor="warning"
             onStartInquiry={onStartInquiry}
             onViewInquiry={onViewInquiry}
-            startInvestigation={startInvestigation}
           />
         )}
 
@@ -202,14 +201,12 @@ function InquirySection({
   statusColor,
   onStartInquiry,
   onViewInquiry,
-  startInvestigation,
 }: {
   title: string;
-  inquiries: any[];
+  inquiries: DashboardInquiry[];
   statusColor: string;
   onStartInquiry?: (id: string) => void;
   onViewInquiry?: (id: string) => void;
-  startInvestigation?: any;
 }) {
   return (
     <div>
