@@ -91,11 +91,10 @@ class DocumentChunkSerializer(serializers.ModelSerializer):
             'chunk_text',
             'token_count',
             'span',
-            'vector_id',
             'summary',
             'created_at',
         ]
-        read_only_fields = ['id', 'vector_id', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 
 class CreateDocumentSerializer(serializers.Serializer):

@@ -121,8 +121,7 @@ class InquiryViewSet(viewsets.ModelViewSet):
                     conclusion=conclusion
                 )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to record inquiry resolution receipt: {e}")
+                logger.warning(f"Failed to record inquiry resolution receipt: {e}")
 
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
@@ -863,8 +862,7 @@ class EvidenceViewSet(viewsets.ModelViewSet):
                     direction=direction
                 )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to record evidence addition receipt: {e}")
+                logger.warning(f"Failed to record evidence addition receipt: {e}")
 
         return Response(
             EvidenceSerializer(evidence).data,

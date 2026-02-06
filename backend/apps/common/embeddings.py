@@ -6,12 +6,20 @@ Model: all-MiniLM-L6-v2 (384 dimensions, ~100MB)
 """
 
 import logging
-from typing import List, Optional
+import time
+from typing import List, Optional, Tuple
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
 # Lazy-loaded embedding service
 _embedding_service = None
+
+# Query embedding cache: {text: (embedding, timestamp)}
+# LRU with TTL for query embeddings (saves ~50ms per repeated query)
+_query_cache: OrderedDict[str, Tuple[List[float], float]] = OrderedDict()
+_CACHE_MAX_SIZE = 100  # Max cached queries
+_CACHE_TTL_SECONDS = 300  # 5 minutes TTL
 
 
 def _get_service():
@@ -23,12 +31,13 @@ def _get_service():
     return _embedding_service
 
 
-def generate_embedding(text: str) -> Optional[List[float]]:
+def generate_embedding(text: str, use_cache: bool = True) -> Optional[List[float]]:
     """
     Generate embedding for text using sentence-transformers.
 
     Args:
         text: Text to embed (should be non-empty)
+        use_cache: Whether to use query cache (default True for search queries)
 
     Returns:
         List of floats (384-dim vector) or None if text is too short
@@ -37,13 +46,50 @@ def generate_embedding(text: str) -> Optional[List[float]]:
         logger.debug("Text too short for embedding, skipping")
         return None
 
+    # Check cache for repeated queries (saves ~50ms per hit)
+    if use_cache:
+        cached = _get_cached_embedding(text)
+        if cached is not None:
+            return cached
+
     try:
         service = _get_service()
         embedding = service.encode(text)
-        return embedding.tolist()
+        result = embedding.tolist()
+
+        # Cache the result for future queries
+        if use_cache:
+            _cache_embedding(text, result)
+
+        return result
     except Exception as e:
         logger.warning(f"Embedding generation failed: {e}")
         return None
+
+
+def _get_cached_embedding(text: str) -> Optional[List[float]]:
+    """Get embedding from cache if valid (not expired)."""
+    if text not in _query_cache:
+        return None
+
+    embedding, timestamp = _query_cache[text]
+    if time.time() - timestamp > _CACHE_TTL_SECONDS:
+        # Expired, remove and return None
+        del _query_cache[text]
+        return None
+
+    # Move to end (LRU)
+    _query_cache.move_to_end(text)
+    return embedding
+
+
+def _cache_embedding(text: str, embedding: List[float]) -> None:
+    """Cache an embedding with current timestamp."""
+    # Evict oldest if at capacity
+    while len(_query_cache) >= _CACHE_MAX_SIZE:
+        _query_cache.popitem(last=False)
+
+    _query_cache[text] = (embedding, time.time())
 
 
 def generate_embeddings_batch(texts: List[str]) -> List[Optional[List[float]]]:

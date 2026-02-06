@@ -1,4 +1,8 @@
+import logging
+
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class SignalsConfig(AppConfig):
@@ -21,9 +25,6 @@ class SignalsConfig(AppConfig):
                         Signal.objects.filter(pk=instance.pk).update(embedding=embedding)
                 except Exception as e:
                     # Don't fail the save if embedding fails
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        f"Failed to generate embedding for signal {instance.pk}: {e}"
-                    )
+                    logger.warning(f"Failed to generate embedding for signal {instance.pk}: {e}")
 
         post_save.connect(generate_embedding_on_save, sender=Signal)

@@ -1,7 +1,8 @@
 """
 Artifact generation workflows
 
-Celery tasks for generating artifacts using Google ADK agents.
+Celery tasks for generating artifacts.
+Includes ADK-based agents (legacy) and ResearchLoop-based agents (v2).
 """
 from celery import shared_task
 from django.utils import timezone
@@ -357,13 +358,204 @@ async def generate_brief_artifact(case_id: str, user_id: int):
             await artifact.input_evidence.aset(
                 Evidence.objects.filter(document__case=case)[:10]
             )
-        
+
         # Track which skills were used
         if active_skills:
             await artifact.skills_used.aset(active_skills)
-    
+
     return {
         'status': 'completed',
         'artifact_id': str(artifact.id),
         'skills_used': len(active_skills),
+    }
+
+
+# ─── Research Loop v2 ────────────────────────────────────────────────────────
+
+@shared_task
+async def generate_research_artifact_v2(
+    case_id: str,
+    topic: str,
+    user_id: int,
+    correlation_id: str = None,
+    placeholder_message_id: str = None,
+):
+    """
+    Generate research artifact using the multi-step ResearchLoop.
+
+    Uses configurable research_config from skills instead of a single-shot
+    ADK agent. Runs Plan → Search → Extract → Evaluate → Synthesize loop.
+
+    Args:
+        case_id: Case to generate research for
+        topic: Research topic / question
+        user_id: User requesting generation
+        correlation_id: Optional correlation ID for progress tracking
+        placeholder_message_id: Optional message ID to update with progress
+
+    Returns:
+        Dict with artifact_id and generation metadata
+    """
+    from apps.cases.models import Case
+    from apps.artifacts.models import Artifact, ArtifactVersion, ArtifactType
+    from apps.projects.models import Evidence
+    from apps.skills.injection import (
+        get_active_skills_for_case,
+        build_skill_context,
+    )
+    from apps.agents.orchestrator import AgentOrchestrator
+    from apps.agents.research_config import ResearchConfig
+    from apps.agents.research_loop import ResearchLoop, ResearchContext
+    from apps.agents.research_tools import resolve_tools_for_config
+    from apps.common.llm_providers.factory import get_llm_provider
+    from django.contrib.auth.models import User
+    import uuid as uuid_module
+
+    # Create correlation ID if not provided
+    if not correlation_id:
+        correlation_id = str(uuid_module.uuid4())
+
+    case = await Case.objects.aget(id=case_id)
+    user = await User.objects.aget(id=user_id)
+
+    # ── Gather context ───────────────────────────────────────────────────
+    if placeholder_message_id:
+        await AgentOrchestrator.update_progress(
+            correlation_id=correlation_id,
+            step='gathering_context',
+            message='Gathering signals and evidence...',
+            placeholder_message_id=placeholder_message_id,
+        )
+
+    signals = [
+        {'type': s.type, 'text': s.text, 'status': s.status}
+        async for s in case.signals.filter(status__in=['suggested', 'confirmed'])[:10]
+    ]
+
+    evidence = [
+        {'text': e.text, 'type': e.type}
+        async for e in Evidence.objects.filter(
+            document__case=case, extraction_confidence__gte=0.7
+        )[:5]
+    ]
+
+    # ── Load skills and config ───────────────────────────────────────────
+    active_skills = await get_active_skills_for_case(case)
+
+    if placeholder_message_id and active_skills:
+        await AgentOrchestrator.update_progress(
+            correlation_id=correlation_id,
+            step='loading_skills',
+            message=f'Loading {len(active_skills)} skill(s)...',
+            placeholder_message_id=placeholder_message_id,
+        )
+
+    skill_context = build_skill_context(active_skills, agent_type='research')
+
+    # Get research config (from skills or default)
+    research_config = skill_context.get('research_config') or ResearchConfig.default()
+
+    # ── Set up provider and tools ────────────────────────────────────────
+    provider = get_llm_provider('chat')
+    tools = resolve_tools_for_config(research_config.sources, case_id=str(case.id))
+
+    # ── Build progress callback ──────────────────────────────────────────
+    async def progress_callback(step: str, message: str):
+        if placeholder_message_id:
+            await AgentOrchestrator.update_progress(
+                correlation_id=correlation_id,
+                step=step,
+                message=message,
+                placeholder_message_id=placeholder_message_id,
+            )
+
+    # ── Run research loop ────────────────────────────────────────────────
+    if placeholder_message_id:
+        await AgentOrchestrator.update_progress(
+            correlation_id=correlation_id,
+            step='researching',
+            message='Starting multi-step research loop...',
+            placeholder_message_id=placeholder_message_id,
+        )
+
+    loop = ResearchLoop(
+        config=research_config,
+        prompt_extension=skill_context['system_prompt_extension'],
+        provider=provider,
+        tools=tools,
+        progress_callback=progress_callback,
+        trace_id=correlation_id,
+    )
+
+    result = await loop.run(
+        question=topic,
+        context=ResearchContext(
+            case_title=case.title,
+            case_position=case.position,
+            signals=signals,
+            evidence=evidence,
+        ),
+    )
+
+    # ── Create artifact ──────────────────────────────────────────────────
+    if placeholder_message_id:
+        await AgentOrchestrator.update_progress(
+            correlation_id=correlation_id,
+            step='creating_artifact',
+            message='Finalizing research artifact...',
+            placeholder_message_id=placeholder_message_id,
+        )
+
+    with transaction.atomic():
+        artifact = await Artifact.objects.acreate(
+            title=f"Research: {topic}",
+            type=ArtifactType.RESEARCH,
+            case=case,
+            user=user,
+            generated_by='research_loop_v2',
+            generation_prompt=topic,
+        )
+
+        version = await ArtifactVersion.objects.acreate(
+            artifact=artifact,
+            version=1,
+            blocks=result.blocks,
+            parent_version=None,
+            diff={},
+            created_by=user,
+            generation_time_ms=result.metadata.get('generation_time_ms'),
+        )
+
+        artifact.current_version = version
+        await artifact.asave()
+
+        # Link input signals and evidence
+        await artifact.input_signals.aset(case.signals.filter(status='confirmed'))
+
+        if evidence:
+            evidence_objects = Evidence.objects.filter(document__case=case)[:5]
+            await artifact.input_evidence.aset(evidence_objects)
+
+        # Track which skills were used
+        if active_skills:
+            await artifact.skills_used.aset(active_skills)
+
+    # ── Complete agent ───────────────────────────────────────────────────
+    if placeholder_message_id:
+        await AgentOrchestrator.complete_agent(
+            correlation_id=correlation_id,
+            artifact_id=str(artifact.id),
+            placeholder_message_id=placeholder_message_id,
+            blocks=result.blocks,
+            generation_time_ms=result.metadata.get('generation_time_ms', 0),
+        )
+
+    return {
+        'status': 'completed',
+        'artifact_id': str(artifact.id),
+        'blocks': len(result.blocks),
+        'generation_time_ms': result.metadata.get('generation_time_ms'),
+        'skills_used': len(active_skills),
+        'sources_found': result.metadata.get('total_sources', 0),
+        'iterations': result.metadata.get('iterations', 0),
     }

@@ -350,12 +350,6 @@ class PineconeBackend(EmbeddingBackend):
             embedding=embedding,
             metadata=metadata
         )
-        
-        # Also update vector_id in DocumentChunk
-        from apps.projects.models import DocumentChunk
-        DocumentChunk.objects.filter(id=chunk_id).update(
-            vector_id=str(chunk_id)
-        )
     
     def search_similar(
         self,

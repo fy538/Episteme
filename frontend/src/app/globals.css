@@ -171,6 +171,7 @@
   .animate-fade-in,
   .animate-slide-down {
     will-change: transform, opacity;
+    animation-fill-mode: both;
   }
 
   /* Prevent layout shift when dialogs open */

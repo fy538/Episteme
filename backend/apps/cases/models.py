@@ -82,13 +82,8 @@ class Case(UUIDModel, TimestampedModel):
 
     # Core content
     position = models.TextField(help_text="Current position or thesis")
-    confidence = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Confidence level 0.0-1.0 (DEPRECATED - use user_confidence)"
-    )
 
-    # User-stated epistemic confidence (replaces computed confidence)
+    # User-stated epistemic confidence
     user_confidence = models.IntegerField(
         null=True,
         blank=True,
@@ -176,7 +171,14 @@ class Case(UUIDModel, TimestampedModel):
         related_name='originating_case',  # Changed to avoid clash
         help_text="Skill created from this case"
     )
-    
+
+    # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
+    embedding = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Pre-computed embedding vector for semantic search"
+    )
+
     class Meta:
         ordering = ['-updated_at']
         indexes = [

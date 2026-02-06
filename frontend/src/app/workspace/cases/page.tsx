@@ -165,9 +165,9 @@ export default function CasesListPage() {
                       >
                         {c.status}
                       </Badge>
-                      {c.confidence != null && (
+                      {c.user_confidence != null && (
                         <span className="text-xs text-primary-500 dark:text-primary-400">
-                          {Math.round(c.confidence * 100)}% confidence
+                          {c.user_confidence}% confidence
                         </span>
                       )}
                     </div>

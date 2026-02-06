@@ -4,7 +4,7 @@ Agent orchestration service
 Manages agent execution with progress tracking and inline chat integration.
 """
 import uuid as uuid_module
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 
@@ -99,16 +99,16 @@ class AgentOrchestrator:
         
         # Step 3: Execute agent workflow (async Celery task)
         from apps.artifacts.workflows import (
-            generate_research_artifact,
+            generate_research_artifact_v2,
             generate_critique_artifact,
             generate_brief_artifact
         )
-        
+
         task = None
-        
+
         if agent_type == 'research':
             topic = params.get('topic', case.position)
-            task = generate_research_artifact.delay(
+            task = generate_research_artifact_v2.delay(
                 case_id=str(case.id),
                 topic=topic,
                 user_id=user.id,

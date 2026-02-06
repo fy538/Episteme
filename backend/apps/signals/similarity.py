@@ -17,24 +17,65 @@ from apps.common.embeddings import generate_embedding
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     """
     Compute cosine similarity between two vectors
-    
+
     Args:
         vec1: First vector
         vec2: Second vector
-    
+
     Returns:
         Similarity score (0.0 to 1.0)
     """
     a = np.array(vec1)
     b = np.array(vec2)
-    
+
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return float(np.dot(a, b) / (norm_a * norm_b))
+
+
+def batch_cosine_similarity(
+    query: List[float],
+    embeddings: List[List[float]]
+) -> np.ndarray:
+    """
+    Compute cosine similarity between one query and multiple embeddings.
+
+    Vectorized implementation - much faster than calling cosine_similarity
+    in a loop when comparing against many embeddings.
+
+    Args:
+        query: Single query embedding vector
+        embeddings: List of embedding vectors to compare against
+
+    Returns:
+        Numpy array of similarity scores (same order as input)
+    """
+    if not embeddings:
+        return np.array([])
+
+    # Convert to numpy arrays
+    query_vec = np.array(query)
+    embed_matrix = np.array(embeddings)
+
+    # Compute norms
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0:
+        return np.zeros(len(embeddings))
+
+    # Vectorized norm computation for all embeddings at once
+    embed_norms = np.linalg.norm(embed_matrix, axis=1)
+
+    # Avoid division by zero
+    embed_norms = np.where(embed_norms == 0, 1, embed_norms)
+
+    # Vectorized dot product: query @ embeddings.T gives all similarities
+    similarities = np.dot(embed_matrix, query_vec) / (embed_norms * query_norm)
+
+    return similarities
 
 
 def find_similar_signals(

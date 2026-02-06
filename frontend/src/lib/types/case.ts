@@ -25,7 +25,6 @@ export interface Case {
   status: 'draft' | 'active' | 'archived';
   stakes: 'low' | 'medium' | 'high';
   position: string;
-  confidence?: number; // DEPRECATED - use user_confidence
   // User-stated epistemic confidence
   user_confidence?: number; // 0-100
   user_confidence_updated_at?: string;
@@ -165,4 +164,140 @@ export interface BlindSpotPrompt {
   text: string;
   action: 'create_inquiry' | 'investigate' | 'add_evidence';
   signal_id?: string;
+}
+
+// ── Intelligent Brief Types ─────────────────────────────────────
+
+export type SectionType = 'decision_frame' | 'inquiry_brief' | 'synthesis' | 'trade_offs' | 'recommendation' | 'custom';
+export type GroundingStatus = 'empty' | 'weak' | 'moderate' | 'strong' | 'conflicted';
+export type AnnotationType = 'tension' | 'blind_spot' | 'ungrounded' | 'evidence_desert' | 'well_grounded' | 'stale' | 'circular';
+export type AnnotationPriority = 'blocking' | 'important' | 'info';
+
+export interface BriefAnnotation {
+  id: string;
+  annotation_type: AnnotationType;
+  description: string;
+  priority: AnnotationPriority;
+  source_signal_ids: string[];
+  source_inquiry?: string;
+  created_at: string;
+  dismissed_at?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+}
+
+export interface BriefSection {
+  id: string;
+  section_id: string;
+  heading: string;
+  order: number;
+  section_type: SectionType;
+  inquiry?: string;
+  inquiry_title?: string;
+  parent_section?: string;
+  depth: number;
+  created_by: 'system' | 'user' | 'agent';
+  is_linked: boolean;
+  grounding_status: GroundingStatus;
+  grounding_data: {
+    evidence_count?: number;
+    supporting?: number;
+    contradicting?: number;
+    neutral?: number;
+    unvalidated_assumptions?: number;
+    tensions_count?: number;
+    confidence_avg?: number | null;
+  };
+  annotations: BriefAnnotation[];
+  is_locked: boolean;
+  lock_reason: string;
+  is_collapsed: boolean;
+  subsections: BriefSection[];
+  content_preview?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BriefSectionsResponse {
+  sections: BriefSection[];
+  brief_id: string;
+}
+
+export interface BriefOverview {
+  sections: Array<{
+    id: string;
+    section_id: string;
+    heading: string;
+    section_type: SectionType;
+    grounding_status: GroundingStatus;
+    is_locked: boolean;
+    is_linked: boolean;
+    annotation_counts: {
+      blocking: number;
+      important: number;
+      info: number;
+    };
+    subsection_count: number;
+  }>;
+  overall_grounding: {
+    score: number;
+    total_sections: number;
+    status_counts?: Record<string, number>;
+  };
+}
+
+export interface EvolveSectionChange {
+  id: string;
+  heading: string;
+  old_status: string;
+  new_status: string;
+}
+
+export interface EvolveAnnotationChange {
+  id: string;
+  type: AnnotationType;
+  section_heading: string;
+}
+
+export interface EvolveDiff {
+  section_changes: EvolveSectionChange[];
+  new_annotations: EvolveAnnotationChange[];
+  resolved_annotations: EvolveAnnotationChange[];
+  readiness_created?: number;
+  readiness_auto_completed?: number;
+}
+
+export interface EvolveBriefResponse {
+  status: string;
+  updated_sections: number;
+  new_annotations: number;
+  resolved_annotations: number;
+  readiness_created?: number;
+  readiness_auto_completed?: number;
+  diff?: EvolveDiff;
+}
+
+export interface CreateBriefSectionData {
+  heading: string;
+  section_type?: SectionType;
+  order?: number;
+  parent_section?: string;
+  inquiry?: string;
+  after_section_id?: string;
+}
+
+export interface UpdateBriefSectionData {
+  heading?: string;
+  order?: number;
+  section_type?: SectionType;
+  inquiry?: string | null;
+  parent_section?: string | null;
+  is_collapsed?: boolean;
+}
+
+export interface ScaffoldResult {
+  case: Case;
+  brief: CaseDocument;
+  inquiries: Inquiry[];
+  sections: BriefSection[];
 }

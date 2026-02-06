@@ -82,6 +82,13 @@ class EventType(models.TextChoices):
     STRUCTURE_DISMISSED = 'StructureDismissed', 'Structure Dismissed'
     STRUCTURE_IGNORED = 'StructureIgnored', 'Structure Ignored'
 
+    # Brief scaffolding events
+    CASE_SCAFFOLDED = 'CaseScaffolded', 'Case Scaffolded from Chat'
+    BRIEF_EVOLVED = 'BriefEvolved', 'Brief Grounding Evolved'
+    BRIEF_SECTION_CREATED = 'BriefSectionCreated', 'Brief Section Created'
+    BRIEF_SECTION_UPDATED = 'BriefSectionUpdated', 'Brief Section Updated'
+    BRIEF_SECTION_DELETED = 'BriefSectionDeleted', 'Brief Section Deleted'
+
 
 class Event(models.Model):
     """

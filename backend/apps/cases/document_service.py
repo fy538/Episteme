@@ -21,17 +21,21 @@ class CaseDocumentService:
         user: User,
         title: str,
         project_id: str = None,
+        content_markdown: str = None,
         **case_kwargs
     ) -> tuple[Case, CaseDocument]:
         """
         Create case and auto-generate main brief with AI outline.
-        
+
         Args:
             user: User creating the case
             title: Case title
             project_id: Optional project ID
+            content_markdown: Optional pre-built markdown content
+                (used by CaseScaffoldService to pass scaffolded content
+                instead of using BriefTemplateGenerator)
             **case_kwargs: Additional case fields
-        
+
         Returns:
             Tuple of (case, case_brief)
         """
@@ -43,10 +47,13 @@ class CaseDocumentService:
             status=CaseStatus.DRAFT,
             **case_kwargs
         )
-        
-        # Generate brief outline using AI
-        outline = BriefTemplateGenerator.generate_case_brief_outline(case)
-        
+
+        # Use provided content or generate default outline
+        if content_markdown is not None:
+            outline = content_markdown
+        else:
+            outline = BriefTemplateGenerator.generate_case_brief_outline(case)
+
         # Create case brief document
         case_brief = CaseDocument.objects.create(
             case=case,
@@ -57,11 +64,11 @@ class CaseDocumentService:
             generated_by_ai=False,  # Outline is AI-assisted, but user owns it
             created_by=user
         )
-        
+
         # Link as main brief
         case.main_brief = case_brief
         case.save(update_fields=['main_brief'])
-        
+
         return case, case_brief
     
     @staticmethod

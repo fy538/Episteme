@@ -3,6 +3,7 @@ Case views
 """
 import logging
 
+from django.db import models
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Case, WorkingView, CaseDocument, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST
+from .brief_models import BriefSection, BriefAnnotation
 from .serializers import (
     CaseSerializer,
     WorkingViewSerializer,
@@ -21,6 +23,14 @@ from .serializers import (
     CreateChecklistItemSerializer,
     UpdateChecklistItemSerializer,
     UserConfidenceSerializer,
+)
+from .brief_serializers import (
+    BriefSectionSerializer,
+    BriefSectionCreateSerializer,
+    BriefSectionUpdateSerializer,
+    BriefSectionReorderSerializer,
+    BriefOverviewSerializer,
+    BriefAnnotationSerializer,
 )
 from .document_serializers import (
     CaseDocumentSerializer,
@@ -73,8 +83,7 @@ class CaseViewSet(viewsets.ModelViewSet):
                     case=case
                 )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to record case creation receipt: {e}")
+                logger.warning(f"Failed to record case creation receipt: {e}")
 
         return Response(
             {
@@ -486,17 +495,18 @@ _What actions follow from this decision?_
 
         case = self.get_object()
 
-        # Count evidence by direction
-        evidence_signals = Signal.objects.filter(case=case, signal_type='evidence')
+        # Count evidence mentions (no direction metadata available on Signal model)
+        evidence_signals = Signal.objects.filter(case=case, type='EvidenceMention')
+        total_evidence = evidence_signals.count()
         evidence = {
-            'supporting': evidence_signals.filter(metadata__direction='supports').count(),
-            'contradicting': evidence_signals.filter(metadata__direction='contradicts').count(),
-            'neutral': evidence_signals.filter(metadata__direction='neutral').count() +
-                       evidence_signals.filter(metadata__direction__isnull=True).count(),
+            'total': total_evidence,
+            'supporting': 0,  # Direction not tracked on Signal model
+            'contradicting': 0,
+            'neutral': total_evidence,
         }
 
         # Count assumptions and their validation status
-        assumption_signals = Signal.objects.filter(case=case, signal_type='assumption')
+        assumption_signals = Signal.objects.filter(case=case, type='Assumption')
         total_assumptions = assumption_signals.count()
 
         # An assumption is validated if it has a linked inquiry that is resolved
@@ -515,7 +525,7 @@ _What actions follow from this decision?_
             else:
                 untested_list.append({
                     'id': str(assumption.id),
-                    'text': assumption.content[:200],
+                    'text': assumption.text[:200] if assumption.text else '',
                     'inquiry_id': str(linked_inquiry.id) if linked_inquiry else None,
                 })
 
@@ -535,17 +545,16 @@ _What actions follow from this decision?_
             'resolved': inquiries.filter(status=InquiryStatus.RESOLVED).count(),
         }
 
-        # Find unlinked claims from the brief
+        # Find claims from the brief (metadata not available on Signal model)
         unlinked_claims = []
         if case.main_brief:
             claim_signals = Signal.objects.filter(
                 case=case,
-                signal_type='claim',
-                metadata__has_evidence=False
+                type='Claim',
             )[:5]
             for claim in claim_signals:
                 unlinked_claims.append({
-                    'text': claim.content[:150],
+                    'text': claim.text[:150] if claim.text else '',
                     'location': 'brief',
                 })
 
@@ -750,8 +759,6 @@ _What actions follow from this decision?_
         items_data = asyncio.run(generate_smart_checklist(case))
 
         # Create checklist items in two passes: parents first, then children
-        import logging
-        logger = logging.getLogger(__name__)
 
         created_items = []
         parent_map = {}  # description -> created parent item
@@ -995,6 +1002,553 @@ _What actions follow from this decision?_
         suggestions = asyncio.run(generate())
         return Response(suggestions)
 
+    # ── Brief Section Endpoints ──────────────────────────────────────
+
+    @action(detail=True, methods=['get', 'post'], url_path='brief-sections')
+    def brief_sections(self, request, pk=None):
+        """
+        List or create brief sections for this case's main brief.
+
+        GET /api/cases/{id}/brief-sections/
+        Returns all sections with annotations.
+
+        POST /api/cases/{id}/brief-sections/
+        Creates a new section and inserts markdown marker.
+        Body: {heading, section_type?, order?, parent_section?, inquiry?, after_section_id?}
+        """
+        case = self.get_object()
+
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        brief = case.main_brief
+
+        if request.method == 'GET':
+            # Return top-level sections (subsections nested via serializer)
+            sections = BriefSection.objects.filter(
+                brief=brief,
+                parent_section__isnull=True
+            ).prefetch_related(
+                'annotations', 'annotations__source_signals',
+                'subsections', 'subsections__annotations',
+                'inquiry'
+            ).order_by('order')
+
+            serializer = BriefSectionSerializer(sections, many=True)
+            return Response({
+                'sections': serializer.data,
+                'brief_id': str(brief.id),
+            })
+
+        elif request.method == 'POST':
+            serializer = BriefSectionCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+
+            # Determine order
+            if 'after_section_id' in data and data['after_section_id']:
+                try:
+                    after_section = BriefSection.objects.get(
+                        brief=brief, section_id=data['after_section_id']
+                    )
+                    order = after_section.order + 1
+                    # Shift subsequent sections
+                    BriefSection.objects.filter(
+                        brief=brief, order__gte=order
+                    ).update(order=models.F('order') + 1)
+                except BriefSection.DoesNotExist:
+                    order = data.get('order', 0)
+            elif 'order' in data:
+                order = data['order']
+            else:
+                max_order = BriefSection.objects.filter(
+                    brief=brief
+                ).order_by('-order').values_list('order', flat=True).first() or 0
+                order = max_order + 1
+
+            # Resolve parent section
+            parent_section = None
+            if data.get('parent_section'):
+                try:
+                    parent_section = BriefSection.objects.get(
+                        id=data['parent_section'], brief=brief
+                    )
+                except BriefSection.DoesNotExist:
+                    pass
+
+            # Resolve inquiry
+            inquiry = None
+            if data.get('inquiry'):
+                from apps.inquiries.models import Inquiry
+                try:
+                    inquiry = Inquiry.objects.get(id=data['inquiry'], case=case)
+                except Inquiry.DoesNotExist:
+                    return Response(
+                        {'error': 'Inquiry not found in this case'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Generate section ID and create
+            section_id = BriefSection.generate_section_id()
+            section = BriefSection.objects.create(
+                brief=brief,
+                section_id=section_id,
+                heading=data['heading'],
+                order=order,
+                section_type=data.get('section_type', 'custom'),
+                inquiry=inquiry,
+                parent_section=parent_section,
+                created_by='user',
+                is_linked=bool(inquiry),
+            )
+
+            # Insert markdown marker into brief content
+            marker = f'\n<!-- section:{section_id} -->\n## {data["heading"]}\n\n'
+            if brief.content_markdown:
+                brief.content_markdown += marker
+            else:
+                brief.content_markdown = marker
+            brief.save(update_fields=['content_markdown', 'updated_at'])
+
+            return Response(
+                BriefSectionSerializer(section).data,
+                status=status.HTTP_201_CREATED
+            )
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'brief-sections/(?P<section_id>[^/.]+)')
+    def brief_section_detail(self, request, pk=None, section_id=None):
+        """
+        Update or delete a specific brief section.
+
+        PATCH /api/cases/{id}/brief-sections/{section_id}/
+        Body: {heading?, order?, section_type?, inquiry?, parent_section?, is_collapsed?}
+
+        DELETE /api/cases/{id}/brief-sections/{section_id}/
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
+        except BriefSection.DoesNotExist:
+            return Response(
+                {'error': 'Brief section not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if request.method == 'DELETE':
+            # Remove markdown marker
+            marker_tag = f'<!-- section:{section.section_id} -->'
+            if case.main_brief.content_markdown:
+                case.main_brief.content_markdown = case.main_brief.content_markdown.replace(
+                    marker_tag, ''
+                )
+                case.main_brief.save(update_fields=['content_markdown', 'updated_at'])
+            section.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PATCH
+        serializer = BriefSectionUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if 'heading' in data:
+            # Update heading in markdown too
+            old_heading = section.heading
+            new_heading = data['heading']
+            if case.main_brief.content_markdown and old_heading:
+                case.main_brief.content_markdown = case.main_brief.content_markdown.replace(
+                    f'## {old_heading}', f'## {new_heading}', 1
+                )
+                case.main_brief.save(update_fields=['content_markdown', 'updated_at'])
+            section.heading = new_heading
+
+        if 'order' in data:
+            section.order = data['order']
+        if 'section_type' in data:
+            section.section_type = data['section_type']
+        if 'is_collapsed' in data:
+            section.is_collapsed = data['is_collapsed']
+
+        if 'parent_section' in data:
+            if data['parent_section']:
+                try:
+                    parent = BriefSection.objects.get(
+                        id=data['parent_section'], brief=case.main_brief
+                    )
+                    section.parent_section = parent
+                except BriefSection.DoesNotExist:
+                    pass
+            else:
+                section.parent_section = None
+
+        if 'inquiry' in data:
+            if data['inquiry']:
+                from apps.inquiries.models import Inquiry
+                try:
+                    inquiry = Inquiry.objects.get(id=data['inquiry'], case=case)
+                    section.inquiry = inquiry
+                    section.is_linked = True
+                except Inquiry.DoesNotExist:
+                    return Response(
+                        {'error': 'Inquiry not found in this case'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                section.inquiry = None
+                section.is_linked = section.tagged_signals.exists()
+
+        section.save()
+        return Response(BriefSectionSerializer(section).data)
+
+    @action(detail=True, methods=['post'], url_path='brief-sections/reorder')
+    def brief_sections_reorder(self, request, pk=None):
+        """
+        Bulk reorder brief sections.
+
+        POST /api/cases/{id}/brief-sections/reorder/
+        Body: {sections: [{id, order}, ...]}
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = BriefSectionReorderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        for item in serializer.validated_data['sections']:
+            BriefSection.objects.filter(
+                id=item['id'], brief=case.main_brief
+            ).update(order=item['order'])
+
+        return Response({'status': 'reordered'})
+
+    @action(detail=True, methods=['post'], url_path=r'brief-sections/(?P<section_id>[^/.]+)/link-inquiry')
+    def brief_section_link_inquiry(self, request, pk=None, section_id=None):
+        """
+        Link a brief section to an inquiry.
+
+        POST /api/cases/{id}/brief-sections/{section_id}/link-inquiry/
+        Body: {inquiry_id: UUID}
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
+        except BriefSection.DoesNotExist:
+            return Response(
+                {'error': 'Brief section not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        inquiry_id = request.data.get('inquiry_id')
+        if not inquiry_id:
+            return Response(
+                {'error': 'inquiry_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from apps.inquiries.models import Inquiry
+        try:
+            inquiry = Inquiry.objects.get(id=inquiry_id, case=case)
+        except Inquiry.DoesNotExist:
+            return Response(
+                {'error': 'Inquiry not found in this case'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        section.inquiry = inquiry
+        section.is_linked = True
+        section.section_type = 'inquiry_brief'
+        section.save()
+
+        return Response(BriefSectionSerializer(section).data)
+
+    @action(detail=True, methods=['post'], url_path=r'brief-sections/(?P<section_id>[^/.]+)/unlink-inquiry')
+    def brief_section_unlink_inquiry(self, request, pk=None, section_id=None):
+        """
+        Unlink a brief section from its inquiry.
+
+        POST /api/cases/{id}/brief-sections/{section_id}/unlink-inquiry/
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
+        except BriefSection.DoesNotExist:
+            return Response(
+                {'error': 'Brief section not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        section.inquiry = None
+        section.is_linked = section.tagged_signals.exists()
+        section.grounding_status = 'empty'
+        section.grounding_data = {}
+        section.save()
+
+        # Clear annotations that came from the inquiry link
+        section.annotations.filter(source_inquiry__isnull=False).delete()
+
+        return Response(BriefSectionSerializer(section).data)
+
+    @action(
+        detail=True, methods=['post'],
+        url_path=r'brief-sections/(?P<section_id>[^/.]+)/dismiss-annotation/(?P<annotation_id>[^/.]+)'
+    )
+    def brief_section_dismiss_annotation(self, request, pk=None, section_id=None, annotation_id=None):
+        """
+        Dismiss an annotation on a brief section.
+
+        POST /api/cases/{id}/brief-sections/{section_id}/dismiss-annotation/{annotation_id}/
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
+            annotation = section.annotations.get(id=annotation_id)
+        except (BriefSection.DoesNotExist, BriefAnnotation.DoesNotExist):
+            return Response(
+                {'error': 'Section or annotation not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        annotation.dismissed_at = timezone.now()
+        annotation.save(update_fields=['dismissed_at', 'updated_at'])
+
+        return Response({'status': 'dismissed'})
+
+    @action(detail=True, methods=['post'], url_path='evolve-brief')
+    def evolve_brief(self, request, pk=None):
+        """
+        Trigger brief grounding recomputation.
+
+        POST /api/cases/{id}/evolve-brief/
+        Recomputes grounding status and annotations for all brief sections.
+        Uses a cache-based lock to prevent concurrent evolve operations.
+        """
+        from django.core.cache import cache as django_cache
+
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Prevent concurrent evolve requests for the same case
+        lock_key = f"evolve_brief_lock:{case.id}"
+        if not django_cache.add(lock_key, True, timeout=120):
+            return Response(
+                {'status': 'already_evolving', 'message': 'Brief evolution already in progress'},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        try:
+            from apps.cases.brief_grounding import BriefGroundingEngine
+            delta = BriefGroundingEngine.evolve_brief(case.id)
+
+            # Build detailed diff for the frontend
+            section_changes = []
+            for s in delta.get('updated_sections', []):
+                section_changes.append({
+                    'id': s['id'],
+                    'heading': s['heading'],
+                    'old_status': s.get('old_status', ''),
+                    'new_status': s.get('new_status', ''),
+                })
+
+            new_anns = []
+            for a in delta.get('new_annotations', []):
+                new_anns.append({
+                    'id': a['id'],
+                    'type': a['type'],
+                    'section_heading': a.get('section_heading', ''),
+                })
+
+            resolved_anns = []
+            for a in delta.get('resolved_annotations', []):
+                resolved_anns.append({
+                    'id': a['id'],
+                    'type': a['type'],
+                    'section_heading': a.get('section_heading', ''),
+                })
+
+            return Response({
+                'status': 'evolved',
+                'updated_sections': len(section_changes),
+                'new_annotations': len(new_anns),
+                'resolved_annotations': len(resolved_anns),
+                'readiness_created': delta.get('readiness_created', 0),
+                'readiness_auto_completed': delta.get('readiness_auto_completed', 0),
+                'diff': {
+                    'section_changes': section_changes,
+                    'new_annotations': new_anns,
+                    'resolved_annotations': resolved_anns,
+                },
+            })
+        except Exception as e:
+            logger.error(f"Failed to evolve brief for case {case.id}: {e}")
+            return Response(
+                {'error': 'Failed to evolve brief', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        finally:
+            django_cache.delete(lock_key)
+
+    @action(detail=True, methods=['get'], url_path='brief-overview')
+    def brief_overview(self, request, pk=None):
+        """
+        Get lightweight brief overview with grounding status.
+
+        GET /api/cases/{id}/brief-overview/
+        Returns sections with status + annotation counts only.
+        """
+        case = self.get_object()
+        if not case.main_brief:
+            return Response(
+                {'error': 'Case has no main brief document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = BriefOverviewSerializer(case.main_brief)
+        return Response(serializer.data)
+
+    # ── Case Scaffolding ─────────────────────────────────────────
+
+    @action(detail=False, methods=['post'], url_path='scaffold')
+    def scaffold(self, request):
+        """
+        Scaffold a new case from a chat transcript or minimal input.
+
+        POST /api/cases/scaffold/
+
+        Body (chat mode):
+            { "project_id": "uuid", "thread_id": "uuid", "mode": "chat" }
+
+        Body (minimal mode):
+            { "project_id": "uuid", "title": "...", "decision_question": "...", "mode": "minimal" }
+
+        Returns: { case, brief, inquiries, sections }
+        """
+        from .scaffold_service import CaseScaffoldService
+
+        mode = request.data.get('mode', 'minimal')
+        project_id = request.data.get('project_id')
+
+        if not project_id:
+            return Response(
+                {'error': 'project_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            if mode == 'chat':
+                thread_id = request.data.get('thread_id')
+                if not thread_id:
+                    return Response(
+                        {'error': 'thread_id is required for chat scaffolding'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Get thread transcript
+                from apps.chat.models import ChatThread, Message
+
+                try:
+                    thread = ChatThread.objects.get(
+                        id=thread_id,
+                        user=request.user
+                    )
+                except ChatThread.DoesNotExist:
+                    return Response(
+                        {'error': 'Thread not found'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                messages = Message.objects.filter(
+                    thread=thread
+                ).order_by('created_at')
+
+                transcript = [
+                    {'role': m.role, 'content': m.content}
+                    for m in messages
+                ]
+
+                # Run async scaffold
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    result = loop.run_until_complete(
+                        CaseScaffoldService.scaffold_from_chat(
+                            transcript=transcript,
+                            user=request.user,
+                            project_id=project_id,
+                            thread_id=thread_id,
+                        )
+                    )
+                finally:
+                    loop.close()
+
+            else:
+                # Minimal scaffold
+                title = request.data.get('title', 'New Case')
+                decision_question = request.data.get('decision_question')
+
+                result = CaseScaffoldService.scaffold_minimal(
+                    title=title,
+                    user=request.user,
+                    project_id=project_id,
+                    decision_question=decision_question,
+                )
+
+            # Serialize response
+            case_data = CaseSerializer(result['case']).data
+            brief_data = CaseDocumentSerializer(result['brief']).data
+            sections_data = BriefSectionSerializer(result['sections'], many=True).data
+
+            return Response({
+                'case': case_data,
+                'brief': brief_data,
+                'inquiries': [
+                    {'id': str(inq.id), 'title': inq.title}
+                    for inq in result.get('inquiries', [])
+                ],
+                'sections': sections_data,
+                'signals_count': len(result.get('signals', [])),
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Scaffold failed: {e}")
+            return Response(
+                {'error': 'Scaffolding failed', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class WorkingViewViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -1235,7 +1789,7 @@ Return JSON:
         # Build case context
         inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
         signals = list(Signal.objects.filter(case=case).values(
-            'id', 'signal_type', 'content'
+            'id', 'type', 'text'
         )[:20])
 
         # Get gaps if available (cached or generate)
@@ -1390,7 +1944,7 @@ Return JSON:
         # Build case context
         inquiries = list(case.inquiries.values('id', 'title', 'status'))
         signals = list(Signal.objects.filter(case=case).values(
-            'id', 'signal_type', 'content'
+            'id', 'type', 'text'
         )[:20])
 
         case_context = {
@@ -1458,7 +2012,7 @@ Return JSON:
         # Build case context
         inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
         signals = list(Signal.objects.filter(case=case).values(
-            'id', 'signal_type', 'content'
+            'id', 'type', 'text'
         )[:20])
 
         case_context = {
@@ -1522,7 +2076,7 @@ Return JSON:
 
         # Get signals for this case
         signals = list(Signal.objects.filter(case=case).values(
-            'id', 'signal_type', 'content'
+            'id', 'type', 'text'
         ))
 
         # Get inquiries
@@ -1555,7 +2109,7 @@ Return JSON:
 
         # Get signals
         signals = list(Signal.objects.filter(case=case).values(
-            'id', 'signal_type', 'content'
+            'id', 'type', 'text'
         ))
 
         # Extract and link claims
@@ -1605,7 +2159,7 @@ Return JSON:
         inquiries = list(case.inquiries.all())
         assumption_signals = list(Signal.objects.filter(
             case=case,
-            signal_type='assumption'
+            type='Assumption'
         ))
         
         # AI prompt
@@ -1622,7 +2176,7 @@ Existing inquiries being investigated:
 {[f"- {i.title} (status: {i.status})" for i in inquiries]}
 
 Previously extracted assumption signals:
-{[f"- {s.content}" for s in assumption_signals[:5]]}
+{[f"- {s.text}" for s in assumption_signals[:5]]}
 
 For each assumption, provide:
 1. text: The exact assumption text (quote from document)

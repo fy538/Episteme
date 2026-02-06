@@ -20,12 +20,14 @@ interface InquiryFocusPromptCardProps {
   card: InlineActionCard;
   onFocus: (inquiryId: string) => void;
   onDismiss: () => void;
+  isFocusing?: boolean;
 }
 
 export function InquiryFocusPromptCard({
   card,
   onFocus,
   onDismiss,
+  isFocusing = false,
 }: InquiryFocusPromptCardProps) {
   const data = card.data as unknown as InquiryFocusPromptData;
   const { inquiryId, inquiryTitle, matchedTopic } = data;
@@ -52,10 +54,17 @@ export function InquiryFocusPromptCard({
         </ActionCardHeader>
 
         <ActionCardFooter className="ml-7">
-          <Button size="sm" onClick={() => onFocus(inquiryId)}>
-            Focus on Inquiry
+          <Button size="sm" onClick={() => onFocus(inquiryId)} disabled={isFocusing}>
+            {isFocusing ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                Focusing...
+              </span>
+            ) : (
+              'Focus on Inquiry'
+            )}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDismiss}>
+          <Button variant="ghost" size="sm" onClick={onDismiss} disabled={isFocusing}>
             Keep Chatting
           </Button>
         </ActionCardFooter>

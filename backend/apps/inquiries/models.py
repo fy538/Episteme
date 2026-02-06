@@ -144,6 +144,13 @@ class Inquiry(UUIDModel, TimestampedModel):
         help_text="Inquiries that must be resolved before this one can be resolved"
     )
 
+    # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
+    embedding = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Pre-computed embedding vector for semantic search"
+    )
+
     class Meta:
         verbose_name_plural = 'inquiries'
         ordering = ['-priority', 'sequence_index']

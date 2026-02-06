@@ -501,87 +501,13 @@ def process_document_workflow(document_id: str):
 @shared_task
 def extract_document_signals_workflow(document_id: str):
     """
-    DEPRECATED: Use process_document_workflow instead.
-    
-    Phase 2: Extract signals from an uploaded document
-    
-    This workflow is deprecated in favor of chunking and vector search.
-    Signal extraction from documents is lossy and doesn't preserve context.
-    
-    Args:
-        document_id: Document to process
+    DEPRECATED: This workflow has been removed.
+    Use process_document_workflow instead.
     """
-    import warnings
-    warnings.warn(
-        "extract_document_signals_workflow is deprecated. "
-        "Use process_document_workflow instead.",
-        DeprecationWarning,
-        stacklevel=2
+    raise NotImplementedError(
+        "extract_document_signals_workflow is deprecated and has been removed. "
+        "Use process_document_workflow instead."
     )
-    
-    from apps.projects.models import Document
-    from apps.signals.document_extractors import get_document_extractor
-    from apps.events.services import EventService
-    from apps.events.models import EventType, ActorType
-    
-    try:
-        document = Document.objects.get(id=document_id)
-        
-        # Update status
-        document.processing_status = 'processing'
-        document.save()
-        
-        # Extract signals
-        extractor = get_document_extractor()
-        signals = extractor.extract_from_document(document)
-        
-        # Save signals with events
-        for signal in signals:
-            # Create event
-            event = EventService.append(
-                event_type=EventType.SIGNAL_EXTRACTED,
-                payload={
-                    'signal_type': signal.type,
-                    'text': signal.text,
-                    'confidence': signal.confidence,
-                    'source_type': 'document',
-                    'document_id': str(document.id),
-                },
-                actor_type=ActorType.SYSTEM,
-                case_id=document.case_id,
-            )
-            
-            # Link event and save
-            signal.event_id = event.id
-            signal.save()
-        
-        # Update document
-        document.processing_status = 'completed'
-        document.signals_extracted = len(signals)
-        document.save()
-        
-        return {
-            'status': 'completed',
-            'document_id': str(document.id),
-            'signals_extracted': len(signals),
-        }
-        
-    except Exception:
-        logger.exception(
-            "extract_document_signals_workflow_failed",
-            extra={"document_id": str(document_id)},
-        )
-        # Update document status
-        try:
-            document = Document.objects.get(id=document_id)
-            document.processing_status = 'failed'
-            document.save()
-        except Exception:
-            logger.exception(
-                "extract_document_signals_workflow_status_update_failed",
-                extra={"document_id": str(document_id)},
-            )
-        raise
 
 
 @shared_task

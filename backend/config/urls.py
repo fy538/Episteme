@@ -5,9 +5,14 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 
+from apps.common.search_views import unified_search_view
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    
+
+    # Unified search endpoint
+    path('api/search/', unified_search_view, name='unified-search'),
+
     # API endpoints
     path('api/auth/', include('apps.auth_app.urls')),
     path('api/events/', include('apps.events.urls')),

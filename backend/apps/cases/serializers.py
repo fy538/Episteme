@@ -26,7 +26,6 @@ class CaseSerializer(serializers.ModelSerializer):
             'status',
             'stakes',
             'position',
-            'confidence',
             # User-stated epistemic confidence
             'user_confidence',
             'user_confidence_updated_at',
@@ -87,7 +86,6 @@ class UpdateCaseSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=500, required=False)
     position = serializers.CharField(required=False)
     stakes = serializers.ChoiceField(choices=StakesLevel.choices, required=False)
-    confidence = serializers.FloatField(min_value=0.0, max_value=1.0, required=False, allow_null=True)
     status = serializers.ChoiceField(choices=CaseStatus.choices, required=False)
     # Decision Frame fields
     decision_question = serializers.CharField(required=False, allow_blank=True)

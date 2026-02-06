@@ -46,6 +46,7 @@ class ChatThreadSerializer(serializers.ModelSerializer):
             'primary_case',
             'project',
             'archived',
+            'metadata',
             'created_at',
             'updated_at',
             'message_count',

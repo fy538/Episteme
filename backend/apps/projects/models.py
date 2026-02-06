@@ -359,13 +359,6 @@ class DocumentChunk(UUIDModel, TimestampedModel):
         help_text="Chunking method used (for experimentation and versioning)"
     )
     
-    # DEPRECATED: External vector DB (migrating to PostgreSQL)
-    vector_id = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="DEPRECATED: ID in Pinecone/Weaviate (use embedding field instead)"
-    )
-    
     # Optional: LLM-generated summary
     summary = models.TextField(
         blank=True,
@@ -378,7 +371,6 @@ class DocumentChunk(UUIDModel, TimestampedModel):
             models.Index(fields=['document', 'chunk_index']),
             models.Index(fields=['document', 'prev_chunk_id']),  # Context navigation
             models.Index(fields=['document', 'next_chunk_id']),  # Context navigation
-            models.Index(fields=['vector_id']),  # Legacy Pinecone support
         ]
     
     def __str__(self):

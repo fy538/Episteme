@@ -48,11 +48,11 @@ class CaseServiceTest(TestCase):
             case_id=case.id,
             user=self.user,
             position='Updated position',
-            confidence=0.8,
+            user_confidence=80,
         )
-        
+
         self.assertEqual(updated.position, 'Updated position')
-        self.assertEqual(updated.confidence, 0.8)
+        self.assertEqual(updated.user_confidence, 80)
         
         # Check patch event was created
         patch_event = Event.objects.filter(

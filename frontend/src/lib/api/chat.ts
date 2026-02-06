@@ -6,9 +6,10 @@ import { apiClient } from './client';
 import type { ChatThread, Message } from '../types/chat';
 
 export const chatAPI = {
-  async createThread(projectId?: string | null): Promise<ChatThread> {
+  async createThread(projectId?: string | null, metadata?: Record<string, any>): Promise<ChatThread> {
     return apiClient.post<ChatThread>('/chat/threads/', {
       ...(projectId ? { project: projectId } : {}),
+      ...(metadata ? { metadata } : {}),
     });
   },
 

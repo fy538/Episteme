@@ -12,6 +12,7 @@ export interface ChatThread {
   project?: string | null;
   user: string;
   archived?: boolean;
+  metadata?: Record<string, any>;
   message_count?: number;
   latest_message?: {
     id: string;

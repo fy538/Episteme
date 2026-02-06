@@ -21,6 +21,7 @@ interface EvidenceSuggestionCardProps {
   card: InlineActionCard;
   onAddEvidence: (inquiryId?: string, direction?: string) => void;
   onDismiss: () => void;
+  isAdding?: boolean;
 }
 
 type EvidenceDirection = 'supporting' | 'contradicting' | 'neutral';
@@ -51,6 +52,7 @@ export function EvidenceSuggestionCard({
   card,
   onAddEvidence,
   onDismiss,
+  isAdding = false,
 }: EvidenceSuggestionCardProps) {
   const data = card.data as unknown as EvidenceSuggestionData;
   const { evidenceText, suggestedInquiryId, suggestedInquiryTitle, direction } = data;
@@ -79,10 +81,18 @@ export function EvidenceSuggestionCard({
           <Button
             size="sm"
             onClick={() => onAddEvidence(suggestedInquiryId, direction)}
+            disabled={isAdding}
           >
-            Add to Inquiry
+            {isAdding ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                Adding...
+              </span>
+            ) : (
+              'Add to Inquiry'
+            )}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDismiss}>
+          <Button variant="ghost" size="sm" onClick={onDismiss} disabled={isAdding}>
             Dismiss
           </Button>
         </ActionCardFooter>

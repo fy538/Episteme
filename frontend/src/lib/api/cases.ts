@@ -14,6 +14,13 @@ import type {
   ReadinessChecklistItem,
   ReadinessChecklistResponse,
   BlindSpotPrompt,
+  BriefSection,
+  BriefSectionsResponse,
+  BriefOverview,
+  EvolveBriefResponse,
+  CreateBriefSectionData,
+  UpdateBriefSectionData,
+  ScaffoldResult,
 } from '../types/case';
 
 interface CreateCaseResponse {
@@ -201,5 +208,125 @@ export const casesAPI = {
     recommendations: string[];
   }> {
     return apiClient.post(`/cases/${caseId}/analyze-gaps/`, {});
+  },
+
+  // ── Intelligent Brief ─────────────────────────────────────────
+
+  /**
+   * Get all brief sections with annotations
+   */
+  async getBriefSections(caseId: string): Promise<BriefSectionsResponse> {
+    return apiClient.get(`/cases/${caseId}/brief-sections/`);
+  },
+
+  /**
+   * Create a new brief section
+   */
+  async createBriefSection(caseId: string, data: CreateBriefSectionData): Promise<BriefSection> {
+    return apiClient.post(`/cases/${caseId}/brief-sections/`, data);
+  },
+
+  /**
+   * Update a brief section
+   */
+  async updateBriefSection(
+    caseId: string,
+    sectionId: string,
+    data: UpdateBriefSectionData
+  ): Promise<BriefSection> {
+    return apiClient.patch(`/cases/${caseId}/brief-sections/${sectionId}/`, data);
+  },
+
+  /**
+   * Delete a brief section
+   */
+  async deleteBriefSection(caseId: string, sectionId: string): Promise<void> {
+    return apiClient.delete(`/cases/${caseId}/brief-sections/${sectionId}/`);
+  },
+
+  /**
+   * Bulk reorder brief sections
+   */
+  async reorderBriefSections(
+    caseId: string,
+    sections: Array<{ id: string; order: number }>
+  ): Promise<void> {
+    return apiClient.post(`/cases/${caseId}/brief-sections/reorder/`, { sections });
+  },
+
+  /**
+   * Link a brief section to an inquiry
+   */
+  async linkSectionToInquiry(
+    caseId: string,
+    sectionId: string,
+    inquiryId: string
+  ): Promise<BriefSection> {
+    return apiClient.post(
+      `/cases/${caseId}/brief-sections/${sectionId}/link-inquiry/`,
+      { inquiry_id: inquiryId }
+    );
+  },
+
+  /**
+   * Unlink a brief section from its inquiry
+   */
+  async unlinkSectionFromInquiry(caseId: string, sectionId: string): Promise<BriefSection> {
+    return apiClient.post(`/cases/${caseId}/brief-sections/${sectionId}/unlink-inquiry/`, {});
+  },
+
+  /**
+   * Dismiss an annotation on a brief section
+   */
+  async dismissAnnotation(
+    caseId: string,
+    sectionId: string,
+    annotationId: string
+  ): Promise<void> {
+    return apiClient.post(
+      `/cases/${caseId}/brief-sections/${sectionId}/dismiss-annotation/${annotationId}/`,
+      {}
+    );
+  },
+
+  /**
+   * Trigger brief grounding recomputation
+   */
+  async evolveBrief(caseId: string): Promise<EvolveBriefResponse> {
+    return apiClient.post(`/cases/${caseId}/evolve-brief/`, {});
+  },
+
+  /**
+   * Get lightweight brief overview
+   */
+  async getBriefOverview(caseId: string): Promise<BriefOverview> {
+    return apiClient.get(`/cases/${caseId}/brief-overview/`);
+  },
+
+  /**
+   * Scaffold a case from a chat thread
+   */
+  async scaffoldFromChat(projectId: string, threadId: string): Promise<ScaffoldResult> {
+    return apiClient.post('/cases/scaffold/', {
+      project_id: projectId,
+      thread_id: threadId,
+      mode: 'chat',
+    });
+  },
+
+  /**
+   * Scaffold a minimal case
+   */
+  async scaffoldMinimal(
+    projectId: string,
+    title: string,
+    decisionQuestion?: string
+  ): Promise<ScaffoldResult> {
+    return apiClient.post('/cases/scaffold/', {
+      project_id: projectId,
+      title,
+      decision_question: decisionQuestion,
+      mode: 'minimal',
+    });
   },
 };

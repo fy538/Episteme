@@ -169,7 +169,7 @@ class CaseService:
             'title': case.title,
             'position': case.position,
             'stakes': case.stakes,
-            'confidence': case.confidence,
+            'user_confidence': case.user_confidence,
             'status': case.status,
             # Phase 1: Add signals here
             'assumptions': [],

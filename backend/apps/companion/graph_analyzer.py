@@ -10,6 +10,7 @@ from asgiref.sync import sync_to_async
 from apps.chat.models import ChatThread
 from apps.signals.models import Signal
 from apps.projects.models import Evidence
+from apps.inquiries.models import Inquiry
 from apps.common.graph_utils import GraphUtils
 
 logger = logging.getLogger(__name__)
@@ -424,5 +425,256 @@ class GraphAnalyzer:
                         'evidence_text': evidence.text,
                         'evidence_confidence': evidence.extraction_confidence
                     })
-        
+
         return conflicts
+
+    # ── Inquiry-Scoped Analysis Methods ──────────────────────────
+
+    def find_patterns_for_inquiry(self, inquiry_id: uuid.UUID) -> Dict:
+        """
+        Find patterns within a single inquiry's signal network.
+
+        Same pattern detection as find_patterns() but scoped to signals
+        related to one inquiry. Used by BriefGroundingEngine for
+        per-section intelligence.
+
+        Args:
+            inquiry_id: Inquiry to analyze
+
+        Returns:
+            Dict with pattern categories:
+            - ungrounded_assumptions: Assumptions without evidence
+            - contradictions: Conflicting signals
+            - strong_claims: Well-supported claims
+            - recurring_themes: Similar signals mentioned multiple times
+            - evidence_quality: Evidence strength breakdown
+        """
+        inquiry = Inquiry.objects.get(id=inquiry_id)
+
+        patterns = {
+            'ungrounded_assumptions': [],
+            'contradictions': [],
+            'strong_claims': [],
+            'recurring_themes': [],
+            'evidence_quality': {
+                'total': 0,
+                'high_confidence': 0,
+                'low_confidence': 0,
+                'supporting': 0,
+                'contradicting': 0,
+                'neutral': 0,
+            },
+        }
+
+        # Get signals for this inquiry
+        inquiry_signals = inquiry.related_signals.filter(
+            dismissed_at__isnull=True
+        ).prefetch_related('supported_by_evidence', 'contradicted_by_evidence')
+
+        if not inquiry_signals.exists():
+            return patterns
+
+        # 1. Ungrounded assumptions
+        for signal in inquiry_signals.filter(type='Assumption'):
+            if not signal.supported_by_evidence.exists():
+                patterns['ungrounded_assumptions'].append({
+                    'id': str(signal.id),
+                    'text': signal.text,
+                    'confidence': signal.confidence,
+                })
+
+        # 2. Contradictions (deduplicated)
+        seen_pairs = set()
+        for signal in inquiry_signals:
+            for contra in signal.contradicts.filter(dismissed_at__isnull=True):
+                pair = tuple(sorted([str(signal.id), str(contra.id)]))
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    patterns['contradictions'].append({
+                        'signal_id': str(signal.id),
+                        'signal_text': signal.text,
+                        'contradicts_id': str(contra.id),
+                        'contradicts_text': contra.text,
+                        'both_high_confidence': (
+                            signal.confidence >= 0.75 and contra.confidence >= 0.75
+                        ),
+                    })
+
+        # 3. Strong claims
+        for signal in inquiry_signals.filter(type='Claim'):
+            supporting = list(signal.supported_by_evidence.all())
+            if len(supporting) >= 2:
+                avg_conf = sum(
+                    e.extraction_confidence for e in supporting
+                ) / len(supporting)
+                if avg_conf > 0.7:
+                    patterns['strong_claims'].append({
+                        'id': str(signal.id),
+                        'text': signal.text,
+                        'evidence_count': len(supporting),
+                        'avg_confidence': round(avg_conf, 2),
+                    })
+
+        # 4. Recurring themes via semantic similarity
+        themes = self._find_recurring_themes(inquiry_signals)
+        for theme in themes:
+            if len(theme['signals']) >= 2:
+                patterns['recurring_themes'].append({
+                    'theme': theme['representative_text'],
+                    'count': len(theme['signals']),
+                    'signal_ids': [str(s.id) for s in theme['signals']],
+                })
+
+        # 5. Evidence quality breakdown
+        evidence_items = inquiry.evidence_items.all()
+        for ev in evidence_items:
+            patterns['evidence_quality']['total'] += 1
+            if hasattr(ev, 'strength') and ev.strength and ev.strength >= 0.75:
+                patterns['evidence_quality']['high_confidence'] += 1
+            elif hasattr(ev, 'strength') and ev.strength and ev.strength < 0.5:
+                patterns['evidence_quality']['low_confidence'] += 1
+            if hasattr(ev, 'direction'):
+                if ev.direction == 'supports':
+                    patterns['evidence_quality']['supporting'] += 1
+                elif ev.direction == 'contradicts':
+                    patterns['evidence_quality']['contradicting'] += 1
+                else:
+                    patterns['evidence_quality']['neutral'] += 1
+
+        logger.info(
+            f"Inquiry pattern analysis complete for {inquiry_id}: "
+            f"{len(patterns['ungrounded_assumptions'])} ungrounded, "
+            f"{len(patterns['contradictions'])} contradictions, "
+            f"{len(patterns['strong_claims'])} strong claims"
+        )
+
+        return patterns
+
+    def find_orphaned_assumptions_for_inquiry(self, inquiry_id: uuid.UUID) -> List[Dict]:
+        """
+        Find assumptions within an inquiry that have no path to evidence.
+
+        Unlike the thread-scoped version, this checks both:
+        - Direct evidence on the assumption
+        - Evidence on signals the assumption depends on
+
+        Args:
+            inquiry_id: Inquiry to analyze
+
+        Returns:
+            List of orphaned assumption dicts
+        """
+        orphaned = []
+        assumptions = Signal.objects.filter(
+            inquiry_id=inquiry_id,
+            type='Assumption',
+            dismissed_at__isnull=True,
+        ).prefetch_related('supported_by_evidence', 'depends_on')
+
+        for assumption in assumptions:
+            # Has direct evidence?
+            if assumption.supported_by_evidence.exists():
+                continue
+
+            # Has grounded dependency?
+            has_grounded_dep = False
+            for dep in assumption.depends_on.all():
+                if dep.supported_by_evidence.exists():
+                    has_grounded_dep = True
+                    break
+
+            if not has_grounded_dep:
+                orphaned.append({
+                    'id': str(assumption.id),
+                    'text': assumption.text,
+                    'confidence': assumption.confidence,
+                    'dependency_count': assumption.depends_on.count(),
+                })
+
+        return orphaned
+
+    def compute_inquiry_health(self, inquiry_id: uuid.UUID) -> Dict:
+        """
+        Compute an overall health assessment for an inquiry.
+
+        Combines pattern analysis into a single health summary
+        suitable for driving brief annotations and readiness items.
+
+        Args:
+            inquiry_id: Inquiry to assess
+
+        Returns:
+            Dict with:
+            - health_score: 0-100 overall health
+            - blocking_issues: List of critical issues
+            - warnings: List of non-critical concerns
+            - strengths: List of well-grounded areas
+        """
+        patterns = self.find_patterns_for_inquiry(inquiry_id)
+
+        health = {
+            'health_score': 50,  # Start neutral
+            'blocking_issues': [],
+            'warnings': [],
+            'strengths': [],
+        }
+
+        # High-confidence contradictions are blocking
+        for contradiction in patterns['contradictions']:
+            if contradiction.get('both_high_confidence'):
+                health['blocking_issues'].append({
+                    'type': 'high_confidence_contradiction',
+                    'description': (
+                        f'High-confidence conflict: "{contradiction["signal_text"][:50]}..." '
+                        f'vs "{contradiction["contradicts_text"][:50]}..."'
+                    ),
+                })
+                health['health_score'] -= 15
+            else:
+                health['warnings'].append({
+                    'type': 'contradiction',
+                    'description': (
+                        f'Conflict: "{contradiction["signal_text"][:50]}..." '
+                        f'vs "{contradiction["contradicts_text"][:50]}..."'
+                    ),
+                })
+                health['health_score'] -= 5
+
+        # Ungrounded assumptions are warnings
+        for assumption in patterns['ungrounded_assumptions']:
+            health['warnings'].append({
+                'type': 'ungrounded_assumption',
+                'description': f'Unvalidated: "{assumption["text"][:60]}..."',
+            })
+            health['health_score'] -= 5
+
+        # Strong claims are strengths
+        for claim in patterns['strong_claims']:
+            health['strengths'].append({
+                'type': 'well_grounded_claim',
+                'description': (
+                    f'Well-supported ({claim["evidence_count"]} evidence): '
+                    f'"{claim["text"][:60]}..."'
+                ),
+            })
+            health['health_score'] += 10
+
+        # Evidence quality adjustments
+        eq = patterns['evidence_quality']
+        if eq['total'] == 0:
+            health['warnings'].append({
+                'type': 'no_evidence',
+                'description': 'No evidence gathered yet.',
+            })
+            health['health_score'] -= 20
+        elif eq['total'] < 2:
+            health['warnings'].append({
+                'type': 'insufficient_evidence',
+                'description': f'Only {eq["total"]} piece(s) of evidence. Consider gathering more.',
+            })
+            health['health_score'] -= 10
+
+        # Clamp to 0-100
+        health['health_score'] = max(0, min(100, health['health_score']))
+
+        return health

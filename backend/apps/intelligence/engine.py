@@ -353,7 +353,8 @@ class UnifiedAnalysisEngine:
         self,
         thread,
         user_message: str,
-        conversation_context: str = ""
+        conversation_context: str = "",
+        system_prompt_override: str = None,
     ) -> AsyncIterator[StreamEvent]:
         """
         Simplified analyze interface.
@@ -362,6 +363,7 @@ class UnifiedAnalysisEngine:
             thread: ChatThread object
             user_message: User's message content
             conversation_context: Formatted conversation history
+            system_prompt_override: Optional custom system prompt (e.g. for scaffolding mode)
 
         Yields:
             StreamEvent objects
@@ -402,5 +404,194 @@ class UnifiedAnalysisEngine:
             message_count=message_count
         )
 
-        async for event in self.analyze(context):
-            yield event
+        if system_prompt_override:
+            # Use the override directly instead of building from config
+            async for event in self._analyze_with_custom_prompt(
+                context, system_prompt_override
+            ):
+                yield event
+        else:
+            async for event in self.analyze(context):
+                yield event
+
+    async def _analyze_with_custom_prompt(
+        self,
+        context: UnifiedAnalysisContext,
+        system_prompt: str,
+    ) -> AsyncIterator[StreamEvent]:
+        """
+        Analyze with a custom system prompt (for scaffolding, etc.).
+
+        Same streaming logic as analyze() but bypasses prompt building.
+        """
+        user_prompt = build_unified_user_prompt(
+            user_message=context.user_message,
+            conversation_context=context.conversation_context,
+            signals_context=context.existing_signals,
+        )
+
+        parser = SectionedStreamParser()
+        response_content = ""
+        reflection_content = ""
+        response_complete = False
+        reflection_complete = False
+        signals_complete = False
+        action_hints_complete = False
+
+        try:
+            async for chunk in self.provider.stream_chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                max_tokens=2048,
+            ):
+                parsed_chunks = parser.parse(chunk.content)
+
+                for parsed in parsed_chunks:
+                    if parsed.section == Section.RESPONSE:
+                        if parsed.is_complete:
+                            response_complete = True
+                            yield StreamEvent(
+                                type=StreamEventType.RESPONSE_COMPLETE,
+                                data=response_content,
+                                section=Section.RESPONSE,
+                            )
+                        else:
+                            response_content += parsed.content
+                            yield StreamEvent(
+                                type=StreamEventType.RESPONSE_CHUNK,
+                                data=parsed.content,
+                                section=Section.RESPONSE,
+                            )
+                    elif parsed.section == Section.REFLECTION:
+                        if parsed.is_complete:
+                            reflection_complete = True
+                            yield StreamEvent(
+                                type=StreamEventType.REFLECTION_COMPLETE,
+                                data=reflection_content,
+                                section=Section.REFLECTION,
+                            )
+                        else:
+                            reflection_content += parsed.content
+                            yield StreamEvent(
+                                type=StreamEventType.REFLECTION_CHUNK,
+                                data=parsed.content,
+                                section=Section.REFLECTION,
+                            )
+                    elif parsed.section == Section.SIGNALS:
+                        if parsed.is_complete:
+                            signals_complete = True
+                            try:
+                                import json as json_mod
+                                signals = json_mod.loads(parser.signals_buffer or '[]')
+                            except Exception:
+                                signals = []
+                            yield StreamEvent(
+                                type=StreamEventType.SIGNALS_COMPLETE,
+                                data={
+                                    'signals': signals,
+                                    'raw': parser.signals_buffer or '[]',
+                                    'extraction_enabled': True,
+                                },
+                                section=Section.SIGNALS,
+                            )
+                    elif parsed.section == Section.ACTION_HINTS:
+                        if parsed.is_complete:
+                            action_hints_complete = True
+                            try:
+                                import json as json_mod
+                                hints = json_mod.loads(parser.action_hints_buffer or '[]')
+                            except Exception:
+                                hints = []
+                            yield StreamEvent(
+                                type=StreamEventType.ACTION_HINTS_COMPLETE,
+                                data={
+                                    'action_hints': hints,
+                                    'raw': parser.action_hints_buffer or '[]',
+                                },
+                                section=Section.ACTION_HINTS,
+                            )
+
+            # Flush any remaining content from the parser
+            remaining = parser.flush()
+            for parsed in remaining:
+                if parsed.section == Section.RESPONSE and parsed.content:
+                    response_content += parsed.content
+                    yield StreamEvent(
+                        type=StreamEventType.RESPONSE_CHUNK,
+                        data=parsed.content,
+                        section=Section.RESPONSE,
+                    )
+                elif parsed.section == Section.REFLECTION and parsed.content:
+                    reflection_content += parsed.content
+                    yield StreamEvent(
+                        type=StreamEventType.REFLECTION_CHUNK,
+                        data=parsed.content,
+                        section=Section.REFLECTION,
+                    )
+
+            # Emit completion events if not already emitted
+            if not response_complete and response_content:
+                yield StreamEvent(
+                    type=StreamEventType.RESPONSE_COMPLETE,
+                    data=response_content,
+                    section=Section.RESPONSE,
+                )
+
+            if not reflection_complete and reflection_content:
+                yield StreamEvent(
+                    type=StreamEventType.REFLECTION_COMPLETE,
+                    data=reflection_content,
+                    section=Section.REFLECTION,
+                )
+
+            if not signals_complete:
+                signals_buffer = parser.get_signals_buffer()
+                try:
+                    import json as json_mod
+                    signals_data = json_mod.loads(signals_buffer) if signals_buffer.strip() else []
+                except (json_mod.JSONDecodeError, Exception):
+                    signals_data = []
+                yield StreamEvent(
+                    type=StreamEventType.SIGNALS_COMPLETE,
+                    data={
+                        'signals': signals_data,
+                        'raw': signals_buffer,
+                        'extraction_enabled': True,
+                    },
+                    section=Section.SIGNALS,
+                )
+
+            if not action_hints_complete:
+                hints_buffer = parser.get_action_hints_buffer()
+                try:
+                    import json as json_mod
+                    hints_data = json_mod.loads(hints_buffer) if hints_buffer.strip() else []
+                except (json_mod.JSONDecodeError, Exception):
+                    hints_data = []
+                yield StreamEvent(
+                    type=StreamEventType.ACTION_HINTS_COMPLETE,
+                    data={
+                        'action_hints': hints_data,
+                        'raw': hints_buffer,
+                    },
+                    section=Section.ACTION_HINTS,
+                )
+
+            # Final done event with all content
+            yield StreamEvent(
+                type=StreamEventType.DONE,
+                data={
+                    'response': response_content,
+                    'reflection': reflection_content,
+                    'signals_raw': parser.get_signals_buffer(),
+                    'action_hints_raw': parser.get_action_hints_buffer(),
+                    'extraction_enabled': True,
+                },
+            )
+
+        except Exception as e:
+            logger.exception("custom_prompt_analysis_error")
+            yield StreamEvent(
+                type=StreamEventType.ERROR,
+                data={'error': str(e)},
+            )

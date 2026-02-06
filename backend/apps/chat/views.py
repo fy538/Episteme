@@ -800,11 +800,19 @@ async def unified_stream(request, thread_id):
         action_hints_json = ""
         extraction_enabled = True
 
+        # Check if thread is in scaffolding mode
+        thread_metadata = thread.metadata or {}
+        system_prompt_override = None
+        if thread_metadata.get('mode') == 'scaffolding':
+            from apps.intelligence.prompts import build_scaffolding_system_prompt
+            system_prompt_override = build_scaffolding_system_prompt()
+
         try:
             async for event in engine.analyze_simple(
                 thread=thread,
                 user_message=content,
-                conversation_context=conversation_context
+                conversation_context=conversation_context,
+                system_prompt_override=system_prompt_override,
             ):
                 if event.type == StreamEventType.RESPONSE_CHUNK:
                     response_content += event.data

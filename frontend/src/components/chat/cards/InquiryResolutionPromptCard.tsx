@@ -2,10 +2,12 @@
  * InquiryResolutionPromptCard - Prompts user to resolve an inquiry
  *
  * Appears when there's strong evidence suggesting an inquiry can be resolved.
+ * Includes confirmation step before resolving.
  */
 
 'use client';
 
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   ActionCard,
@@ -21,6 +23,7 @@ interface InquiryResolutionPromptCardProps {
   onResolve: (inquiryId: string, conclusion?: string) => void;
   onAddMore: (inquiryId: string) => void;
   onDismiss: () => void;
+  isResolving?: boolean;
 }
 
 export function InquiryResolutionPromptCard({
@@ -28,10 +31,66 @@ export function InquiryResolutionPromptCard({
   onResolve,
   onAddMore,
   onDismiss,
+  isResolving = false,
 }: InquiryResolutionPromptCardProps) {
+  const [showConfirm, setShowConfirm] = useState(false);
   const data = card.data as unknown as InquiryResolutionPromptData;
   const { inquiryId, inquiryTitle, evidenceCount, suggestedConclusion } = data;
 
+  // Confirmation view
+  if (showConfirm) {
+    return (
+      <div className="my-3 mx-4">
+        <ActionCard variant="info">
+          <ActionCardHeader icon="?">
+            <ActionCardTitle>Confirm Resolution</ActionCardTitle>
+            <ActionCardDescription>
+              Resolving &quot;{inquiryTitle}&quot; will mark it as complete with this conclusion.
+              This action helps finalize your analysis.
+            </ActionCardDescription>
+
+            {suggestedConclusion && (
+              <div className="mt-2 p-2 bg-info-100 dark:bg-info-800/30 rounded text-sm">
+                <span className="text-xs text-info-700 dark:text-info-300 font-medium block mb-1">
+                  Conclusion:
+                </span>
+                <span className="text-neutral-700 dark:text-neutral-300">
+                  {suggestedConclusion}
+                </span>
+              </div>
+            )}
+          </ActionCardHeader>
+
+          <ActionCardFooter className="ml-7">
+            <Button
+              size="sm"
+              onClick={() => onResolve(inquiryId, suggestedConclusion)}
+              disabled={isResolving}
+            >
+              {isResolving ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                  Resolving...
+                </span>
+              ) : (
+                'Yes, Resolve'
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowConfirm(false)}
+              disabled={isResolving}
+            >
+              Cancel
+            </Button>
+          </ActionCardFooter>
+        </ActionCard>
+      </div>
+    );
+  }
+
+  // Default view
   return (
     <div className="my-3 mx-4">
       <ActionCard variant="success">
@@ -57,7 +116,7 @@ export function InquiryResolutionPromptCard({
         <ActionCardFooter className="ml-7">
           <Button
             size="sm"
-            onClick={() => onResolve(inquiryId, suggestedConclusion)}
+            onClick={() => setShowConfirm(true)}
           >
             Resolve
           </Button>

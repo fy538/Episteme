@@ -137,8 +137,33 @@ def validate_skill_md(content: str) -> Tuple[bool, List[str]]:
                                 f"Invalid agent type '{agent}'. "
                                 f"Must be one of: {', '.join(valid_agents)}"
                             )
-    
+
+            # Validate research_config if present
+            if 'research_config' in episteme:
+                rc_errors = _validate_research_config(episteme['research_config'])
+                errors.extend(rc_errors)
+
     return len(errors) == 0, errors
+
+
+def _validate_research_config(raw_config) -> List[str]:
+    """
+    Validate research_config section of episteme config.
+
+    Parses into ResearchConfig dataclass and runs validation.
+    Returns list of error strings (empty if valid).
+    """
+    if not isinstance(raw_config, dict):
+        return ["Field 'episteme.research_config' must be an object"]
+
+    try:
+        from apps.agents.research_config import ResearchConfig
+        config = ResearchConfig.from_dict(raw_config)
+        is_valid, config_errors = config.validate()
+        # Prefix errors with path
+        return [f"research_config: {e}" for e in config_errors]
+    except Exception as e:
+        return [f"research_config: Failed to parse — {e}"]
 
 
 def extract_metadata_from_yaml(content: str) -> Dict:

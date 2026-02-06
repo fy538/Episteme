@@ -36,9 +36,9 @@ export function CaseCardExpanded({
   const [showInquiries, setShowInquiries] = useState(false);
   const [showThreads, setShowThreads] = useState(false);
 
-  const confidenceLevel = caseData.confidence != null ? caseData.confidence : 0;
-  const isHighConfidence = confidenceLevel >= 0.7;
-  const isMediumConfidence = confidenceLevel >= 0.4 && confidenceLevel < 0.7;
+  const confidenceLevel = caseData.user_confidence != null ? caseData.user_confidence : 0;
+  const isHighConfidence = confidenceLevel >= 70;
+  const isMediumConfidence = confidenceLevel >= 40 && confidenceLevel < 70;
 
   return (
     <Card className="hover:border-accent-500 dark:hover:border-accent-600 transition-colors">
@@ -64,11 +64,11 @@ export function CaseCardExpanded({
                   isMediumConfidence ? 'bg-warning-600' :
                   'bg-error-600'
                 )}
-                style={{ width: `${confidenceLevel * 100}%` }}
+                style={{ width: `${confidenceLevel}%` }}
               />
             </div>
             <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300 w-12">
-              {Math.round(confidenceLevel * 100)}%
+              {confidenceLevel}%
             </span>
           </div>
         </div>

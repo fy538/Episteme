@@ -20,12 +20,14 @@ interface CaseCreationPromptCardProps {
   card: InlineActionCard;
   onCreateCase: (suggestedTitle?: string) => void;
   onDismiss: () => void;
+  isCreating?: boolean;
 }
 
 export function CaseCreationPromptCard({
   card,
   onCreateCase,
   onDismiss,
+  isCreating = false,
 }: CaseCreationPromptCardProps) {
   const data = card.data as unknown as CaseCreationPromptData;
   const { signalCount, suggestedTitle, keyQuestions, aiReason } = data;
@@ -75,10 +77,17 @@ export function CaseCreationPromptCard({
         </ActionCardHeader>
 
         <ActionCardFooter className="ml-7">
-          <Button size="sm" onClick={() => onCreateCase(suggestedTitle)}>
-            Create Case
+          <Button size="sm" onClick={() => onCreateCase(suggestedTitle)} disabled={isCreating}>
+            {isCreating ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                Creating...
+              </span>
+            ) : (
+              'Create Case'
+            )}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDismiss}>
+          <Button variant="ghost" size="sm" onClick={onDismiss} disabled={isCreating}>
             Keep Chatting
           </Button>
         </ActionCardFooter>
