@@ -88,7 +88,7 @@ export function BriefContextModal({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-lg mx-4 max-h-[90vh] bg-white dark:bg-neutral-900 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+      <div className="relative w-full max-w-lg mx-4 max-h-[90vh] bg-white dark:bg-neutral-900 rounded-lg shadow-lg overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
           <div>

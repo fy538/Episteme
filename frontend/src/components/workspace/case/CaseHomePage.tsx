@@ -25,6 +25,8 @@ import { BriefContextModal } from '@/components/workspace/actions/BriefContextMo
 import { IntelligentBrief } from '@/components/workspace/case/IntelligentBrief';
 import { NoInquiriesEmpty } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { MessageInput } from '@/components/chat/MessageInput';
 import { cn } from '@/lib/utils';
 import type { Case, Inquiry } from '@/lib/types/case';
 import type { IntelligenceItem, BriefContextSettings } from '@/lib/types/intelligence';
@@ -52,16 +54,12 @@ interface CaseHomePageProps {
   onUploadSource?: () => void;
   onGenerateResearch?: () => void;
   onAddInquiry?: () => void;
+  onDelete?: () => void;
   className?: string;
 }
 
-// Mock sources data
-const mockSources: Source[] = [
-  { id: 'src-1', name: 'Company Financials 2023.pdf', type: 'document', linkedInquiries: 3 },
-  { id: 'src-2', name: 'Auditor Notes Q4.pdf', type: 'document', linkedInquiries: 2 },
-  { id: 'src-3', name: 'Research: Comparable Multiples', type: 'research', linkedInquiries: 1, isNew: true },
-  { id: 'src-4', name: 'Research: Industry Benchmarks', type: 'research', linkedInquiries: 1 },
-];
+// Default empty — real sources should come from API via props
+const defaultSources: Source[] = [];
 
 // Brief summary is now handled by IntelligentBrief component
 
@@ -69,17 +67,15 @@ export function CaseHomePage({
   caseData,
   inquiries,
   projectTitle,
-  sources = mockSources,
-  lastChatMessage = {
-    content: 'Let me analyze the revenue recognition discrepancy...',
-    timestamp: 'Yesterday 4:32 PM',
-  },
+  sources = defaultSources,
+  lastChatMessage,
   onStartChat,
   onOpenBrief,
   onOpenSettings,
   onUploadSource,
   onGenerateResearch,
   onAddInquiry,
+  onDelete,
   className,
 }: CaseHomePageProps) {
   const router = useRouter();
@@ -89,6 +85,7 @@ export function CaseHomePage({
   const [showTensionPanel, setShowTensionPanel] = useState(false);
   const [showBlindSpotModal, setShowBlindSpotModal] = useState(false);
   const [showBriefContextModal, setShowBriefContextModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Fetch intelligence and readiness
   const { topAction, dismissItem } = useIntelligence({
@@ -116,19 +113,19 @@ export function CaseHomePage({
       case 'explore':
         // Navigate to chat with pre-filled prompt
         const prompt = encodeURIComponent(item.exploration?.question || item.title);
-        router.push(`/chat?case=${caseData.id}&prompt=${prompt}`);
+        router.push(`/?case=${caseData.id}&prompt=${prompt}`);
         break;
       case 'research_ready':
         // Navigate to document viewer or research page
-        router.push(`/workspace/cases/${caseData.id}/research`);
+        router.push(`/cases/${caseData.id}/research`);
         break;
       case 'ready':
         // Navigate to brief editor
-        router.push(`/workspace/cases/${caseData.id}/brief`);
+        router.push(`/cases/${caseData.id}/brief`);
         break;
       default:
         // Default: navigate to case detail
-        router.push(`/workspace/cases/${caseData.id}`);
+        router.push(`/cases/${caseData.id}`);
     }
   };
 
@@ -152,13 +149,13 @@ export function CaseHomePage({
     console.log('Research blind spot:', selectedItem?.id);
     // TODO: Trigger research generation
     setShowBlindSpotModal(false);
-    router.push(`/workspace/cases/${caseData.id}/research?topic=${encodeURIComponent(selectedItem?.blindSpot?.area || '')}`);
+    router.push(`/cases/${caseData.id}/research?topic=${encodeURIComponent(selectedItem?.blindSpot?.area || '')}`);
   };
 
   const handleBlindSpotDiscuss = () => {
     console.log('Discuss blind spot:', selectedItem?.id);
     const prompt = encodeURIComponent(`Help me understand ${selectedItem?.blindSpot?.area || selectedItem?.title}`);
-    router.push(`/chat?case=${caseData.id}&prompt=${prompt}`);
+    router.push(`/?case=${caseData.id}&prompt=${prompt}`);
     setShowBlindSpotModal(false);
   };
 
@@ -189,7 +186,7 @@ export function CaseHomePage({
         {/* Breadcrumb */}
         {projectTitle && (
           <Link
-            href={`/workspace/projects/${caseData.project}`}
+            href={`/projects/${caseData.project}`}
             className="text-sm text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 mb-2 inline-flex items-center gap-1"
           >
             <ChevronLeftIcon className="w-4 h-4" />
@@ -214,18 +211,32 @@ export function CaseHomePage({
             <Button variant="ghost" size="icon" onClick={onOpenSettings} title="Settings">
               <SettingsIcon className="w-5 h-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onStartChat} title="New Chat">
-              <ChatIcon className="w-5 h-5" />
-            </Button>
             <Button variant="ghost" size="icon" onClick={onOpenBrief} title="Case Brief">
               <DocumentIcon className="w-5 h-5" />
             </Button>
+            {onDelete && (
+              <Button variant="ghost" size="icon" onClick={() => setShowDeleteConfirm(true)} title="Archive case">
+                <TrashIcon className="w-5 h-5" />
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
+      {/* Inline chat input */}
+      <div className="mb-6 rounded-lg border border-neutral-200/60 dark:border-neutral-700/50 overflow-hidden">
+        <MessageInput
+          variant="hero"
+          onSend={(content) => {
+            const prompt = encodeURIComponent(content);
+            router.push(`/cases/${caseData.id}?prompt=${prompt}`);
+          }}
+          placeholder="Continue working on this case..."
+        />
+      </div>
+
       {/* Readiness Meter */}
-      <section className="mb-8 p-4 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-neutral-50/50 dark:bg-neutral-900/50">
+      <section className="mb-8 p-4 border border-neutral-200/80 dark:border-neutral-800/80 rounded-md bg-neutral-50/50 dark:bg-neutral-900/50">
         <ReadinessMeter
           score={readiness.score}
           inquiries={readiness.inquiries}
@@ -286,7 +297,7 @@ export function CaseHomePage({
               Context
             </button>
             <Link
-              href={`/workspace/cases/${caseData.id}/brief`}
+              href={`/cases/${caseData.id}/brief`}
               className="text-xs text-accent-600 dark:text-accent-400 hover:underline"
             >
               Full editor →
@@ -298,11 +309,11 @@ export function CaseHomePage({
           caseData={caseData}
           inquiries={inquiries}
           onNavigateToInquiry={(inquiryId) => {
-            router.push(`/workspace/cases/${caseData.id}?inquiry=${inquiryId}`);
+            router.push(`/cases/${caseData.id}?inquiry=${inquiryId}`);
           }}
           onStartChat={onStartChat}
           onOpenBriefEditor={() => {
-            router.push(`/workspace/cases/${caseData.id}/brief`);
+            router.push(`/cases/${caseData.id}/brief`);
           }}
         />
       </section>
@@ -329,25 +340,27 @@ export function CaseHomePage({
         </div>
       </section>
 
-      {/* Recent Chat */}
-      <section>
-        <h2 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3">
-          Recent Chat
-        </h2>
-        <div className="p-4 border border-neutral-200 dark:border-neutral-800 rounded-xl">
-          <p className="text-sm text-neutral-700 dark:text-neutral-300 line-clamp-2">
-            "{lastChatMessage.content}"
-          </p>
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              {lastChatMessage.timestamp}
-            </span>
-            <Button size="sm" onClick={onStartChat}>
-              Continue →
-            </Button>
+      {/* Recent Chat — only shown when real data is provided */}
+      {lastChatMessage && (
+        <section>
+          <h2 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3">
+            Recent Chat
+          </h2>
+          <div className="p-4 border border-neutral-200/80 dark:border-neutral-800/80 rounded-md">
+            <p className="text-sm text-neutral-700 dark:text-neutral-300 line-clamp-2">
+              &ldquo;{lastChatMessage.content}&rdquo;
+            </p>
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                {lastChatMessage.timestamp}
+              </span>
+              <Button size="sm" onClick={onStartChat}>
+                Continue →
+              </Button>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Tension Slide Over */}
       {selectedItem?.tension && (
@@ -394,6 +407,20 @@ export function CaseHomePage({
         onClose={() => setShowBriefContextModal(false)}
         onRegenerate={handleBriefRegenerate}
       />
+
+      {/* Delete Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={() => {
+          setShowDeleteConfirm(false);
+          onDelete?.();
+        }}
+        title="Archive case"
+        description={`"${caseData.title}" will be archived. You can restore it later.`}
+        confirmLabel="Archive"
+        variant="danger"
+      />
     </div>
   );
 }
@@ -404,7 +431,7 @@ function InquiryRow({ inquiry, caseId }: { inquiry: Inquiry; caseId: string }) {
 
   return (
     <Link
-      href={`/workspace/cases/${caseId}?inquiry=${inquiry.id}`}
+      href={`/cases/${caseId}?inquiry=${inquiry.id}`}
       className="flex items-center justify-between p-3 border border-neutral-200 dark:border-neutral-800 rounded-lg hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
     >
       <div className="flex items-center gap-3">
@@ -468,6 +495,15 @@ function ChevronLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="3 6 5 6 21 6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

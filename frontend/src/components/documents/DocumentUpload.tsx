@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/toast';
 import { documentsAPI } from '@/lib/api/documents';
 
 interface DocumentUploadProps {
@@ -20,6 +21,7 @@ interface DocumentUploadProps {
 }
 
 export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUploadProps) {
+  const { addToast } = useToast();
   const [uploading, setUploading] = useState(false);
   const [pasteMode, setPasteMode] = useState(false);
   const [pastedText, setPastedText] = useState('');
@@ -43,7 +45,7 @@ export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUpload
       setTitle('');
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('Upload failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      addToast({ title: 'Upload failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'error' });
     } finally {
       setUploading(false);
     }
@@ -51,7 +53,7 @@ export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUpload
 
   const handlePaste = async () => {
     if (!pastedText.trim() || !title.trim()) {
-      alert('Please provide both title and content');
+      addToast({ title: 'Missing fields', description: 'Please provide both title and content', variant: 'warning' });
       return;
     }
 
@@ -71,7 +73,7 @@ export function DocumentUpload({ caseId, projectId, onUploaded }: DocumentUpload
       setPasteMode(false);
     } catch (error) {
       console.error('Upload failed:', error);
-      alert('Upload failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      addToast({ title: 'Upload failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'error' });
     } finally {
       setUploading(false);
     }

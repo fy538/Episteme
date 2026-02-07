@@ -19,7 +19,6 @@ interface ThinkingSectionProps {
   isStreaming?: boolean;
   mode: ChatMode;
   collapsed?: boolean;
-  onToggleCollapse?: () => void;
 }
 
 const MODE_LABELS: Record<ChatMode, string> = {
@@ -45,7 +44,6 @@ export function ThinkingSection({
   isStreaming = false,
   mode,
   collapsed = false,
-  onToggleCollapse,
 }: ThinkingSectionProps) {
   const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false);
 
@@ -54,11 +52,7 @@ export function ThinkingSection({
   const modeTheme = getModeTheme(mode);
 
   const handleToggle = () => {
-    if (onToggleCollapse) {
-      onToggleCollapse();
-    } else {
-      setIsManuallyCollapsed(!isManuallyCollapsed);
-    }
+    setIsManuallyCollapsed(!isManuallyCollapsed);
   };
 
   // Split content into paragraphs
@@ -70,6 +64,7 @@ export function ThinkingSection({
       {/* Header */}
       <button
         onClick={handleToggle}
+        aria-expanded={!shouldCollapse}
         className={cn(
           'w-full px-3 py-2 flex items-center justify-between transition-colors',
           modeTheme.bgHover,
@@ -77,16 +72,16 @@ export function ThinkingSection({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className={cn('text-xs', modeTheme.text)}>{'>'}</span>
+          <span className={cn('text-xs', modeTheme.text)} aria-hidden="true">{'>'}</span>
           <span className={cn('text-xs tracking-wider font-medium uppercase', modeTheme.text)}>
             {MODE_LABELS[mode]}
           </span>
           {isStreaming && (
-            <span className={cn('animate-pulse text-xs', modeTheme.text)}>_</span>
+            <span className={cn('animate-pulse text-xs', modeTheme.text)} aria-label="Streaming">_</span>
           )}
         </div>
         {hasContent && (
-          <span className={cn('text-xs', modeTheme.textMuted)}>
+          <span className={cn('text-xs', modeTheme.textMuted)} aria-hidden="true">
             {shouldCollapse ? '[+]' : '[-]'}
           </span>
         )}

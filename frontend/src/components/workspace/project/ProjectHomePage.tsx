@@ -21,17 +21,12 @@ import { TensionSlideOver } from '@/components/workspace/actions/TensionSlideOve
 import { BlindSpotModal } from '@/components/workspace/actions/BlindSpotModal';
 import { NoCasesEmpty } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { MessageInput } from '@/components/chat/MessageInput';
 import { cn } from '@/lib/utils';
 import type { Project } from '@/lib/types/project';
-import type { Case, Inquiry } from '@/lib/types/case';
 import type { IntelligenceItem } from '@/lib/types/intelligence';
-
-interface CaseWithInquiries extends Case {
-  inquiries: Inquiry[];
-  readinessScore: number;
-  tensionsCount: number;
-  blindSpotsCount: number;
-}
+import type { CaseWithInquiries } from '@/hooks/useProjectsQuery';
 
 interface ProjectHomePageProps {
   project: Project;
@@ -39,6 +34,7 @@ interface ProjectHomePageProps {
   onCreateCase?: () => void;
   onStartChat?: () => void;
   onOpenSettings?: () => void;
+  onDelete?: () => void;
   className?: string;
 }
 
@@ -48,6 +44,7 @@ export function ProjectHomePage({
   onCreateCase,
   onStartChat,
   onOpenSettings,
+  onDelete,
   className,
 }: ProjectHomePageProps) {
   const router = useRouter();
@@ -56,6 +53,7 @@ export function ProjectHomePage({
   const [selectedItem, setSelectedItem] = useState<IntelligenceItem | null>(null);
   const [showTensionPanel, setShowTensionPanel] = useState(false);
   const [showBlindSpotModal, setShowBlindSpotModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Fetch intelligence for project scope
   const { topAction, exploration, activity, isLoading, dismissItem } = useIntelligence({
@@ -82,24 +80,24 @@ export function ProjectHomePage({
         // Navigate to chat with pre-filled prompt
         const prompt = encodeURIComponent(item.exploration?.question || item.title);
         const chatUrl = item.caseId
-          ? `/chat?case=${item.caseId}&prompt=${prompt}`
-          : `/chat?project=${project.id}&prompt=${prompt}`;
+          ? `/?case=${item.caseId}&prompt=${prompt}`
+          : `/?project=${project.id}&prompt=${prompt}`;
         router.push(chatUrl);
         break;
       case 'research_ready':
         if (item.caseId) {
-          router.push(`/workspace/cases/${item.caseId}/research`);
+          router.push(`/cases/${item.caseId}/research`);
         }
         break;
       case 'ready':
         if (item.caseId) {
-          router.push(`/workspace/cases/${item.caseId}/brief`);
+          router.push(`/cases/${item.caseId}/brief`);
         }
         break;
       default:
         // Default: navigate to the relevant case
         if (item.caseId) {
-          router.push(`/workspace/cases/${item.caseId}`);
+          router.push(`/cases/${item.caseId}`);
         }
     }
   };
@@ -108,8 +106,8 @@ export function ProjectHomePage({
   const handleExploreClick = (item: IntelligenceItem) => {
     const prompt = encodeURIComponent(item.exploration?.question || item.title);
     const chatUrl = item.caseId
-      ? `/chat?case=${item.caseId}&prompt=${prompt}`
-      : `/chat?project=${project.id}&prompt=${prompt}`;
+      ? `/?case=${item.caseId}&prompt=${prompt}`
+      : `/?project=${project.id}&prompt=${prompt}`;
     router.push(chatUrl);
   };
 
@@ -133,7 +131,7 @@ export function ProjectHomePage({
     console.log('Research blind spot:', selectedItem?.id);
     setShowBlindSpotModal(false);
     if (selectedItem?.caseId) {
-      router.push(`/workspace/cases/${selectedItem.caseId}/research?topic=${encodeURIComponent(selectedItem?.blindSpot?.area || '')}`);
+      router.push(`/cases/${selectedItem.caseId}/research?topic=${encodeURIComponent(selectedItem?.blindSpot?.area || '')}`);
     }
   };
 
@@ -141,8 +139,8 @@ export function ProjectHomePage({
     console.log('Discuss blind spot:', selectedItem?.id);
     const prompt = encodeURIComponent(`Help me understand ${selectedItem?.blindSpot?.area || selectedItem?.title}`);
     const chatUrl = selectedItem?.caseId
-      ? `/chat?case=${selectedItem.caseId}&prompt=${prompt}`
-      : `/chat?project=${project.id}&prompt=${prompt}`;
+      ? `/?case=${selectedItem.caseId}&prompt=${prompt}`
+      : `/?project=${project.id}&prompt=${prompt}`;
     router.push(chatUrl);
     setShowBlindSpotModal(false);
   };
@@ -166,7 +164,7 @@ export function ProjectHomePage({
       <header className="mb-6">
         {/* Breadcrumb */}
         <Link
-          href="/workspace"
+          href="/"
           className="text-sm text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 mb-2 inline-flex items-center gap-1"
         >
           <ChevronLeftIcon className="w-4 h-4" />
@@ -190,12 +188,26 @@ export function ProjectHomePage({
             <Button variant="ghost" size="icon" onClick={onOpenSettings} title="Settings">
               <SettingsIcon className="w-5 h-5" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onStartChat} title="New Chat">
-              <ChatIcon className="w-5 h-5" />
-            </Button>
+            {onDelete && (
+              <Button variant="ghost" size="icon" onClick={() => setShowDeleteConfirm(true)} title="Archive project">
+                <TrashIcon className="w-5 h-5" />
+              </Button>
+            )}
           </div>
         </div>
       </header>
+
+      {/* Inline chat input */}
+      <div className="mb-6 rounded-lg border border-neutral-200/60 dark:border-neutral-700/50 overflow-hidden">
+        <MessageInput
+          variant="hero"
+          onSend={(content) => {
+            const prompt = encodeURIComponent(content);
+            router.push(`/?project=${project.id}&prompt=${prompt}`);
+          }}
+          placeholder="Ask about this project..."
+        />
+      </div>
 
       {/* Recommended Action */}
       {topAction && !isLoading && (
@@ -234,7 +246,7 @@ export function ProjectHomePage({
               </span>
             )}
           </div>
-          <div className="border border-neutral-200 dark:border-neutral-800 rounded-xl overflow-hidden">
+          <div className="border border-neutral-200/80 dark:border-neutral-800/80 rounded-md overflow-hidden">
             <NewActivityFeed items={activity} maxItems={3} />
           </div>
         </section>
@@ -307,6 +319,20 @@ export function ProjectHomePage({
           onMarkAddressed={handleBlindSpotMarkAddressed}
         />
       )}
+
+      {/* Delete Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={() => {
+          setShowDeleteConfirm(false);
+          onDelete?.();
+        }}
+        title="Archive project"
+        description={`"${project.title}" and all its cases will be archived. You can restore it later.`}
+        confirmLabel="Archive"
+        variant="danger"
+      />
     </div>
   );
 }
@@ -320,7 +346,7 @@ function ExplorationCard({
   onExplore: (item: IntelligenceItem) => void;
 }) {
   return (
-    <div className="p-4 border border-primary-200 dark:border-primary-800 rounded-xl bg-primary-50/50 dark:bg-primary-900/10">
+    <div className="p-4 border border-primary-200/60 dark:border-primary-800/60 rounded-md bg-primary-50/50 dark:bg-primary-900/10">
       <div className="flex items-start gap-3">
         <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
           <ExploreIcon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
@@ -354,7 +380,7 @@ function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
   const resolvedInquiries = caseItem.inquiries.filter(i => i.status === 'resolved').length;
 
   return (
-    <div className="border border-neutral-200 dark:border-neutral-800 rounded-xl overflow-hidden">
+    <div className="border border-neutral-200/80 dark:border-neutral-800/80 rounded-md overflow-hidden">
       {/* Case Header */}
       <div className="flex items-center gap-3 p-4">
         {/* Expand toggle */}
@@ -374,7 +400,7 @@ function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
 
         {/* Case info */}
         <Link
-          href={`/workspace/cases/${caseItem.id}`}
+          href={`/cases/${caseItem.id}`}
           className="flex-1 flex items-center justify-between hover:opacity-80 transition-opacity"
         >
           <div className="flex items-center gap-3">
@@ -419,7 +445,7 @@ function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
           {caseItem.inquiries.map((inquiry) => (
             <Link
               key={inquiry.id}
-              href={`/workspace/cases/${caseItem.id}?inquiry=${inquiry.id}`}
+              href={`/cases/${caseItem.id}?inquiry=${inquiry.id}`}
               className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition-colors"
             >
               {inquiry.status === 'resolved' ? (
@@ -475,6 +501,15 @@ function ChatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="3 6 5 6 21 6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

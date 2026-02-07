@@ -56,7 +56,7 @@ export function Dialog({
   const dialogContent = (
     <div
       className={cn(
-        'bg-white dark:bg-primary-900 rounded-lg shadow-xl w-full',
+        'bg-white dark:bg-primary-900 rounded-md shadow-lg w-full',
         {
           'max-w-sm': size === 'sm',
           'max-w-md': size === 'md',

@@ -333,7 +333,7 @@ export function ScaffoldingChat({
 
   const handleGoToCase = useCallback(() => {
     if (createdCaseId) {
-      router.push(`/workspace/cases/${createdCaseId}/overview`);
+      router.push(`/cases/${createdCaseId}/overview`);
     }
   }, [createdCaseId, router]);
 

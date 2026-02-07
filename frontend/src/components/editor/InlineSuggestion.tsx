@@ -183,9 +183,16 @@ export function useInlineSuggestions(
     setIsLoading(true);
 
     try {
-      // This would call the backend for suggestions
-      // For now, return a placeholder
-      setSuggestion(null);
+      const result = await documentsAPI.getInlineCompletion(
+        documentId,
+        contextBefore,
+        contextAfter,
+        50
+      );
+
+      if (result.completion) {
+        setSuggestion(result.completion);
+      }
     } catch (err) {
       console.error('Failed to get suggestion:', err);
     } finally {

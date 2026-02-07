@@ -11,15 +11,48 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 from .research_config import ResearchConfig
 from .research_tools import ResearchTool, SearchResult, resolve_tools_for_config
 from . import research_prompts as prompts
 
 logger = logging.getLogger(__name__)
+
+# ─── Constants ─────────────────────────────────────────────────────────────
+
+MAX_FOLLOWUPS_PER_ROUND = 3
+MAX_RESULTS_PER_QUERY = 5
+MAX_CONTRARY_FINDINGS = 5
+MAX_CITATION_LEADS_PER_ROUND = 5
+COMPACTION_TOKEN_THRESHOLD = 60_000
+COMPACT_KEEP_RATIO = 0.6
+MIN_FINDINGS_AFTER_COMPACT = 10
+MIN_FINDINGS_FOR_COMPACTION = 20
+
+
+# ─── Provider Protocol ─────────────────────────────────────────────────────
+
+class LLMProviderProtocol(Protocol):
+    """Structural type for LLM providers — any object with generate() qualifies.
+
+    The research loop checks ``hasattr(provider, 'generate')`` at call time.
+    Providers that only expose ``stream_chat()`` (async iterator of chunks)
+    are supported via an automatic fallback that collects the stream.
+    """
+
+    async def generate(
+        self,
+        messages: list[dict],
+        system_prompt: str = "",
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+    ) -> str: ...
 
 
 # ─── Data Models ────────────────────────────────────────────────────────────
@@ -62,8 +95,8 @@ class ResearchPlan:
         if iteration == 0:
             return self.sub_queries
         # Later iterations use followup queries
-        pending = self.followups[:3]  # Max 3 followups per round
-        self.followups = self.followups[3:]
+        pending = self.followups[:MAX_FOLLOWUPS_PER_ROUND]
+        self.followups = self.followups[MAX_FOLLOWUPS_PER_ROUND:]
         return pending
 
 
@@ -132,21 +165,31 @@ class ResearchLoop:
         self,
         config: ResearchConfig,
         prompt_extension: str,
-        provider,  # LLMProvider instance
+        provider: LLMProviderProtocol,
         tools: list[ResearchTool],
         progress_callback: Optional[Callable] = None,
         trace_id: Optional[str] = None,
+        checkpoint_callback: Optional[Callable] = None,
+        trajectory_recorder: Optional[Any] = None,
     ):
         self.config = config
         self.prompt_extension = prompt_extension
         self.provider = provider
         self.tools = {t.name: t for t in tools}
         self.progress_callback = progress_callback
+        self.checkpoint_callback = checkpoint_callback
+        self.trajectory_recorder = trajectory_recorder
 
         # Runtime state
         self._total_sources_found = 0
         self._search_rounds = 0
         self._semaphore = asyncio.Semaphore(self.config.search.parallel_branches)
+
+        # Context budget tracking (optional)
+        self._context_tracker = None
+        if hasattr(provider, 'context_window_tokens'):
+            from .context_manager import ContextBudgetTracker
+            self._context_tracker = ContextBudgetTracker(provider.context_window_tokens)
 
         # Observability
         self._trace_id = trace_id
@@ -158,14 +201,55 @@ class ResearchLoop:
 
         # 1. PLAN
         await self._emit_progress("planning", "Decomposing research question...")
+        plan_start = time.time()
         plan = await self._plan(question, context)
+        self._record_trajectory(
+            "plan",
+            input_summary=f"Question: {question[:200]}",
+            output_summary=f"{len(plan.sub_queries)} sub-queries, strategy: {plan.strategy_notes[:200]}",
+            decision_rationale=f"Decomposition: {self.config.search.decomposition}",
+            metrics={"sub_queries": len(plan.sub_queries)},
+            duration_ms=int((time.time() - plan_start) * 1000),
+        )
         await self._emit_progress("plan_complete", f"Created {len(plan.sub_queries)} sub-queries")
+        await self._emit_checkpoint("plan", 0, plan, [], question, context)
 
-        # 2. SEARCH + EXTRACT + EVALUATE LOOP
-        all_findings: list[ScoredFinding] = []
+        # 2. SEARCH + EXTRACT + EVALUATE + CONTRARY + SYNTHESIZE
+        result = await self._iterate_and_synthesize(
+            plan=plan,
+            initial_findings=[],
+            question=question,
+            context=context,
+            start_iteration=0,
+        )
 
-        for iteration in range(self.config.search.max_iterations):
-            # Get queries for this round
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        result.metadata["generation_time_ms"] = elapsed_ms
+        result.plan = plan
+
+        await self._emit_progress(
+            "done",
+            f"Complete — {result.metadata['findings_count']} findings in {elapsed_ms / 1000:.1f}s",
+        )
+        return result
+
+    # ── Shared Iteration Loop ──────────────────────────────────────────
+
+    async def _iterate_and_synthesize(
+        self,
+        plan: ResearchPlan,
+        initial_findings: list[ScoredFinding],
+        question: str,
+        context: ResearchContext,
+        start_iteration: int = 0,
+    ) -> ResearchResult:
+        """
+        Run the search/extract/evaluate iteration loop, contrary check,
+        and synthesize step. Shared by run() and resume_from_checkpoint().
+        """
+        all_findings = list(initial_findings)
+
+        for iteration in range(start_iteration, self.config.search.max_iterations):
             queries = plan.get_pending_queries(iteration)
             if not queries:
                 logger.info("research_loop_no_queries", extra={"iteration": iteration})
@@ -173,12 +257,21 @@ class ResearchLoop:
 
             await self._emit_progress(
                 "searching",
-                f"Search round {iteration + 1}: {len(queries)} queries..."
+                f"Search round {iteration + 1}: {len(queries)} queries...",
             )
 
             # Search
+            search_start = time.time()
             raw_results = await self._search(queries)
             self._search_rounds += 1
+            domains_hit = list({r.domain for r in raw_results if r.domain})
+            self._record_trajectory(
+                "search",
+                input_summary=f"{len(queries)} queries: {', '.join(q.query[:50] for q in queries)}",
+                output_summary=f"{len(raw_results)} results from {len(domains_hit)} domains",
+                metrics={"results": len(raw_results), "domains": domains_hit[:10], "iteration": iteration},
+                duration_ms=int((time.time() - search_start) * 1000),
+            )
 
             if not raw_results:
                 logger.info("research_loop_no_results", extra={"iteration": iteration})
@@ -186,18 +279,38 @@ class ResearchLoop:
 
             # Extract
             await self._emit_progress("extracting", f"Extracting from {len(raw_results)} sources...")
+            extract_start = time.time()
             findings = await self._extract(raw_results)
+            self._record_trajectory(
+                "extract",
+                input_summary=f"{len(raw_results)} sources",
+                output_summary=f"{len(findings)} findings extracted",
+                metrics={"findings_extracted": len(findings), "iteration": iteration},
+                duration_ms=int((time.time() - extract_start) * 1000),
+            )
 
             # Evaluate
             await self._emit_progress("evaluating", f"Evaluating {len(findings)} findings...")
+            eval_start = time.time()
             scored = await self._evaluate(findings)
+            avg_relevance = sum(f.relevance_score for f in scored) / len(scored) if scored else 0
+            self._record_trajectory(
+                "evaluate",
+                input_summary=f"{len(findings)} findings",
+                output_summary=f"{len(scored)} scored, avg relevance: {avg_relevance:.2f}",
+                decision_rationale=f"Rubric: {self.config.get_effective_rubric()[:200]}",
+                metrics={"scored": len(scored), "avg_relevance": round(avg_relevance, 3), "iteration": iteration},
+                duration_ms=int((time.time() - eval_start) * 1000),
+            )
             all_findings.extend(scored)
             self._total_sources_found += len(scored)
+            await self._emit_checkpoint("evaluate", iteration, plan, all_findings, question, context)
 
             # Compact if findings are growing large
             if self._should_compact(all_findings):
                 await self._emit_progress("compacting", "Condensing findings...")
                 all_findings = await self._compact_findings(all_findings)
+                await self._emit_checkpoint("compact", iteration, plan, all_findings, question, context)
 
             # Follow citations if configured
             if (
@@ -207,6 +320,17 @@ class ResearchLoop:
                 citation_leads = self._get_citation_leads(scored)
                 if citation_leads:
                     plan.add_followups(citation_leads)
+
+            # Check context budget
+            if self._context_tracker:
+                self._context_tracker.track_findings([f.to_dict() for f in all_findings])
+                budget_status = self._context_tracker.check_budget()
+                if budget_status["needs_continuation"]:
+                    logger.info(
+                        "research_loop_context_exhausted",
+                        extra={"utilization": budget_status["utilization"], "iteration": iteration},
+                    )
+                    break
 
             # Check budget ceiling
             if self._total_sources_found >= self.config.completeness.max_sources:
@@ -221,32 +345,51 @@ class ResearchLoop:
                 break
 
             # Check completeness
-            if await self._is_complete(all_findings, question):
+            complete_start = time.time()
+            is_done = await self._is_complete(all_findings, question)
+            self._record_trajectory(
+                "completeness",
+                input_summary=f"{len(all_findings)} total findings",
+                output_summary="complete" if is_done else "continue",
+                decision_rationale=self.config.completeness.done_when[:200] if self.config.completeness.done_when else "min_sources met",
+                metrics={"is_complete": is_done, "findings": len(all_findings), "iteration": iteration},
+                duration_ms=int((time.time() - complete_start) * 1000),
+            )
+            if is_done:
                 await self._emit_progress("complete", "Research complete — sufficient coverage")
                 break
 
-        # 3. CONTRARY CHECK
+        # Contrary check
         if self.config.completeness.require_contrary_check and all_findings:
             await self._emit_progress("contrary_check", "Searching for contrary evidence...")
             contrary = await self._search_contrary(all_findings, question)
             all_findings.extend(contrary)
 
-        # 4. SYNTHESIZE
+        # Synthesize
         await self._emit_progress("synthesizing", "Writing research report...")
+        synth_start = time.time()
         result = await self._synthesize(all_findings, plan, question)
+        self._record_trajectory(
+            "synthesize",
+            input_summary=f"{len(all_findings)} findings, {len(plan.sub_queries)} sub-queries",
+            output_summary=f"{len(result.blocks)} blocks, {len(result.content)} chars",
+            metrics={"blocks": len(result.blocks), "content_length": len(result.content)},
+            duration_ms=int((time.time() - synth_start) * 1000),
+        )
 
-        elapsed_ms = int((time.time() - start_time) * 1000)
         result.metadata = {
-            "generation_time_ms": elapsed_ms,
             "iterations": self._search_rounds,
             "total_sources": self._total_sources_found,
             "findings_count": len(all_findings),
             "config_decomposition": self.config.search.decomposition,
             "config_eval_mode": self.config.evaluate.mode,
         }
-        result.plan = plan
 
-        await self._emit_progress("done", f"Complete — {len(all_findings)} findings in {elapsed_ms / 1000:.1f}s")
+        # Flag if context budget was exhausted
+        if self._context_tracker and self._context_tracker.budget.needs_continuation:
+            result.metadata["needs_continuation"] = True
+            result.metadata["context_utilization"] = round(self._context_tracker.budget.utilization, 3)
+
         return result
 
     # ── Step Implementations ────────────────────────────────────────────
@@ -295,7 +438,7 @@ class ResearchLoop:
                         query=sq.query,
                         domains=domains,
                         excluded_domains=excluded or None,
-                        max_results=5,
+                        max_results=MAX_RESULTS_PER_QUERY,
                     )
                 except Exception as e:
                     logger.exception(
@@ -373,6 +516,7 @@ class ResearchLoop:
         prompt = prompts.build_evaluate_prompt(
             findings=[f.to_dict() for f in findings],
             evaluate_config=self.config.evaluate,
+            effective_rubric=self.config.get_effective_rubric(),
             skill_instructions=self.prompt_extension,
         )
 
@@ -453,7 +597,7 @@ class ResearchLoop:
     ) -> list[ScoredFinding]:
         """Search for evidence that contradicts current findings."""
         prompt = prompts.build_contrary_prompt(
-            findings_summary=[f.to_dict() for f in findings[:5]],
+            findings_summary=[f.to_dict() for f in findings[:MAX_CONTRARY_FINDINGS]],
             original_question=question,
         )
 
@@ -485,6 +629,7 @@ class ResearchLoop:
             findings=[f.to_dict() for f in findings],
             plan={"strategy_notes": plan.strategy_notes},
             output_config=self.config.output,
+            effective_sections=self.config.get_effective_sections(),
             original_question=question,
             skill_instructions=self.prompt_extension,
         )
@@ -518,21 +663,30 @@ class ResearchLoop:
                             source_target="web",
                             rationale=f"Cited by {f.source.title}",
                         ))
-        return leads[:5]  # Limit citation leads per round
+                        if len(leads) >= MAX_CITATION_LEADS_PER_ROUND:
+                            return leads
+        return leads
 
     # ── Context Compaction ───────────────────────────────────────────────
 
     def _should_compact(self, findings: list[ScoredFinding]) -> bool:
         """Check if findings need compaction."""
-        if len(findings) < 20:
+        if len(findings) < MIN_FINDINGS_FOR_COMPACTION:
             return False
         estimated_tokens = self._estimate_findings_tokens(findings)
-        return estimated_tokens > 60_000
+        return estimated_tokens > COMPACTION_TOKEN_THRESHOLD
 
     def _estimate_findings_tokens(self, findings: list[ScoredFinding]) -> int:
         """Rough token estimate: ~4 chars per token."""
         total_chars = sum(
-            len(str(f.extracted_fields)) + len(f.raw_quote) + len(f.evaluation_notes)
+            len(str(f.extracted_fields))
+            + len(f.raw_quote)
+            + len(f.evaluation_notes)
+            + len(f.source.title)
+            + len(f.source.url)
+            + len(f.source.domain)
+            + len(str(f.relationships))
+            + 20  # score fields overhead (relevance_score, quality_score)
             for f in findings
         )
         return total_chars // 4
@@ -547,8 +701,7 @@ class ResearchLoop:
             key=lambda f: (f.relevance_score * 0.6 + f.quality_score * 0.4),
             reverse=True,
         )
-        # Keep top 60%, drop bottom 40%
-        keep_count = max(10, int(len(scored_sorted) * 0.6))
+        keep_count = max(MIN_FINDINGS_AFTER_COMPACT, int(len(scored_sorted) * COMPACT_KEEP_RATIO))
         top_findings = scored_sorted[:keep_count]
         dropped = scored_sorted[keep_count:]
 
@@ -559,6 +712,7 @@ class ResearchLoop:
         prompt = prompts.build_compact_prompt(
             dropped_findings=[f.to_dict() for f in dropped],
             kept_count=len(top_findings),
+            skill_instructions=self.prompt_extension,
         )
         response = await self._llm_call(
             prompt, prompts.COMPACT_SYSTEM, max_tokens=2000, step_name="compact"
@@ -658,6 +812,169 @@ class ResearchLoop:
             except Exception:
                 pass  # Progress is best-effort
 
+    def _record_trajectory(
+        self,
+        step_name: str,
+        input_summary: str = "",
+        output_summary: str = "",
+        decision_rationale: str = "",
+        metrics: dict | None = None,
+        duration_ms: int = 0,
+    ):
+        """Record a trajectory event if recorder is attached. Zero overhead otherwise."""
+        if self.trajectory_recorder is None:
+            return
+        try:
+            self.trajectory_recorder.record_step(
+                step_name=step_name,
+                input_summary=input_summary,
+                output_summary=output_summary,
+                decision_rationale=decision_rationale,
+                metrics=metrics,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            pass  # Trajectory is best-effort
+
+    async def _emit_checkpoint(
+        self,
+        phase: str,
+        iteration: int,
+        plan: ResearchPlan,
+        findings: list[ScoredFinding],
+        question: str,
+        context: ResearchContext,
+    ):
+        """Emit a checkpoint if callback is registered. Best-effort."""
+        if not self.checkpoint_callback:
+            return
+        try:
+            from .checkpoint import ResearchCheckpoint
+
+            checkpoint = ResearchCheckpoint(
+                correlation_id=self._trace_id or "",
+                question=question,
+                iteration=iteration,
+                phase=phase,
+                total_sources_found=self._total_sources_found,
+                search_rounds=self._search_rounds,
+                plan_dict={
+                    "sub_queries": [
+                        {"query": sq.query, "source_target": sq.source_target, "rationale": sq.rationale}
+                        for sq in plan.sub_queries
+                    ],
+                    "strategy_notes": plan.strategy_notes,
+                    "followups": [
+                        {"query": sq.query, "source_target": sq.source_target, "rationale": sq.rationale}
+                        for sq in plan.followups
+                    ],
+                },
+                findings_dicts=[f.to_dict() for f in findings],
+                config_dict=self.config.to_dict(),
+                prompt_extension=self.prompt_extension,
+                context_dict=context.to_dict(),
+            )
+            await asyncio.to_thread(self.checkpoint_callback, checkpoint)
+        except Exception:
+            pass  # Checkpoint is best-effort
+
+    # ── Resume from Checkpoint ────────────────────────────────────────────
+
+    @classmethod
+    async def resume_from_checkpoint(
+        cls,
+        checkpoint: Any,  # ResearchCheckpoint (avoid circular at module level)
+        config: ResearchConfig,
+        prompt_extension: str,
+        provider: LLMProviderProtocol,
+        tools: list[ResearchTool],
+        progress_callback: Optional[Callable] = None,
+        trace_id: Optional[str] = None,
+        checkpoint_callback: Optional[Callable] = None,
+        trajectory_recorder: Optional[Any] = None,
+    ) -> ResearchResult:
+        """
+        Resume a research loop from a saved checkpoint.
+
+        Reconstructs the plan and scored findings from the checkpoint,
+        then continues the iteration loop from where it left off.
+        """
+        loop = cls(
+            config=config,
+            prompt_extension=prompt_extension,
+            provider=provider,
+            tools=tools,
+            progress_callback=progress_callback,
+            trace_id=trace_id,
+            checkpoint_callback=checkpoint_callback,
+            trajectory_recorder=trajectory_recorder,
+        )
+
+        # Restore runtime state
+        loop._total_sources_found = checkpoint.total_sources_found
+        loop._search_rounds = checkpoint.search_rounds
+
+        # Rebuild plan
+        plan = ResearchPlan(
+            sub_queries=[
+                SubQuery(
+                    query=sq.get("query", ""),
+                    source_target=sq.get("source_target", "web"),
+                    rationale=sq.get("rationale", ""),
+                )
+                for sq in checkpoint.plan_dict.get("sub_queries", [])
+            ],
+            strategy_notes=checkpoint.plan_dict.get("strategy_notes", ""),
+            followups=[
+                SubQuery(
+                    query=sq.get("query", ""),
+                    source_target=sq.get("source_target", "web"),
+                    rationale=sq.get("rationale", ""),
+                )
+                for sq in checkpoint.plan_dict.get("followups", [])
+            ],
+        )
+
+        # Rebuild scored findings
+        all_findings = _rebuild_findings(checkpoint.findings_dicts)
+
+        # Rebuild context
+        context = ResearchContext(
+            case_title=checkpoint.context_dict.get("case_title", ""),
+            case_position=checkpoint.context_dict.get("case_position", ""),
+            conversation_context=checkpoint.context_dict.get("conversation_context", ""),
+        )
+        question = checkpoint.question
+
+        await loop._emit_progress(
+            "resuming",
+            f"Resuming from checkpoint at iteration {checkpoint.iteration} "
+            f"({len(all_findings)} findings recovered)",
+        )
+
+        start_time = time.time()
+        start_iteration = checkpoint.iteration + 1
+
+        result = await loop._iterate_and_synthesize(
+            plan=plan,
+            initial_findings=all_findings,
+            question=question,
+            context=context,
+            start_iteration=start_iteration,
+        )
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        result.metadata["generation_time_ms"] = elapsed_ms
+        result.metadata["resumed_from_checkpoint"] = True
+        result.metadata["resumed_at_iteration"] = checkpoint.iteration
+        result.plan = plan
+
+        await loop._emit_progress(
+            "done",
+            f"Complete — {result.metadata['findings_count']} findings in {elapsed_ms / 1000:.1f}s (resumed)",
+        )
+        return result
+
 
 # ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -676,7 +993,6 @@ def _parse_json_from_response(text: str) -> dict:
         pass
 
     # Try extracting from code fence
-    import re
     json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if json_match:
         try:
@@ -711,8 +1027,6 @@ def _parse_markdown_to_blocks(markdown: str) -> list[dict]:
     Parse markdown into artifact blocks.
     Compatible with the existing ArtifactVersion.blocks format.
     """
-    import uuid
-
     blocks = []
     lines = markdown.split("\n")
     current_paragraph = []
@@ -731,30 +1045,30 @@ def _parse_markdown_to_blocks(markdown: str) -> list[dict]:
     for line in lines:
         stripped = line.strip()
 
-        # Headings
-        if stripped.startswith("# "):
+        # Headings (check longest prefix first to avoid mis-classification)
+        if stripped.startswith("### "):
             flush_paragraph()
             blocks.append({
                 "id": str(uuid.uuid4()),
                 "type": "heading",
-                "content": stripped.lstrip("# ").strip(),
-                "metadata": {"level": 1},
+                "content": stripped[4:].strip(),
+                "metadata": {"level": 3},
             })
         elif stripped.startswith("## "):
             flush_paragraph()
             blocks.append({
                 "id": str(uuid.uuid4()),
                 "type": "heading",
-                "content": stripped.lstrip("# ").strip(),
+                "content": stripped[3:].strip(),
                 "metadata": {"level": 2},
             })
-        elif stripped.startswith("### "):
+        elif stripped.startswith("# "):
             flush_paragraph()
             blocks.append({
                 "id": str(uuid.uuid4()),
                 "type": "heading",
-                "content": stripped.lstrip("# ").strip(),
-                "metadata": {"level": 3},
+                "content": stripped[2:].strip(),
+                "metadata": {"level": 1},
             })
         elif stripped == "":
             flush_paragraph()
@@ -765,10 +1079,30 @@ def _parse_markdown_to_blocks(markdown: str) -> list[dict]:
     return blocks
 
 
-def _get_tracer():
+def _rebuild_findings(findings_dicts: list[dict]) -> list[ScoredFinding]:
+    """Reconstruct ScoredFinding objects from serialized dicts (checkpoint resume)."""
+    findings = []
+    for fd in findings_dicts:
+        findings.append(ScoredFinding(
+            source=SearchResult(
+                url=fd.get("source_url", ""),
+                title=fd.get("source_title", ""),
+                snippet="",
+                domain=fd.get("source_domain", ""),
+            ),
+            extracted_fields=fd.get("extracted_fields", {}),
+            raw_quote=fd.get("raw_quote", ""),
+            relationships=fd.get("relationships", []),
+            relevance_score=float(fd.get("relevance_score", 0.5)),
+            quality_score=float(fd.get("quality_score", 0.5)),
+            evaluation_notes=fd.get("evaluation_notes", ""),
+        ))
+    return findings
+
+
+def _get_tracer() -> Any:
     """Get Langfuse client if configured, else None. Best-effort — never raises."""
     try:
-        import os
         if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
             return None
         from langfuse import Langfuse

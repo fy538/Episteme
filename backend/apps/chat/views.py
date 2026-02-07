@@ -7,14 +7,16 @@ import logging
 import asyncio
 from asgiref.sync import sync_to_async
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import BaseRenderer
 from django.conf import settings
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST, require_GET
 
 from .models import ChatThread, Message
 from .serializers import (
@@ -38,6 +40,27 @@ class StreamingRenderer(BaseRenderer):
     def render(self, data, accepted_media_type=None, renderer_context=None):
         # StreamingHttpResponse handles rendering; return as-is.
         return data
+
+
+async def _authenticate_jwt(request):
+    """Authenticate a raw Django request using JWT (for async views outside DRF)."""
+    from rest_framework_simplejwt.authentication import JWTAuthentication
+    from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed as JWTAuthFailed
+    from django.contrib.auth.models import AnonymousUser
+
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+
+    jwt_auth = JWTAuthentication()
+    try:
+        validated_token = await sync_to_async(jwt_auth.get_validated_token)(
+            auth_header.split(' ', 1)[1]
+        )
+        user = await sync_to_async(jwt_auth.get_user)(validated_token)
+        return user
+    except (InvalidToken, JWTAuthFailed):
+        return None
 
 
 class ChatThreadViewSet(viewsets.ModelViewSet):
@@ -604,133 +627,10 @@ Return ONLY valid JSON:
             'inquiries': await sync_to_async(lambda: InquirySerializer(inquiries, many=True).data)(),
             'correlation_id': str(correlation_id)
         })
-        
-        async def event_stream():
-            """Generator for SSE events"""
-            from apps.companion.services import CompanionService
-            from apps.companion.models import ReflectionTriggerType, Reflection as ReflectionModel
-            
-            companion = CompanionService()
-            
-            # Prepare reflection context
-            try:
-                context = await companion.prepare_reflection_context(thread_id=thread.id)
-                
-                # Extract current topic for semantic highlighting
-                current_topic = companion.extract_current_topic(context['recent_messages'])
-                
-                # Stream reflection token-by-token
-                full_reflection_text = ""
-                
-                async for token in companion.stream_reflection(
-                    thread=context['thread'],
-                    recent_messages=context['recent_messages'],
-                    current_signals=context['current_signals'],
-                    patterns=context['patterns']
-                ):
-                    full_reflection_text += token
-                    
-                    # Send each token immediately
-                    payload = json.dumps({
-                        'type': 'reflection_chunk',
-                        'delta': token
-                    })
-                    yield f"data: {payload}\n\n"
-                
-                # Save completed reflection to database
-                reflection = ReflectionModel.objects.create(
-                    thread=context['thread'],
-                    reflection_text=full_reflection_text.strip(),
-                    trigger_type=ReflectionTriggerType.PERIODIC,
-                    analyzed_messages=[str(m['id']) for m in context['recent_messages']],
-                    analyzed_signals=[str(s['id']) for s in context['current_signals']],
-                    patterns=context['patterns']
-                )
-                
-                # Send completion event with full reflection and patterns
-                payload = json.dumps({
-                    'type': 'reflection_complete',
-                    'id': str(reflection.id),
-                    'text': full_reflection_text.strip(),
-                    'patterns': context['patterns'],
-                    'current_topic': current_topic
-                })
-                yield f"data: {payload}\n\n"
-                
-            except Exception:
-                logger.exception(
-                    "companion_reflection_failed",
-                    extra={"thread_id": str(thread.id)}
-                )
-            
-            # Send initial background activity
-            try:
-                activity = await companion.track_background_work(thread_id=thread.id)
-                
-                payload = json.dumps({
-                    'type': 'background_update',
-                    'activity': activity
-                })
-                yield f"data: {payload}\n\n"
-                
-            except Exception:
-                logger.exception(
-                    "companion_background_failed",
-                    extra={"thread_id": str(thread.id)}
-                )
-            
-            # Keep connection alive and send periodic updates
-            update_interval = 30  # seconds
-            last_update = time.time()
-            
-            while True:
-                await asyncio.sleep(2)  # Check every 2 seconds
-                
-                current_time = time.time()
-                
-                # Send periodic background updates
-                if current_time - last_update >= update_interval:
-                    try:
-                        activity = await companion.track_background_work(thread_id=thread.id)
-                        
-                        # Only send if there's actual activity
-                        if activity['signals_extracted']['count'] > 0 or \
-                           activity['evidence_linked']['count'] > 0 or \
-                           activity['connections_built']['count'] > 0 or \
-                           activity['confidence_updates']:
-                            payload = json.dumps({
-                                'type': 'background_update',
-                                'activity': activity
-                            })
-                            yield f"data: {payload}\n\n"
-                        
-                        last_update = current_time
-                        
-                    except Exception:
-                        logger.exception(
-                            "companion_periodic_update_failed",
-                            extra={"thread_id": str(thread.id)}
-                        )
-                
-                # Send heartbeat to keep connection alive
-                if current_time - last_update >= 10:
-                    yield f": heartbeat\n\n"
-        
-        # Create streaming response
-        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
-        response["Cache-Control"] = "no-cache"
-        response["X-Accel-Buffering"] = "no"
-        
-        # CORS headers
-        origin = request.headers.get("Origin", "http://localhost:3000")
-        response["Access-Control-Allow-Origin"] = origin
-        response["Access-Control-Allow-Credentials"] = "true"
-        
-        return response
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@csrf_exempt
+@require_POST
 async def unified_stream(request, thread_id):
     """
     Unified streaming endpoint for chat response + reflection + signals + action hints.
@@ -755,24 +655,38 @@ async def unified_stream(request, thread_id):
     """
     import uuid as uuid_module
 
+    # Authenticate via JWT
+    user = await _authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
     # Get thread and verify ownership
     thread = await sync_to_async(
-        lambda: get_object_or_404(ChatThread, id=thread_id, user=request.user)
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
     )()
 
+    # Parse JSON body
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
     # Get message content from request body
-    content = request.data.get('content', '')
+    content = body.get('content', '')
     if not content:
-        return Response(
+        return JsonResponse(
             {'error': 'Message content is required'},
-            status=status.HTTP_400_BAD_REQUEST
+            status=400
         )
+
+    # Get optional mode context for system prompt selection
+    mode_context = body.get('context', {})
 
     # Create user message first
     user_message = await sync_to_async(ChatService.create_user_message)(
         thread_id=thread.id,
         content=content,
-        user=request.user
+        user=user
     )
 
     async def event_stream():
@@ -800,12 +714,32 @@ async def unified_stream(request, thread_id):
         action_hints_json = ""
         extraction_enabled = True
 
-        # Check if thread is in scaffolding mode
+        # Check if thread is in scaffolding mode or if frontend sent mode context
         thread_metadata = thread.metadata or {}
         system_prompt_override = None
         if thread_metadata.get('mode') == 'scaffolding':
             from apps.intelligence.prompts import build_scaffolding_system_prompt
             system_prompt_override = build_scaffolding_system_prompt()
+        elif mode_context.get('mode') == 'inquiry_focus' and mode_context.get('inquiryId'):
+            # Inquiry-focused mode: emphasize investigation and evidence gathering
+            inquiry_id = mode_context.get('inquiryId')
+            try:
+                from apps.inquiries.models import Inquiry
+                inquiry = await sync_to_async(
+                    lambda: Inquiry.objects.filter(id=inquiry_id).first()
+                )()
+                if inquiry:
+                    system_prompt_override = (
+                        "You are Episteme, a thoughtful decision-support assistant. "
+                        f"The user is currently investigating a specific inquiry: \"{inquiry.title}\". "
+                        f"{('Context: ' + inquiry.description + '. ') if inquiry.description else ''}"
+                        "Focus your responses on helping them gather evidence, validate assumptions, "
+                        "and reach a well-supported conclusion for this inquiry. "
+                        "Be specific, cite reasoning, and suggest concrete next steps for investigation. "
+                        "When the user's question relates to this inquiry, frame your answer in that context."
+                    )
+            except Exception as e:
+                logger.warning(f"Could not load inquiry for mode context: {e}")
 
         try:
             async for event in engine.analyze_simple(
@@ -859,7 +793,7 @@ async def unified_stream(request, thread_id):
             # Post-process: save message, reflection, signals
             result = await UnifiedAnalysisHandler.handle_completion(
                 thread=thread,
-                user=request.user,
+                user=user,
                 response_content=response_content,
                 reflection_content=reflection_content,
                 signals_json=signals_json,
@@ -898,8 +832,8 @@ async def unified_stream(request, thread_id):
     return response
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@csrf_exempt
+@require_GET
 async def companion_stream(request, thread_id):
     """
     Server-Sent Events stream for reasoning companion updates.
@@ -916,9 +850,14 @@ async def companion_stream(request, thread_id):
     - background_update: Activity summary (event-driven, not polled)
     - heartbeat: Keep-alive (every 30s)
     """
+    # Authenticate via JWT
+    user = await _authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
     # Get thread and verify ownership
     thread = await sync_to_async(
-        lambda: get_object_or_404(ChatThread, id=thread_id, user=request.user)
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
     )()
 
     async def event_stream():
@@ -927,7 +866,7 @@ async def companion_stream(request, thread_id):
 
         logger.info(
             "companion_stream_connected",
-            extra={"thread_id": str(thread.id), "user_id": request.user.id}
+            extra={"thread_id": str(thread.id), "user_id": user.id}
         )
 
         try:

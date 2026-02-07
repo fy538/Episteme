@@ -39,7 +39,6 @@ class ResearchConfigFromDictTest(TestCase):
 
     def test_full_config_parses(self):
         data = {
-            "suggest_defaults": False,
             "sources": {
                 "primary": [
                     {"type": "court_opinions", "description": "Case law", "domains": ["courtlistener.com"]},
@@ -88,8 +87,6 @@ class ResearchConfigFromDictTest(TestCase):
         }
 
         config = ResearchConfig.from_dict(data)
-
-        self.assertFalse(config.suggest_defaults)
 
         # Sources
         self.assertEqual(len(config.sources.primary), 1)

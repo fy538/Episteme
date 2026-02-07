@@ -26,6 +26,7 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { useAgenticTask } from '@/hooks/useAgenticTask';
+import { WordDiff, ChangeDiff } from '@/components/editor/WordDiff';
 
 interface AgenticTaskDialogProps {
   documentId: string;
@@ -52,6 +53,10 @@ export function AgenticTaskDialog({
     discardResult,
     reset,
     plan,
+    changes,
+    changeStates,
+    acceptChange,
+    rejectChange,
     diffSummary,
     reviewScore,
     reviewNotes,
@@ -261,16 +266,61 @@ export function AgenticTaskDialog({
                 </div>
               </div>
 
-              {/* Preview toggle */}
+              {/* Per-change diffs with accept/reject */}
+              {result.changes && result.changes.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-neutral-700">
+                      Changes ({result.changes.length})
+                    </p>
+                    <div className="flex items-center gap-2 text-xs text-neutral-500">
+                      <span className="text-green-600">
+                        {Object.values(changeStates).filter(s => s === 'accepted').length} accepted
+                      </span>
+                      <span className="text-red-600">
+                        {Object.values(changeStates).filter(s => s === 'rejected').length} rejected
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {result.changes.map((change, idx) => {
+                      const state = changeStates[change.step_id] || 'pending';
+                      return (
+                        <div
+                          key={change.step_id || idx}
+                          className={`transition-opacity ${
+                            state === 'rejected' ? 'opacity-40' : ''
+                          }`}
+                        >
+                          <ChangeDiff
+                            change={change}
+                            onAccept={state === 'pending' ? () => acceptChange(change.step_id) : undefined}
+                            onReject={state === 'pending' ? () => rejectChange(change.step_id) : undefined}
+                          />
+                          {state !== 'pending' && (
+                            <div className={`text-xs mt-1 px-2 ${
+                              state === 'accepted' ? 'text-green-600' : 'text-red-500'
+                            }`}>
+                              {state === 'accepted' ? '✓ Accepted' : '✗ Rejected'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Full document diff toggle */}
               <details className="group">
                 <summary className="cursor-pointer text-sm font-medium text-accent-600 hover:text-accent-700">
-                  Preview final content
+                  View full document diff
                 </summary>
-                <div className="mt-2 p-3 bg-neutral-50 rounded-lg max-h-60 overflow-auto">
-                  <pre className="text-xs text-neutral-700 whitespace-pre-wrap">
-                    {result.final_content.slice(0, 2000)}
-                    {result.final_content.length > 2000 && '...'}
-                  </pre>
+                <div className="mt-2">
+                  <WordDiff
+                    oldText={result.original_content}
+                    newText={result.final_content}
+                  />
                 </div>
               </details>
             </div>

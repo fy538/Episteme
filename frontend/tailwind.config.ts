@@ -139,7 +139,7 @@ const config: Config = {
       // Design Tokens: Typography
       fontFamily: {
         sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
-        display: ['var(--font-dm-sans)', 'DM Sans', 'system-ui', 'sans-serif'],
+        display: ['var(--font-lora)', 'Lora', 'Georgia', 'serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       fontSize: {
@@ -194,6 +194,7 @@ const config: Config = {
         'slide-up': 'slideUp 300ms cubic-bezier(0.33, 1, 0.68, 1)',
         'slide-down': 'slideDown 300ms cubic-bezier(0.33, 1, 0.68, 1)',
         'scale-in': 'scaleIn 200ms cubic-bezier(0.33, 1, 0.68, 1)',
+        'slide-in-right': 'slideInRight 250ms cubic-bezier(0.33, 1, 0.68, 1)',
         'pulse-subtle': 'pulseSubtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'shimmer': 'shimmer 2s linear infinite',
         'wiggle': 'wiggle 0.5s ease-in-out',
@@ -215,6 +216,10 @@ const config: Config = {
         scaleIn: {
           '0%': { transform: 'scale(0.95)', opacity: '0' },
           '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        slideInRight: {
+          '0%': { transform: 'translateX(16px)', opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
         },
         pulseSubtle: {
           '0%, 100%': { opacity: '1' },

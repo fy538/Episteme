@@ -8,7 +8,7 @@
  * - Ability to accept or reject the result
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { documentsAPI } from '@/lib/api/documents';
 
 interface TaskStep {
@@ -61,9 +61,16 @@ interface UseAgenticTaskReturn {
   discardResult: () => void;
   reset: () => void;
 
+  /** Accept a single change by step_id (keeps change, rejects others not yet accepted) */
+  acceptChange: (stepId: string) => void;
+  /** Reject a single change by step_id */
+  rejectChange: (stepId: string) => void;
+
   // Computed
   plan: TaskStep[];
   changes: TaskChange[];
+  /** Changes with per-hunk accept/reject state */
+  changeStates: Record<string, 'pending' | 'accepted' | 'rejected'>;
   diffSummary: string;
   reviewScore: number | null;
   reviewNotes: string | null;
@@ -77,6 +84,9 @@ export function useAgenticTask({
   const [phase, setPhase] = useState<TaskPhase>('idle');
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [changeStates, setChangeStates] = useState<Record<string, 'pending' | 'accepted' | 'rejected'>>({});
+  const [streamPlan, setStreamPlan] = useState<TaskStep[]>([]);
+  const abortRef = useRef<{ abort: () => void } | null>(null);
 
   const executeTask = useCallback(
     async (taskDescription: string) => {
@@ -85,33 +95,70 @@ export function useAgenticTask({
       setPhase('planning');
       setError(null);
       setResult(null);
+      setStreamPlan([]);
+      setChangeStates({});
 
-      try {
-        // The backend handles all phases, we just track the overall progress
-        setPhase('executing');
-
-        const taskResult = await documentsAPI.executeTask(documentId, taskDescription);
-
-        setPhase('reviewing');
-
-        // Small delay to show review phase
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        if (taskResult.status === 'completed') {
+      // Try streaming first, fall back to non-streaming
+      const stream = documentsAPI.executeTaskStream(
+        documentId,
+        taskDescription,
+        // onEvent - real-time phase/step updates
+        (event) => {
+          switch (event.type) {
+            case 'phase':
+              setPhase(event.data.phase as TaskPhase);
+              break;
+            case 'plan':
+              setStreamPlan(
+                (event.data.steps || []).map((s: any) => ({
+                  ...s,
+                  status: 'pending',
+                }))
+              );
+              break;
+            case 'step_start':
+              setStreamPlan((prev) =>
+                prev.map((s) =>
+                  s.id === event.data.step_id ? { ...s, status: 'in_progress' } : s
+                )
+              );
+              break;
+            case 'step_complete':
+              setStreamPlan((prev) =>
+                prev.map((s) =>
+                  s.id === event.data.step_id
+                    ? { ...s, status: event.data.status, error: event.data.error }
+                    : s
+                )
+              );
+              break;
+            case 'review':
+              // Review score comes before done
+              break;
+          }
+        },
+        // onDone
+        (taskResult) => {
           setResult(taskResult);
+          const states: Record<string, 'pending' | 'accepted' | 'rejected'> = {};
+          for (const change of taskResult.changes || []) {
+            states[change.step_id] = 'pending';
+          }
+          setChangeStates(states);
           setPhase('completed');
           onSuccess?.(taskResult);
-        } else {
-          setError('Task execution failed');
+          abortRef.current = null;
+        },
+        // onError
+        (errMsg) => {
+          setError(errMsg);
           setPhase('failed');
-          onError?.('Task execution failed');
-        }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Task execution failed';
-        setError(errorMsg);
-        setPhase('failed');
-        onError?.(errorMsg);
-      }
+          onError?.(errMsg);
+          abortRef.current = null;
+        },
+      );
+
+      abortRef.current = stream;
     },
     [documentId, onSuccess, onError]
   );
@@ -131,6 +178,7 @@ export function useAgenticTask({
 
   const discardResult = useCallback(() => {
     setResult(null);
+    setChangeStates({});
     setPhase('idle');
   }, []);
 
@@ -138,6 +186,20 @@ export function useAgenticTask({
     setPhase('idle');
     setResult(null);
     setError(null);
+    setChangeStates({});
+    setStreamPlan([]);
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
+  const acceptChange = useCallback((stepId: string) => {
+    setChangeStates((prev) => ({ ...prev, [stepId]: 'accepted' }));
+  }, []);
+
+  const rejectChange = useCallback((stepId: string) => {
+    setChangeStates((prev) => ({ ...prev, [stepId]: 'rejected' }));
   }, []);
 
   return {
@@ -150,9 +212,12 @@ export function useAgenticTask({
     applyResult,
     discardResult,
     reset,
+    acceptChange,
+    rejectChange,
 
-    plan: result?.plan ?? [],
+    plan: result?.plan ?? streamPlan,
     changes: result?.changes ?? [],
+    changeStates,
     diffSummary: result?.diff_summary ?? '',
     reviewScore: result?.review_score ?? null,
     reviewNotes: result?.review_notes ?? null,

@@ -39,12 +39,20 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         if correlation_id:
             queryset = queryset.filter(correlation_id=correlation_id)
         
-        # Filter by type
+        # Filter by type (single)
         event_type = self.request.query_params.get('type')
         if event_type:
             queryset = queryset.filter(type=event_type)
-        
-        return queryset.order_by('timestamp')
+
+        # Filter by types (comma-separated, e.g. ?types=CaseCreated,InquiryResolved)
+        types = self.request.query_params.get('types')
+        if types:
+            queryset = queryset.filter(type__in=types.split(','))
+
+        # Limit results (default 50, max 200)
+        limit = min(int(self.request.query_params.get('limit', 50)), 200)
+
+        return queryset.order_by('-timestamp')[:limit]
     
     @action(detail=False, methods=['get'], url_path='case/(?P<case_id>[^/.]+)/timeline')
     def case_timeline(self, request, case_id=None):

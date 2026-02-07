@@ -171,26 +171,17 @@ export function SpotlightSearch({
         label: 'Create new case',
         icon: <PlusIcon />,
         action: () => {
-          router.push('/workspace/cases?new=true');
+          router.push('/cases?new=true');
           onClose();
         },
         shortcut: '⌘N',
       },
       {
-        id: 'action-chat',
-        label: 'Go to Chat',
-        icon: <ChatIcon />,
-        action: () => {
-          router.push('/chat');
-          onClose();
-        },
-      },
-      {
-        id: 'action-workspace',
-        label: 'Go to Workspace',
+        id: 'action-home',
+        label: 'Go Home',
         icon: <GridIcon />,
         action: () => {
-          router.push('/workspace');
+          router.push('/');
           onClose();
         },
       },
@@ -252,12 +243,12 @@ export function SpotlightSearch({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-start justify-center pt-[15vh]">
+    <div className="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 flex items-start justify-center pt-[15vh] animate-fade-in">
       {/* Backdrop */}
       <div className="absolute inset-0" onClick={onClose} />
 
       {/* Spotlight Panel */}
-      <div className="relative bg-white dark:bg-neutral-900 rounded-xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden border border-neutral-200 dark:border-neutral-700">
+      <div className="relative bg-white dark:bg-neutral-900 rounded-xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden border border-neutral-200 dark:border-neutral-700 animate-scale-in">
         {/* Search Input */}
         <div className="border-b border-neutral-200 dark:border-neutral-700">
           <div className="flex items-center px-4 py-3 gap-3">

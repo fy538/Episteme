@@ -10,7 +10,12 @@ import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { BriefEditor } from '@/components/editor/BriefEditor';
+import dynamic from 'next/dynamic';
+
+const BriefEditor = dynamic(
+  () => import('@/components/editor/BriefEditor').then(mod => mod.BriefEditor),
+  { ssr: false, loading: () => <div className="p-8 text-neutral-400 animate-pulse">Loading editor...</div> }
+);
 import { CaseOnboarding } from '@/components/onboarding/CaseOnboarding';
 import { AssumptionHighlighter } from '@/components/onboarding/AssumptionHighlighter';
 import {
@@ -72,6 +77,7 @@ export function CaseBriefView({
   const [briefContent, setBriefContent] = useState(brief?.content_markdown || '');
   const [inlineEnabled, setInlineEnabled] = useState(false);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
+  const [showInlineSuggestions, setShowInlineSuggestions] = useState(true); // inline marks vs review panel
 
   // Background analysis hook
   const {
@@ -351,6 +357,10 @@ export function CaseBriefView({
           <BriefEditor
             document={brief}
             onSave={() => onRefresh()}
+            inlineEnabled={inlineEnabled}
+            suggestions={showInlineSuggestions ? suggestions : undefined}
+            onAcceptSuggestion={acceptSuggestion}
+            onRejectSuggestion={rejectSuggestion}
             onCreateInquiry={async (selectedText) => {
               // 1. Generate AI title from selected text
               const { title } = await inquiriesAPI.generateTitle(selectedText);
@@ -463,6 +473,34 @@ export function CaseBriefView({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Suggestion display mode toggle */}
+      {suggestions.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 px-2">
+          <span className="text-xs text-neutral-500">Show suggestions:</span>
+          <button
+            onClick={() => setShowInlineSuggestions(true)}
+            className={`text-xs px-2 py-1 rounded ${
+              showInlineSuggestions
+                ? 'bg-accent-100 text-accent-700 font-medium'
+                : 'text-neutral-500 hover:bg-neutral-100'
+            }`}
+          >
+            Inline
+          </button>
+          <button
+            onClick={() => { setShowInlineSuggestions(false); setShowReviewPanel(true); }}
+            className={`text-xs px-2 py-1 rounded ${
+              !showInlineSuggestions
+                ? 'bg-accent-100 text-accent-700 font-medium'
+                : 'text-neutral-500 hover:bg-neutral-100'
+            }`}
+          >
+            Review Panel
+          </button>
+          <span className="text-xs text-neutral-400 ml-2">{pendingCount} pending</span>
         </div>
       )}
 

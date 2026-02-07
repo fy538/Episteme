@@ -13,77 +13,80 @@ class ActorType(models.TextChoices):
 
 
 class EventType(models.TextChoices):
+    # ── Actively emitted ─────────────────────────────────────────────────
+
     # Chat events
     USER_MESSAGE_CREATED = 'UserMessageCreated', 'User Message Created'
     ASSISTANT_MESSAGE_CREATED = 'AssistantMessageCreated', 'Assistant Message Created'
-    
+
     # Case lifecycle events
     CASE_CREATED = 'CaseCreated', 'Case Created'
     CASE_PATCHED = 'CasePatched', 'Case Patched'
     CASE_LINKED_TO_THREAD = 'CaseLinkedToThread', 'Case Linked to Thread'
-    
-    # Case creation from analysis (smart case creation)
     CONVERSATION_ANALYZED_FOR_CASE = 'ConversationAnalyzedForCase', 'Conversation Analyzed for Case'
     CASE_CREATED_FROM_ANALYSIS = 'CaseCreatedFromAnalysis', 'Case Created from Analysis'
-    INQUIRIES_AUTO_CREATED = 'InquiriesAutoCreated', 'Inquiries Auto-Created'
-    
-    # Inquiry lifecycle events
+    CASE_SCAFFOLDED = 'CaseScaffolded', 'Case Scaffolded from Chat'
+
+    # Inquiry events
     INQUIRY_CREATED = 'InquiryCreated', 'Inquiry Created'
     INQUIRY_RESOLVED = 'InquiryResolved', 'Inquiry Resolved'
-    INQUIRY_REOPENED = 'InquiryReopened', 'Inquiry Reopened'
-    INQUIRY_PRIORITY_CHANGED = 'InquiryPriorityChanged', 'Inquiry Priority Changed'
-    
-    # Document lifecycle events
-    CASE_DOCUMENT_CREATED = 'CaseDocumentCreated', 'Case Document Created'
-    CASE_DOCUMENT_UPDATED = 'CaseDocumentUpdated', 'Case Document Updated'
-    CASE_DOCUMENT_DELETED = 'CaseDocumentDeleted', 'Case Document Deleted'
-    
-    # Evidence events
-    EVIDENCE_CREATED = 'EvidenceCreated', 'Evidence Created'
-    EVIDENCE_UPDATED = 'EvidenceUpdated', 'Evidence Updated'
-    
-    # Objection events
-    OBJECTION_CREATED = 'ObjectionCreated', 'Objection Created'
-    OBJECTION_ADDRESSED = 'ObjectionAddressed', 'Objection Addressed'
-    OBJECTION_DISMISSED = 'ObjectionDismissed', 'Objection Dismissed'
-    
-    # Citation events
-    CITATION_CREATED = 'CitationCreated', 'Citation Created'
-    CITATION_DELETED = 'CitationDeleted', 'Citation Deleted'
-    
-    # Signal events (Phase 1)
+    INQUIRIES_AUTO_CREATED = 'InquiriesAutoCreated', 'Inquiries Auto-Created'
+
+    # Signal events
     SIGNAL_EXTRACTED = 'SignalExtracted', 'Signal Extracted'
-    SIGNALS_LINKED_TO_CASE = 'SignalsLinkedToCase', 'Signals Linked to Case'
     SIGNAL_STATUS_CHANGED = 'SignalStatusChanged', 'Signal Status Changed'
     SIGNAL_EDITED = 'SignalEdited', 'Signal Edited'
-    
-    # WorkingView events (Phase 1)
+
+    # WorkingView events
     WORKING_VIEW_MATERIALIZED = 'WorkingViewMaterialized', 'Working View Materialized'
-    
+
     # Workflow events
     WORKFLOW_STARTED = 'WorkflowStarted', 'Workflow Started'
     WORKFLOW_COMPLETED = 'WorkflowCompleted', 'Workflow Completed'
-    
-    # Agent routing events (Intelligent orchestration)
-    CONVERSATION_ANALYZED_FOR_AGENT = 'ConversationAnalyzedForAgent', 'Conversation Analyzed for Agent'
-    AGENT_SUGGESTED = 'AgentSuggested', 'Agent Suggested'
-    AGENT_CONFIRMED = 'AgentConfirmed', 'Agent Confirmed by User'
-    AGENT_DECLINED = 'AgentDeclined', 'Agent Declined by User'
-    
+
     # Agent execution events
     AGENT_WORKFLOW_STARTED = 'AgentWorkflowStarted', 'Agent Workflow Started'
     AGENT_PROGRESS = 'AgentProgress', 'Agent Progress Update'
     AGENT_COMPLETED = 'AgentCompleted', 'Agent Workflow Completed'
     AGENT_FAILED = 'AgentFailed', 'Agent Workflow Failed'
-    
-    # Structure discovery events (Progressive disclosure)
-    STRUCTURE_SUGGESTED = 'StructureSuggested', 'Structure Suggested'
+    AGENT_CHECKPOINT = 'AgentCheckpoint', 'Agent Loop Checkpoint'
+    AGENT_TRAJECTORY = 'AgentTrajectory', 'Agent Decision Trajectory'
+
+    # Structure discovery events
     STRUCTURE_ACCEPTED = 'StructureAccepted', 'Structure Accepted'
     STRUCTURE_DISMISSED = 'StructureDismissed', 'Structure Dismissed'
+
+    # ── Reserved / not yet emitted ───────────────────────────────────────
+    # These types are defined for planned features but not yet emitted.
+    # Do NOT delete — they may be referenced in migrations or frontend code.
+
+    INQUIRY_REOPENED = 'InquiryReopened', 'Inquiry Reopened'
+    INQUIRY_PRIORITY_CHANGED = 'InquiryPriorityChanged', 'Inquiry Priority Changed'
+
+    CASE_DOCUMENT_CREATED = 'CaseDocumentCreated', 'Case Document Created'
+    CASE_DOCUMENT_UPDATED = 'CaseDocumentUpdated', 'Case Document Updated'
+    CASE_DOCUMENT_DELETED = 'CaseDocumentDeleted', 'Case Document Deleted'
+
+    EVIDENCE_CREATED = 'EvidenceCreated', 'Evidence Created'
+    EVIDENCE_UPDATED = 'EvidenceUpdated', 'Evidence Updated'
+
+    OBJECTION_CREATED = 'ObjectionCreated', 'Objection Created'
+    OBJECTION_ADDRESSED = 'ObjectionAddressed', 'Objection Addressed'
+    OBJECTION_DISMISSED = 'ObjectionDismissed', 'Objection Dismissed'
+
+    CITATION_CREATED = 'CitationCreated', 'Citation Created'
+    CITATION_DELETED = 'CitationDeleted', 'Citation Deleted'
+
+    SIGNALS_LINKED_TO_CASE = 'SignalsLinkedToCase', 'Signals Linked to Case'
+
+    CONVERSATION_ANALYZED_FOR_AGENT = 'ConversationAnalyzedForAgent', 'Conversation Analyzed for Agent'
+    AGENT_SUGGESTED = 'AgentSuggested', 'Agent Suggested'
+    AGENT_CONFIRMED = 'AgentConfirmed', 'Agent Confirmed by User'
+    AGENT_DECLINED = 'AgentDeclined', 'Agent Declined by User'
+
+    STRUCTURE_SUGGESTED = 'StructureSuggested', 'Structure Suggested'
     STRUCTURE_IGNORED = 'StructureIgnored', 'Structure Ignored'
 
-    # Brief scaffolding events
-    CASE_SCAFFOLDED = 'CaseScaffolded', 'Case Scaffolded from Chat'
     BRIEF_EVOLVED = 'BriefEvolved', 'Brief Grounding Evolved'
     BRIEF_SECTION_CREATED = 'BriefSectionCreated', 'Brief Section Created'
     BRIEF_SECTION_UPDATED = 'BriefSectionUpdated', 'Brief Section Updated'

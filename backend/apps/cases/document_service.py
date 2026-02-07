@@ -3,6 +3,9 @@ Case document service - business logic for document operations.
 
 Handles creation, updates, and citation management for case documents.
 """
+import logging
+import re
+
 from django.db import transaction
 from django.contrib.auth.models import User
 
@@ -10,6 +13,79 @@ from apps.cases.models import Case, CaseDocument, DocumentType, EditFriction, Do
 from apps.cases.brief_templates import BriefTemplateGenerator
 from apps.cases.citation_parser import CitationParser
 from apps.inquiries.models import Inquiry
+
+logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Section marker validation
+# --------------------------------------------------------------------------- #
+
+# Matches <!-- section:SECTION_ID --> where SECTION_ID is alphanumeric + dash/underscore
+SECTION_MARKER_RE = re.compile(r'<!-- section:([a-zA-Z0-9_-]+) -->')
+
+
+def validate_section_markers(document: CaseDocument) -> dict:
+    """
+    Validate that every BriefSection's section_id has a corresponding
+    ``<!-- section:ID -->`` marker in the document's content_markdown.
+
+    Returns a dict with:
+        valid (bool): True if all section IDs have markers and vice-versa.
+        missing_markers (list[str]): Section IDs in DB but not in content.
+        orphaned_markers (list[str]): Markers in content with no matching
+            BriefSection row.
+        matched (list[str]): Section IDs present in both DB and content.
+    """
+    from apps.cases.brief_models import BriefSection  # avoid circular import
+
+    content = document.content_markdown or ''
+
+    # Section IDs registered in the database
+    db_section_ids = set(
+        BriefSection.objects.filter(brief=document)
+        .values_list('section_id', flat=True)
+    )
+
+    # Section IDs found in the markdown content
+    content_section_ids = set(SECTION_MARKER_RE.findall(content))
+
+    missing_markers = sorted(db_section_ids - content_section_ids)
+    orphaned_markers = sorted(content_section_ids - db_section_ids)
+    matched = sorted(db_section_ids & content_section_ids)
+
+    return {
+        'valid': len(missing_markers) == 0 and len(orphaned_markers) == 0,
+        'missing_markers': missing_markers,
+        'orphaned_markers': orphaned_markers,
+        'matched': matched,
+    }
+
+
+def log_marker_integrity(document: CaseDocument) -> None:
+    """
+    Run marker validation and log warnings for any mismatches.
+
+    Non-blocking — this is informational. User edits may temporarily
+    remove markers, so we log but don't raise.
+    """
+    result = validate_section_markers(document)
+    if result['valid']:
+        return
+
+    doc_label = f'Document {document.id} ({document.title})'
+    if result['missing_markers']:
+        logger.warning(
+            '%s: section IDs in DB but missing from content: %s',
+            doc_label,
+            result['missing_markers'],
+        )
+    if result['orphaned_markers']:
+        logger.warning(
+            '%s: markers in content with no matching BriefSection: %s',
+            doc_label,
+            result['orphaned_markers'],
+        )
 
 
 class CaseDocumentService:
@@ -161,10 +237,14 @@ class CaseDocumentService:
         # Update content
         document.content_markdown = new_content
         document.save(update_fields=['content_markdown', 'updated_at'])
-        
+
         # Reparse citations
         CitationParser.create_citation_links(document)
-        
+
+        # Log section marker integrity (non-blocking)
+        if document.brief_sections.exists():
+            log_marker_integrity(document)
+
         return document
     
     @staticmethod

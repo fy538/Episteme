@@ -1,246 +1,115 @@
 /**
- * Chat panel for workspace - Cursor-style AI companion
- * Always accessible, collapsible, context-aware
+ * ChatPanel - Unified chat component for all contexts
+ *
+ * Supports two display variants:
+ * - "panel" (default): Sidebar chat panel (collapsible, compact header)
+ * - "full": Full-screen chat (fills parent, breadcrumbs header, no collapse)
+ *
+ * Features: unified streaming, mode-aware header, case analysis auto-trigger.
+ * Companion content (thinking, action hints, signals) is rendered separately
+ * in CompanionPanel.
+ *
+ * Used by:
+ * - Home.tsx (variant="full") — casual chat
+ * - CaseWorkspace page (variant="panel") — case chat sidebar
+ * - FloatingChatPanel (variant="panel", hideCollapse) — canvas floating chat
  */
 
 'use client';
 
-import { useState, useEffect, useRef, startTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
+import { ChatModeHeader } from '@/components/chat/ChatModeHeader';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { CaseCreationPreview } from '@/components/cases/CaseCreationPreview';
 import { CaseAssemblyAnimation } from '@/components/cases/CaseAssemblyAnimation';
+import { documentsAPI } from '@/lib/api/documents';
 import { chatAPI } from '@/lib/api/chat';
-import { signalsAPI } from '@/lib/api/signals';
-import type { Message } from '@/lib/types/chat';
-import type { Signal } from '@/lib/types/signal';
+import { useState as useToastState } from 'react';
+import { useChatPanelState } from '@/hooks/useChatPanelState';
+import type { StreamingCallbacks } from '@/lib/types/streaming';
+import type { ModeContext } from '@/lib/types/companion';
 
 interface ChatPanelProps {
   threadId: string;
-  contextLabel?: string;  // e.g., "Chat about: Market Entry Case"
-  onCreateInquiry?: (signalIds: string[]) => void;
+  contextLabel?: string;
   onCreateCase?: () => void;
-  hideCollapse?: boolean;  // For standalone chat mode
-  briefId?: string;  // Current brief for "Add to Brief" action
+  hideCollapse?: boolean;
+  briefId?: string;
   onIntegrationPreview?: (result: Record<string, unknown>) => void;
+  /** Callbacks for unified stream events forwarded to parent */
+  streamCallbacks?: StreamingCallbacks;
+  /** Current chat mode context (case, inquiry_focus, casual) */
+  mode?: ModeContext;
+  /** Exit inquiry focus mode */
+  onExitFocus?: () => void;
+  /** Display variant: "panel" (sidebar) or "full" (full-screen) */
+  variant?: 'panel' | 'full';
+  /** Auto-send this message on mount (used by Home hero input handoff) */
+  initialMessage?: string;
+  /** Called after initialMessage has been sent */
+  onInitialMessageSent?: () => void;
 }
 
-export function ChatPanel({ 
-  threadId, 
+export function ChatPanel({
+  threadId,
   contextLabel = 'AI Chat',
-  onCreateInquiry,
   onCreateCase,
   hideCollapse = false,
   briefId,
   onIntegrationPreview,
+  streamCallbacks,
+  mode,
+  onExitFocus,
+  variant = 'panel',
+  initialMessage,
+  onInitialMessageSent,
 }: ChatPanelProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [signalsExpanded, setSignalsExpanded] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [pendingSince, setPendingSince] = useState<number | null>(null);
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [ttft, setTtft] = useState<number | null>(null);
-  const [showCaseSuggestion, setShowCaseSuggestion] = useState(false);
-  const [caseAnalysis, setCaseAnalysis] = useState<any>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [creatingCase, setCreatingCase] = useState(false);
-  const [showAssembly, setShowAssembly] = useState(false);
-  const conversationTurns = useRef(0);
+  const router = useRouter();
+  const state = useChatPanelState({
+    threadId,
+    onCreateCase,
+    streamCallbacks,
+    mode,
+    initialMessage,
+    onInitialMessageSent,
+  });
 
-  // Load messages
-  useEffect(() => {
-    async function loadMessages() {
-      setIsLoading(true);
-      try {
-        const msgs = await chatAPI.getMessages(threadId);
-        setMessages(msgs);
-      } catch (error) {
-        console.error('Failed to load messages:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadMessages();
-  }, [threadId]);
-
-  // Load signals
-  useEffect(() => {
-    async function loadSignals() {
-      try {
-        const sigs = await signalsAPI.getByThread(threadId);
-        setSignals(sigs);
-      } catch (error) {
-        console.error('Failed to load signals:', error);
-      }
-    }
-    loadSignals();
-    const interval = setInterval(loadSignals, 15000);
-    return () => clearInterval(interval);
-  }, [threadId]);
-
-  async function handleSendMessage(content: string) {
-    setIsLoading(true);
-    setIsWaitingForResponse(true);
-    const requestStart = Date.now();
-    setPendingSince(requestStart);
-    setTtft(null);
-    
-    const controller = new AbortController();
-    setAbortController(controller);
-    
-    try {
-      const now = new Date().toISOString();
-      const tempUserId = `local-user-${Date.now()}`;
-      const tempAssistantId = `local-assistant-${Date.now()}`;
-
-      const optimisticUserMessage: Message = {
-        id: tempUserId,
-        thread: threadId,
-        role: 'user',
-        content,
-        event_id: '',
-        metadata: {},
-        created_at: now,
-      };
-
-      const optimisticAssistantMessage: Message = {
-        id: tempAssistantId,
-        thread: threadId,
-        role: 'assistant',
-        content: '',
-        event_id: '',
-        metadata: { streaming: true },
-        created_at: now,
-      };
-
-      setMessages(prev => [...prev, optimisticUserMessage, optimisticAssistantMessage]);
-      setIsStreaming(true);
-
-      let firstTokenReceived = false;
-
-      try {
-        await chatAPI.sendMessageStream(
-          threadId,
-          content,
-          (delta) => {
-            if (!firstTokenReceived) {
-              const ttftMs = Date.now() - requestStart;
-              setTtft(ttftMs);
-              firstTokenReceived = true;
-            }
-            
-            startTransition(() => {
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === tempAssistantId
-                    ? { ...msg, content: `${msg.content}${delta}` }
-                    : msg
-                )
-              );
-            });
-          },
-          async (messageId) => {
-            setIsWaitingForResponse(false);
-            setIsStreaming(false);
-            setPendingSince(null);
-            
-            // Track conversation turns for case suggestion
-            conversationTurns.current += 1;
-            
-            // Trigger analysis after 4 turns
-            if (conversationTurns.current >= 4 && onCreateCase && !showCaseSuggestion && !analyzing) {
-              triggerCaseAnalysis();
-            }
-            
-            async function triggerCaseAnalysis() {
-              setAnalyzing(true);
-              try {
-                const analysis = await chatAPI.analyzeForCase(threadId);
-                setCaseAnalysis(analysis);
-                setShowCaseSuggestion(true);
-              } catch (error) {
-                console.error('Failed to analyze for case:', error);
-              } finally {
-                setAnalyzing(false);
-              }
-            }
-            
-            if (messageId) {
-              setMessages(prev =>
-                prev.map(msg => {
-                  if (msg.id === tempAssistantId) {
-                    return { ...msg, id: messageId, metadata: { ...msg.metadata, streaming: false } };
-                  }
-                  return msg;
-                })
-              );
-            }
-          },
-          controller.signal
-        );
-      } catch (error) {
-        if (error instanceof Error && error.name !== 'AbortError') {
-          // Stream error occurred
-          setMessages(prev => prev.filter(m => m.id !== tempAssistantId));
-        }
-        setIsWaitingForResponse(false);
-        setIsStreaming(false);
-        setPendingSince(null);
-      }
-    } catch (error) {
-      console.error('Send error:', error);
-    } finally {
-      setIsLoading(false);
-      setAbortController(null);
-    }
-  }
-
-  function handleStop() {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
-      setIsStreaming(false);
-      setIsWaitingForResponse(false);
-    }
-  }
+  const isFull = variant === 'full';
+  const [briefToast, setBriefToast] = useToastState<string | null>(null);
 
   async function handleAddToBrief(messageId: string, content: string) {
     if (!briefId) {
-      alert('No brief available in this context');
+      console.warn('No brief available in this context');
       return;
     }
-
     try {
-      const { documentsAPI } = await import('@/lib/api/documents');
-      const result = await documentsAPI.integrateContent(
-        briefId,
-        content,
-        'general',
-        messageId
-      );
-      
+      const result = await documentsAPI.integrateContent(briefId, content, 'general', messageId);
       onIntegrationPreview?.(result);
+      setBriefToast('Content added to brief');
+      setTimeout(() => setBriefToast(null), 3000);
     } catch (error) {
       console.error('Failed to integrate content:', error);
-      alert('Failed to integrate content. Please try again.');
+      setBriefToast('Failed to add to brief');
+      setTimeout(() => setBriefToast(null), 3000);
     }
   }
 
   async function handleCreateEvidence(content: string) {
-    // TODO: Implement evidence creation
+    // TODO: Implement evidence creation via API
     console.log('Create evidence from:', content);
-    alert('Evidence creation coming soon!');
   }
 
-  if (isCollapsed && !hideCollapse) {
+  // Determine if we should show mode-aware header vs static label
+  const showModeHeader = mode && mode.mode !== 'casual';
+
+  // Panel variant: collapsed sidebar
+  if (!isFull && state.isCollapsed && !hideCollapse) {
     return (
-      <div className="w-16 flex flex-col items-center py-4 bg-neutral-50 border-l border-neutral-200">
+      <div className="w-16 flex flex-col items-center py-4 bg-neutral-50 animate-fade-in">
         <button
-          onClick={() => setIsCollapsed(false)}
+          onClick={() => state.setIsCollapsed(false)}
           className="p-2 hover:bg-neutral-200 rounded-lg transition-colors"
           aria-label="Expand chat"
         >
@@ -248,128 +117,133 @@ export function ChatPanel({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        
-        {signals.length > 0 && (
-          <div className="mt-4 px-2 py-1 bg-accent-100 text-accent-700 rounded-full text-xs font-medium">
-            {signals.length}
-          </div>
-        )}
       </div>
     );
   }
 
   return (
-    <div className="w-96 flex flex-col h-full bg-white">
-      {/* Chat Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200">
-        <h3 className="text-sm font-medium text-neutral-900">{contextLabel}</h3>
-        {!hideCollapse && (
-          <button
-            onClick={() => setIsCollapsed(true)}
-            className="p-1 hover:bg-neutral-100 rounded transition-colors"
-            aria-label="Collapse chat"
-          >
-            <svg className="w-4 h-4 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        )}
-      </div>
+    <div className={isFull ? 'flex flex-col h-full bg-white' : 'flex flex-col h-full bg-white'}>
+      {/* Header — variant-aware */}
+      {isFull ? (
+        <div className="border-b border-neutral-200 p-4">
+          <Breadcrumbs items={[{ label: 'Chat' }]} />
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200">
+          <h3 className="text-sm font-medium text-neutral-900">
+            {showModeHeader ? 'Chat' : contextLabel}
+          </h3>
+          {!hideCollapse && (
+            <button
+              onClick={() => state.setIsCollapsed(true)}
+              className="p-1 hover:bg-neutral-100 rounded transition-colors"
+              aria-label="Collapse chat"
+            >
+              <svg className="w-4 h-4 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Mode-aware context header */}
+      {showModeHeader && mode && (
+        <ChatModeHeader
+          mode={mode}
+          onExitFocus={onExitFocus}
+        />
+      )}
+
+      {/* Error banner */}
+      {state.error && (
+        <div className={isFull
+          ? 'bg-error-50 border-l-4 border-error-500 p-4 mx-4 mt-4'
+          : 'bg-red-50 border-l-4 border-red-500 p-3 mx-3 mt-2'
+        }>
+          <div className="flex items-start">
+            <div className="flex-1">
+              <p className={isFull ? 'text-sm text-error-700' : 'text-xs text-red-700'}>{state.error}</p>
+              {state.lastFailedMessage && (
+                <button
+                  onClick={state.handleRetry}
+                  className={isFull
+                    ? 'mt-2 text-sm font-medium text-error-700 hover:text-error-900 underline'
+                    : 'mt-1 text-xs font-medium text-red-700 hover:text-red-900 underline'
+                  }
+                >
+                  Retry message
+                </button>
+              )}
+            </div>
+            <button
+              onClick={state.clearError}
+              className={isFull
+                ? 'ml-4 text-error-700 hover:text-error-900'
+                : 'ml-2 text-red-700 hover:text-red-900 text-xs'
+              }
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Brief integration toast */}
+      {briefToast && (
+        <div className="mx-3 mb-1 px-3 py-1.5 bg-accent-50 border border-accent-200 rounded text-xs text-accent-700 text-center animate-in fade-in slide-in-from-top-1">
+          {briefToast}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-hidden flex flex-col">
         <div className="flex-1 overflow-y-auto">
           <MessageList
-            messages={messages}
-            isWaitingForResponse={isWaitingForResponse}
-            isStreaming={isStreaming}
-            ttft={ttft}
+            messages={state.messages}
+            isWaitingForResponse={state.isWaitingForResponse}
+            isStreaming={state.isStreaming}
+            ttft={state.ttft}
             onAddToBrief={briefId ? handleAddToBrief : undefined}
             onCreateEvidence={handleCreateEvidence}
           />
         </div>
 
-        {/* Smart case suggestion with preview */}
-        {showCaseSuggestion && caseAnalysis && (
+        {/* Case suggestion */}
+        {state.showCaseSuggestion && state.caseAnalysis && (
           <CaseCreationPreview
-            analysis={caseAnalysis}
+            analysis={state.caseAnalysis}
             onConfirm={async (edits) => {
-              setCreatingCase(true);
+              state.setCreatingCase(true);
               try {
-                const result = await chatAPI.createCaseFromAnalysis(
-                  threadId,
-                  caseAnalysis,
-                  edits
-                );
-                
-                setShowCaseSuggestion(false);
-                setShowAssembly(true);
-                
-                // After assembly animation, navigate
+                const result = await chatAPI.createCaseFromAnalysis(threadId, state.caseAnalysis, edits);
+                state.setShowCaseSuggestion(false);
+                state.setShowAssembly(true);
                 setTimeout(() => {
-                  window.location.href = `/workspace/cases/${result.case.id}`;
+                  router.push(`/cases/${result.case.id}`);
                 }, 3000);
               } catch (error) {
                 console.error('Failed to create case:', error);
-                setCreatingCase(false);
+                state.setCreatingCase(false);
               }
             }}
-            onDismiss={() => setShowCaseSuggestion(false)}
-            isCreating={creatingCase}
+            onDismiss={() => state.setShowCaseSuggestion(false)}
+            isCreating={state.creatingCase}
           />
         )}
-        
+
         {/* Assembly animation */}
-        {showAssembly && (
-          <CaseAssemblyAnimation
-            onComplete={() => {
-              // Animation completes, navigation happens via setTimeout above
-            }}
-          />
-        )}
+        {state.showAssembly && <CaseAssemblyAnimation onComplete={() => {}} />}
       </div>
 
-      {/* Message Input */}
+      {/* Input */}
       <MessageInput
-        onSend={handleSendMessage}
-        disabled={isLoading}
-        isProcessing={isLoading}
-        isStreaming={isStreaming}
-        onStop={handleStop}
+        onSend={state.sendMessage}
+        disabled={state.isLoading}
+        isProcessing={state.isLoading || state.isWaitingForResponse}
+        isStreaming={state.isStreaming}
+        onStop={state.stopGeneration}
       />
-
-      {/* Collapsible Signals */}
-      {signals.length > 0 && (
-        <div className="border-t border-neutral-200">
-          <button
-            onClick={() => setSignalsExpanded(!signalsExpanded)}
-            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition-colors"
-          >
-            <span>Signals ({signals.length})</span>
-            <svg
-              className={`w-4 h-4 transition-transform ${signalsExpanded ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          
-          {signalsExpanded && (
-            <div className="px-4 py-3 max-h-48 overflow-y-auto bg-neutral-50">
-              <div className="space-y-2">
-                {signals.map(signal => (
-                  <div key={signal.id} className="text-xs p-2 bg-white border border-neutral-200 rounded">
-                    <span className="font-medium text-neutral-700">{signal.signal_type}:</span>
-                    <span className="text-neutral-600 ml-1">{signal.content}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

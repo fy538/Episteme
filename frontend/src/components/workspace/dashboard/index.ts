@@ -1,11 +1,7 @@
-export { HomePage } from './HomePage';
 export { RecommendedAction } from './RecommendedAction';
 export { NewActivityFeed } from './NewActivityFeed';
-export { ProjectList } from './ProjectList';
-export { ActionChips } from './ActionChips';
-export { HomeContextZone } from './HomeContextZone';
 export { DashboardSidebar } from './DashboardSidebar';
-export { RecentCases } from './RecentCases';
-export { QuickActions } from './QuickActions';
 export { WelcomeEmpty } from './WelcomeEmpty';
-export { EmptyContextZone } from './EmptyContextZone';
+export { ActionItemCard } from './ActionItemCard';
+export { ArticleCarousel } from './ArticleCarousel';
+export { ActivityTimeline } from './ActivityTimeline';

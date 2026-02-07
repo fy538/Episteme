@@ -70,6 +70,8 @@ interface UseBriefReturn {
   unlinkFromInquiry: (sectionId: string) => Promise<BriefSection | null>;
   /** Dismiss an annotation */
   dismissAnnotation: (sectionId: string, annotationId: string) => Promise<void>;
+  /** Toggle section collapsed state */
+  toggleCollapse: (sectionId: string, collapsed: boolean) => Promise<void>;
   /** Trigger grounding recomputation */
   evolveBrief: () => Promise<void>;
 
@@ -120,6 +122,7 @@ export function useBrief({
   // deactivates after a stable period with no changes.
   const [pollActive, setPollActive] = useState(false);
   const pollStableCountRef = useRef(0); // Consecutive polls with no change
+  const pollFailureCountRef = useRef(0); // Consecutive poll failures
   const groundingFingerprintRef = useRef<string>('');
 
   // ── Fetch ──────────────────────────────────────────────────────
@@ -134,6 +137,16 @@ export function useBrief({
       setBriefId(response.brief_id);
       // Update fingerprint
       groundingFingerprintRef.current = buildGroundingFingerprint(response.sections);
+
+      // Auto-activate polling if any sections are linked to inquiries
+      // (which means grounding may update in the background via Django signals)
+      const hasLinkedSections = response.sections.some(
+        (s: BriefSection) => s.is_linked || s.inquiry
+      );
+      if (hasLinkedSections && !pollActive) {
+        pollStableCountRef.current = 0;
+        setPollActive(true);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load brief sections');
       // Not an error if case just has no sections yet
@@ -144,7 +157,7 @@ export function useBrief({
     } finally {
       setIsLoading(false);
     }
-  }, [caseId]);
+  }, [caseId, pollActive]);
 
   useEffect(() => {
     if (autoFetch) {
@@ -182,8 +195,16 @@ export function useBrief({
             setPollActive(false);
           }
         }
+        // Reset failure counter on success
+        pollFailureCountRef.current = 0;
       } catch {
-        // Silently fail — polling is best-effort
+        // Polling is best-effort, but stop after repeated failures
+        // to avoid hammering a down server
+        pollFailureCountRef.current += 1;
+        if (pollFailureCountRef.current >= 3) {
+          setPollActive(false);
+          console.warn('[useBrief] Polling stopped after 3 consecutive failures');
+        }
       }
     }, pollInterval);
 
@@ -280,6 +301,27 @@ export function useBrief({
     }
   }, [caseId, refresh]);
 
+  const toggleCollapse = useCallback(async (sectionId: string, collapsed: boolean) => {
+    // Optimistic update
+    const updateCollapse = (sects: BriefSection[]): BriefSection[] =>
+      sects.map(s => ({
+        ...s,
+        is_collapsed: s.id === sectionId ? collapsed : s.is_collapsed,
+        subsections: s.subsections ? updateCollapse(s.subsections) : s.subsections,
+      }));
+    setSections(prev => updateCollapse(prev));
+    try {
+      await casesAPI.updateBriefSection(caseId, sectionId, { is_collapsed: collapsed });
+    } catch (err: any) {
+      // Revert on error
+      setSections(prev => updateCollapse(prev).map(s => ({
+        ...s,
+        is_collapsed: s.id === sectionId ? !collapsed : s.is_collapsed,
+      })));
+      setError(err.message || 'Failed to toggle section');
+    }
+  }, [caseId]);
+
   const dismissAnnotation = useCallback(async (sectionId: string, annotationId: string) => {
     try {
       await casesAPI.dismissAnnotation(caseId, sectionId, annotationId);
@@ -324,6 +366,7 @@ export function useBrief({
       }
       // Start polling in case background tasks also trigger further updates
       pollStableCountRef.current = 0;
+      pollFailureCountRef.current = 0;
       setPollActive(true);
     } catch (err: any) {
       setError(err.message || 'Failed to evolve brief');
@@ -412,6 +455,7 @@ export function useBrief({
     linkToInquiry,
     unlinkFromInquiry,
     dismissAnnotation,
+    toggleCollapse,
     evolveBrief,
     overallGrounding,
     blockingAnnotations,

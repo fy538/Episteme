@@ -75,7 +75,7 @@ export function CaseTabs({ caseId, activeTab = 'brief', counts }: CaseTabsProps)
   ];
 
   const handleTabClick = (tabId: TabId) => {
-    router.push(`/workspace/cases/${caseId}?tab=${tabId}`);
+    router.push(`/cases/${caseId}?tab=${tabId}`);
   };
 
   // Keyboard shortcuts

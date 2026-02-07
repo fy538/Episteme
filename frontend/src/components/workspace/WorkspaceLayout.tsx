@@ -41,7 +41,7 @@ export function WorkspaceLayout({
         </div>
 
         {/* Right: AI Chat Panel (Cursor-style, collapsible) */}
-        <div className="border-l border-neutral-200 bg-white">
+        <div className="border-l border-neutral-200 bg-white transition-all duration-200 ease-out">
           {rightPanel}
         </div>
       </div>

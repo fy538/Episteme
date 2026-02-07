@@ -62,10 +62,10 @@ function ActivityItemRow({ item }: { item: ActivityItem }) {
 
   // Build link
   const href = item.caseId
-    ? `/workspace/cases/${item.caseId}`
+    ? `/cases/${item.caseId}`
     : item.projectId
-    ? `/workspace/projects/${item.projectId}`
-    : '/workspace';
+    ? `/projects/${item.projectId}`
+    : '/';
 
   // Format timestamp
   const timeAgo = formatTimeAgo(item.timestamp);

@@ -155,7 +155,7 @@ export function CaseCardExpanded({
                 {threads.map((thread) => (
                   <Link
                     key={thread.id}
-                    href={`/chat?thread=${thread.id}`}
+                    href={`/?thread=${thread.id}`}
                     className="block p-2 rounded border border-neutral-200 dark:border-neutral-700 hover:border-accent-500 transition-colors text-sm"
                   >
                     <div className="flex items-center justify-between gap-2">

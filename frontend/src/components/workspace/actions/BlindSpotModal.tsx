@@ -82,7 +82,7 @@ export function BlindSpotModal({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-neutral-900 rounded-2xl shadow-xl overflow-hidden">
+      <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-lg overflow-hidden">
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b border-neutral-200 dark:border-neutral-800">
           <div className="flex items-start gap-3">

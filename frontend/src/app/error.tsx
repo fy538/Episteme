@@ -50,7 +50,7 @@ export default function Error({
 
         <div className="flex items-center justify-center gap-3">
           <Button onClick={reset}>Try Again</Button>
-          <Button variant="outline" onClick={() => window.location.href = '/workspace'}>
+          <Button variant="outline" onClick={() => window.location.href = '/'}>
             Go Home
           </Button>
         </div>

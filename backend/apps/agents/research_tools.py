@@ -11,7 +11,10 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .research_config import SourcesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +79,6 @@ class WebSearchTool(ResearchTool):
 
     name = "web_search"
     description = "Search the web for information on any topic"
-
-    def __init__(self):
-        self._provider = None
 
     async def execute(
         self,
@@ -273,8 +273,9 @@ def _extract_domain(url: str) -> str:
 
 
 def resolve_tools_for_config(
-    sources_config,
+    sources_config: SourcesConfig,
     case_id: str | None = None,
+    user_id: int | None = None,
 ) -> list[ResearchTool]:
     """
     Build the list of tools based on source configuration.
@@ -290,7 +291,35 @@ def resolve_tools_for_config(
     if case_id:
         tools.append(DocumentSearchTool(case_id=case_id))
 
-    # Future: MCP tool resolution would go here
-    # e.g., if "court_opinions" in source types and westlaw_mcp_server is connected...
+    # Sub-agent tools (when config declares sub_agents)
+    if sources_config.sub_agents and case_id and user_id:
+        from .sub_agent_tool import SubAgentTool
+
+        for agent_type in sources_config.sub_agents:
+            tools.append(SubAgentTool(
+                agent_type=agent_type,
+                case_id=case_id,
+                user_id=user_id,
+            ))
+
+    # MCP tool resolution
+    if sources_config.mcp_servers:
+        from .mcp_client import MCPClient
+        from .mcp_tool import MCPResearchTool
+
+        for mcp_config in sources_config.mcp_servers:
+            client = MCPClient(
+                name=mcp_config.name,
+                command=mcp_config.command,
+                url=mcp_config.url,
+                tool_filter=mcp_config.tool_filter,
+            )
+            # Use first tool in filter as the search tool, or "search" as default
+            tool_name = mcp_config.tool_filter[0] if mcp_config.tool_filter else "search"
+            tools.append(MCPResearchTool(
+                client=client,
+                tool_name=tool_name,
+                server_name=mcp_config.name,
+            ))
 
     return tools

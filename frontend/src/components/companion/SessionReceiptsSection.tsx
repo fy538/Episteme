@@ -64,6 +64,7 @@ export function SessionReceiptsSection({
       {/* Header */}
       <button
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
         className={cn(
           'w-full px-3 py-2 flex items-center justify-between transition-colors',
           theme.thinking.bgHover,
@@ -71,7 +72,7 @@ export function SessionReceiptsSection({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className={cn('text-xs', theme.thinking.text)}>{'>'}</span>
+          <span className={cn('text-xs', theme.thinking.text)} aria-hidden="true">{'>'}</span>
           <span className={cn('text-xs tracking-wider font-medium uppercase', theme.thinking.text)}>
             SESSION
           </span>
@@ -79,7 +80,7 @@ export function SessionReceiptsSection({
             ({receipts.length} item{receipts.length !== 1 ? 's' : ''})
           </span>
         </div>
-        <span className={cn('text-xs', theme.thinking.textMuted)}>
+        <span className={cn('text-xs', theme.thinking.textMuted)} aria-hidden="true">
           {collapsed ? '[+]' : '[-]'}
         </span>
       </button>

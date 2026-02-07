@@ -54,7 +54,7 @@ export function InquiryList({
               </Badge>
               {inquiry.case && (
                 <Link 
-                  href={`/workspace/cases/${inquiry.case}`}
+                  href={`/cases/${inquiry.case}`}
                   className="text-xs text-accent-600 hover:text-accent-700 hover:underline"
                 >
                   {getCaseName(inquiry.case)}

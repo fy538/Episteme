@@ -19,11 +19,18 @@ from .services import ProjectService, DocumentService
 
 class ProjectViewSet(viewsets.ModelViewSet):
     """ViewSet for projects"""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get_queryset(self):
-        return Project.objects.filter(user=self.request.user)
+        return Project.objects.filter(user=self.request.user, is_archived=False)
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete — sets is_archived=True instead of removing the row."""
+        project = self.get_object()
+        project.is_archived = True
+        project.save(update_fields=['is_archived', 'updated_at'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
     
     def get_serializer_class(self):
         if self.action == 'create':

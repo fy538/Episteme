@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useBrief } from '@/hooks/useBrief';
 import { BriefSectionCard } from './BriefSectionCard';
+import { WordDiff } from '@/components/editor/WordDiff';
+import { documentsAPI } from '@/lib/api/documents';
 import type { Case, Inquiry, SectionType, GroundingStatus, EvolveDiff } from '@/lib/types/case';
 
 interface IntelligentBriefProps {
@@ -58,6 +60,7 @@ export function IntelligentBrief({
 }: IntelligentBriefProps) {
   const {
     sections,
+    briefId,
     isLoading,
     isEvolving,
     isPolling,
@@ -72,6 +75,7 @@ export function IntelligentBrief({
     linkToInquiry,
     unlinkFromInquiry,
     dismissAnnotation,
+    toggleCollapse,
     evolveBrief,
     overallGrounding,
     blockingAnnotations,
@@ -83,6 +87,33 @@ export function IntelligentBrief({
   const [showLinkModal, setShowLinkModal] = useState<string | null>(null); // section ID
   const [newSectionHeading, setNewSectionHeading] = useState('');
   const [newSectionType, setNewSectionType] = useState<SectionType>('custom');
+
+  // Version diff state (for "View changes" on evolve)
+  const [showVersionDiff, setShowVersionDiff] = useState(false);
+  const [versionDiffData, setVersionDiffData] = useState<{ oldContent: string; newContent: string } | null>(null);
+  const [loadingVersionDiff, setLoadingVersionDiff] = useState(false);
+
+  const handleViewChanges = useCallback(async () => {
+    if (!briefId) return;
+    setLoadingVersionDiff(true);
+    setShowVersionDiff(true);
+    try {
+      const versions = await documentsAPI.getVersionHistoryWithContent(briefId);
+      if (versions.length >= 2) {
+        // Compare the two most recent versions
+        setVersionDiffData({
+          oldContent: versions[1]?.content_markdown || '',
+          newContent: versions[0]?.content_markdown || '',
+        });
+      } else {
+        setVersionDiffData(null);
+      }
+    } catch {
+      setVersionDiffData(null);
+    } finally {
+      setLoadingVersionDiff(false);
+    }
+  }, [briefId]);
 
   // ── Drag-and-drop state ──────────────────────────────────────
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
@@ -391,7 +422,44 @@ export function IntelligentBrief({
 
       {/* Evolve Diff Banner — shows what changed after grounding recomputation */}
       {lastEvolveDiff && (
-        <EvolveDiffBanner diff={lastEvolveDiff} onDismiss={dismissEvolveDiff} />
+        <EvolveDiffBanner
+          diff={lastEvolveDiff}
+          onDismiss={dismissEvolveDiff}
+          onViewChanges={briefId ? handleViewChanges : undefined}
+        />
+      )}
+
+      {/* Version Diff Modal — shows content diff after evolve */}
+      {showVersionDiff && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Content Changes
+              </h3>
+              <button
+                onClick={() => setShowVersionDiff(false)}
+                className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              {loadingVersionDiff ? (
+                <p className="text-sm text-neutral-500 text-center py-8">Loading diff...</p>
+              ) : versionDiffData ? (
+                <WordDiff
+                  oldText={versionDiffData.oldContent}
+                  newText={versionDiffData.newContent}
+                />
+              ) : (
+                <p className="text-sm text-neutral-500 text-center py-8">
+                  No version history available to compare.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Section Cards — with drag-to-reorder */}
@@ -406,6 +474,7 @@ export function IntelligentBrief({
             onUnlinkInquiry={handleUnlinkInquiry}
             onDismissAnnotation={handleDismissAnnotation}
             onNavigateToInquiry={handleNavigateToInquiry}
+            onToggleCollapse={toggleCollapse}
             onStartChat={onStartChat}
             isDragging={dragSourceId === section.id}
             isDragOver={dragOverId === section.id}
@@ -581,7 +650,15 @@ function LinkInquiryModal({
 
 // ── Evolve Diff Banner ───────────────────────────────────────────
 
-function EvolveDiffBanner({ diff, onDismiss }: { diff: EvolveDiff; onDismiss: () => void }) {
+function EvolveDiffBanner({
+  diff,
+  onDismiss,
+  onViewChanges,
+}: {
+  diff: EvolveDiff;
+  onDismiss: () => void;
+  onViewChanges?: () => void;
+}) {
   const { section_changes, new_annotations, resolved_annotations } = diff;
 
   // Build summary line
@@ -676,13 +753,23 @@ function EvolveDiffBanner({ diff, onDismiss }: { diff: EvolveDiff; onDismiss: ()
           </div>
         )}
       </div>
-      <button
-        onClick={onDismiss}
-        className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 flex-shrink-0 mt-0.5"
-        title="Dismiss"
-      >
-        <span className="text-sm">&times;</span>
-      </button>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {onViewChanges && (
+          <button
+            onClick={onViewChanges}
+            className={cn('text-[11px] underline hover:no-underline', textStyle)}
+          >
+            View changes
+          </button>
+        )}
+        <button
+          onClick={onDismiss}
+          className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 mt-0.5"
+          title="Dismiss"
+        >
+          <span className="text-sm">&times;</span>
+        </button>
+      </div>
     </div>
   );
 }

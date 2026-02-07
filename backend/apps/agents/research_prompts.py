@@ -251,6 +251,7 @@ def build_evaluate_prompt(
     findings: list[dict],
     evaluate_config: EvaluateConfig,
     skill_instructions: str = "",
+    effective_rubric: str = "",
 ) -> str:
     """Build the prompt for the evaluation step."""
 
@@ -278,6 +279,8 @@ def build_evaluate_prompt(
             criteria_spec += "Higher-authority sources override lower-authority sources on conflicting claims.\n"
         elif evaluate_config.mode == "corroborative":
             criteria_spec += "Multiple independent sources increase confidence. Weight by criteria importance.\n"
+    elif effective_rubric:
+        criteria_spec = f"Evaluation rubric:\n\n{effective_rubric}\n"
     elif evaluate_config.quality_rubric:
         criteria_spec = f"Evaluation rubric:\n\n{evaluate_config.quality_rubric}\n"
     else:
@@ -406,6 +409,7 @@ def build_synthesize_prompt(
     output_config: OutputConfig,
     original_question: str,
     skill_instructions: str = "",
+    effective_sections: list[str] | None = None,
 ) -> str:
     """Build the prompt for the synthesis step."""
 
@@ -425,8 +429,8 @@ def build_synthesize_prompt(
         if f.get("evaluation_notes"):
             findings_text += f"Notes: {f['evaluation_notes']}\n"
 
-    # Output structure
-    sections = output_config.sections if output_config.sections else [
+    # Output structure — use effective_sections if provided (includes config defaults)
+    sections = effective_sections or output_config.sections or [
         "Executive Summary",
         "Key Findings",
         "Supporting Evidence",
@@ -487,7 +491,11 @@ Write the full report in markdown."""
 
 # ─── Compact Prompt ───────────────────────────────────────────────────────
 
-def build_compact_prompt(dropped_findings: list[dict], kept_count: int) -> str:
+def build_compact_prompt(
+    dropped_findings: list[dict],
+    kept_count: int,
+    skill_instructions: str = "",
+) -> str:
     """Build prompt for the compaction step."""
 
     findings_text = ""
@@ -502,6 +510,7 @@ The following {len(dropped_findings)} lower-scoring findings are being compacted
 
 ## Findings to Digest
 {findings_text}
+{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
 
 ## Your Task
 Produce a concise digest of any unique insights from these findings

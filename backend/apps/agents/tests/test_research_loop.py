@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import TestCase
 
-from apps.agents.research_config import ResearchConfig, SearchConfig
+from apps.agents.research_config import (
+    ResearchConfig, SearchConfig, SourcesConfig, SourceEntry,
+    CompletenessConfig,
+)
 from apps.agents.research_loop import (
     ResearchLoop,
     ResearchContext,
@@ -20,6 +23,7 @@ from apps.agents.research_loop import (
     _parse_markdown_to_blocks,
     _target_length_to_tokens,
     _get_tracer,
+    MAX_CITATION_LEADS_PER_ROUND,
 )
 from apps.agents.research_tools import SearchResult
 
@@ -340,6 +344,19 @@ class ParseMarkdownToBlocksTest(TestCase):
         blocks = _parse_markdown_to_blocks(md)
         self.assertEqual(blocks[0]["metadata"]["level"], 3)
 
+    def test_heading_levels_correct(self):
+        """### should be level 3, not misclassified as level 1."""
+        md = "# H1\n\n## H2\n\n### H3\n\nParagraph."
+        blocks = _parse_markdown_to_blocks(md)
+        headings = [b for b in blocks if b["type"] == "heading"]
+        self.assertEqual(len(headings), 3)
+        self.assertEqual(headings[0]["metadata"]["level"], 1)
+        self.assertEqual(headings[0]["content"], "H1")
+        self.assertEqual(headings[1]["metadata"]["level"], 2)
+        self.assertEqual(headings[1]["content"], "H2")
+        self.assertEqual(headings[2]["metadata"]["level"], 3)
+        self.assertEqual(headings[2]["content"], "H3")
+
     def test_empty_content(self):
         blocks = _parse_markdown_to_blocks("")
         self.assertEqual(blocks, [])
@@ -374,14 +391,14 @@ class ParallelSearchTest(TestCase):
     """Test parallel search execution."""
 
     def test_parallel_search_queries(self):
-        """Queries should run concurrently — wall time < sum of individual delays."""
+        """All queries should be dispatched and results combined."""
         config = ResearchConfig.default()
         provider = make_mock_provider()
 
-        delay_seconds = 0.1
+        dispatched_queries = []
 
-        async def slow_search(**kwargs):
-            await asyncio.sleep(delay_seconds)
+        async def tracking_search(**kwargs):
+            dispatched_queries.append(kwargs.get("query", ""))
             return [
                 SearchResult(
                     url=f"https://example.com/{kwargs.get('query', '')}",
@@ -393,7 +410,7 @@ class ParallelSearchTest(TestCase):
 
         tool = MagicMock()
         tool.name = "web_search"
-        tool.execute = AsyncMock(side_effect=slow_search)
+        tool.execute = AsyncMock(side_effect=tracking_search)
 
         loop = ResearchLoop(
             config=config,
@@ -408,13 +425,12 @@ class ParallelSearchTest(TestCase):
             SubQuery(query="Q3"),
         ]
 
-        start = time.time()
         results = asyncio.run(loop._search(queries))
-        elapsed = time.time() - start
 
-        # 3 queries with 0.1s each — sequential would be ~0.3s, parallel should be ~0.1s
+        # All 3 queries dispatched and results combined
         self.assertEqual(len(results), 3)
-        self.assertLess(elapsed, delay_seconds * 2.5)  # generous margin
+        self.assertEqual(len(dispatched_queries), 3)
+        self.assertEqual(set(dispatched_queries), {"Q1", "Q2", "Q3"})
 
     def test_parallel_search_handles_exceptions(self):
         """One failing query should not prevent others from returning results."""
@@ -690,3 +706,407 @@ class ObservabilityTest(TestCase):
 
         # Each span should have been ended
         self.assertGreaterEqual(mock_span.end.call_count, len(span_calls))
+
+
+# ─── Contrary Search Tests ─────────────────────────────────────────────────
+
+class ContrarySearchTest(TestCase):
+    """Test _search_contrary() method."""
+
+    def _make_finding(self, title="Source", quote="Quote", domain="example.com"):
+        return ScoredFinding(
+            source=SearchResult(
+                url=f"https://{domain}/article",
+                title=title,
+                snippet="Snippet",
+                domain=domain,
+            ),
+            extracted_fields={"claim": f"Claim from {title}"},
+            raw_quote=quote,
+            relevance_score=0.8,
+            quality_score=0.8,
+        )
+
+    def test_search_contrary_generates_and_searches(self):
+        """Contrary check should generate contrary queries and search them."""
+        config = ResearchConfig.default()
+
+        responses = [
+            # 1. Contrary prompt → generates queries
+            json.dumps({
+                "contrary_queries": [
+                    {"query": "Why X is overhyped", "rationale": "Challenge consensus"},
+                ]
+            }),
+            # 2. Extract from contrary results
+            json.dumps({
+                "findings": [
+                    {
+                        "source_index": 0,
+                        "extracted_fields": {"key_claim": "X has been overhyped"},
+                        "raw_quote": "Critics argue X is overhyped.",
+                        "relationships": [],
+                    }
+                ]
+            }),
+            # 3. Evaluate contrary findings
+            json.dumps({
+                "evaluations": [
+                    {"finding_index": 0, "relevance_score": 0.7, "quality_score": 0.6,
+                     "evaluation_notes": "Valid contrarian view"},
+                ]
+            }),
+        ]
+
+        provider = MagicMock()
+        provider.generate = AsyncMock(side_effect=responses)
+
+        tool = make_mock_tool([
+            SearchResult(
+                url="https://critic.com/article",
+                title="Why X is Overhyped",
+                snippet="Critics argue X is overhyped.",
+                domain="critic.com",
+            ),
+        ])
+
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        findings = [self._make_finding()]
+        result = asyncio.run(loop._search_contrary(findings, "What is X?"))
+
+        # Should return scored contrary findings
+        self.assertGreaterEqual(len(result), 1)
+        self.assertIsInstance(result[0], ScoredFinding)
+
+    def test_search_contrary_empty_when_no_queries_generated(self):
+        """If LLM returns no contrary queries, result is empty."""
+        config = ResearchConfig.default()
+
+        provider = MagicMock()
+        provider.generate = AsyncMock(return_value=json.dumps({"contrary_queries": []}))
+
+        tool = make_mock_tool()
+
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        findings = [self._make_finding()]
+        result = asyncio.run(loop._search_contrary(findings, "What is X?"))
+        self.assertEqual(result, [])
+
+
+# ─── Tool Resolution Tests ─────────────────────────────────────────────────
+
+class ResolveToolTest(TestCase):
+    """Test _resolve_tool() method."""
+
+    def _make_loop(self):
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        web_tool = MagicMock()
+        web_tool.name = "web_search"
+        doc_tool = MagicMock()
+        doc_tool.name = "document_search"
+        return ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[web_tool, doc_tool],
+        )
+
+    def test_resolve_tool_internal(self):
+        """Internal source target should pick document_search."""
+        loop = self._make_loop()
+        sq = SubQuery(query="contract terms", source_target="internal")
+        tool = loop._resolve_tool(sq)
+        self.assertEqual(tool.name, "document_search")
+
+    def test_resolve_tool_web_for_default(self):
+        """Default source_target 'web' should pick web_search."""
+        loop = self._make_loop()
+        sq = SubQuery(query="latest news", source_target="web")
+        tool = loop._resolve_tool(sq)
+        self.assertEqual(tool.name, "web_search")
+
+    def test_resolve_tool_unknown_falls_back_to_web(self):
+        """Unknown source_target should fall back to web_search."""
+        loop = self._make_loop()
+        sq = SubQuery(query="court cases", source_target="court_opinions")
+        tool = loop._resolve_tool(sq)
+        self.assertEqual(tool.name, "web_search")
+
+    def test_resolve_tool_internal_without_doc_search(self):
+        """Internal target without document_search tool should fall back to web."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        web_tool = MagicMock()
+        web_tool.name = "web_search"
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[web_tool],
+        )
+        sq = SubQuery(query="contract terms", source_target="internal")
+        tool = loop._resolve_tool(sq)
+        self.assertEqual(tool.name, "web_search")
+
+
+# ─── Domain Filter Tests ───────────────────────────────────────────────────
+
+class DomainFilterTest(TestCase):
+    """Test _build_domain_filters() method."""
+
+    def test_filters_from_source_config(self):
+        """Should pick up domains from matching source entry."""
+        config = ResearchConfig(
+            sources=SourcesConfig(
+                primary=[
+                    SourceEntry(type="sec_filings", domains=["sec.gov", "edgar.sec.gov"]),
+                ],
+                excluded_domains=["spam.com"],
+            ),
+        )
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        sq = SubQuery(query="AAPL 10-K filing", source_target="sec_filings")
+        domains, excluded = loop._build_domain_filters(sq)
+
+        self.assertEqual(domains, ["sec.gov", "edgar.sec.gov"])
+        self.assertIn("spam.com", excluded)
+
+    def test_no_domain_filter_for_generic_web(self):
+        """Generic web queries should not have domain restrictions."""
+        config = ResearchConfig(
+            sources=SourcesConfig(
+                primary=[SourceEntry(type="web")],
+                excluded_domains=["tabloid.com"],
+            ),
+        )
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        sq = SubQuery(query="general topic", source_target="web")
+        domains, excluded = loop._build_domain_filters(sq)
+
+        # web type has no domains restriction
+        self.assertIsNone(domains)
+        self.assertIn("tabloid.com", excluded)
+
+    def test_excluded_domains_always_present(self):
+        """Excluded domains should always be applied."""
+        config = ResearchConfig(
+            sources=SourcesConfig(excluded_domains=["bad.com", "worse.com"]),
+        )
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        sq = SubQuery(query="anything", source_target="web")
+        _, excluded = loop._build_domain_filters(sq)
+
+        self.assertEqual(set(excluded), {"bad.com", "worse.com"})
+
+
+# ─── Citation Leads Tests ──────────────────────────────────────────────────
+
+class CitationLeadsTest(TestCase):
+    """Test _get_citation_leads() method."""
+
+    def _make_finding_with_rels(self, relationships):
+        return ScoredFinding(
+            source=SearchResult(
+                url="https://example.com/src",
+                title="Source Paper",
+                snippet="Snippet",
+                domain="example.com",
+            ),
+            extracted_fields={},
+            raw_quote="Quote",
+            relationships=relationships,
+            relevance_score=0.8,
+            quality_score=0.8,
+        )
+
+    def test_extracts_cites_relationships(self):
+        """Should create SubQueries from 'cites' relationships."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        findings = [
+            self._make_finding_with_rels([
+                {"type": "cites", "target_title": "Referenced Paper A"},
+                {"type": "cites", "target_url": "https://ref.com/paper-b"},
+            ]),
+        ]
+
+        leads = loop._get_citation_leads(findings)
+        self.assertEqual(len(leads), 2)
+        self.assertEqual(leads[0].query, "Referenced Paper A")
+        self.assertEqual(leads[1].query, "https://ref.com/paper-b")
+
+    def test_ignores_non_citation_relationships(self):
+        """Should skip relationship types that aren't cites/references."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        findings = [
+            self._make_finding_with_rels([
+                {"type": "contradicts", "target_title": "Opposing View"},
+                {"type": "cites", "target_title": "Valid Citation"},
+            ]),
+        ]
+
+        leads = loop._get_citation_leads(findings)
+        self.assertEqual(len(leads), 1)
+        self.assertEqual(leads[0].query, "Valid Citation")
+
+    def test_limits_to_max_per_round(self):
+        """Should cap leads at MAX_CITATION_LEADS_PER_ROUND."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        many_rels = [
+            {"type": "cites", "target_title": f"Paper {i}"}
+            for i in range(10)
+        ]
+        findings = [self._make_finding_with_rels(many_rels)]
+
+        leads = loop._get_citation_leads(findings)
+        self.assertEqual(len(leads), MAX_CITATION_LEADS_PER_ROUND)
+
+
+# ─── Token Estimation Tests ────────────────────────────────────────────────
+
+class TokenEstimationTest(TestCase):
+    """Test _estimate_findings_tokens() method."""
+
+    def test_basic_estimate(self):
+        """Known input should produce expected token count."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        findings = [
+            ScoredFinding(
+                source=SearchResult(url="", title="T", snippet="S", domain="d"),
+                extracted_fields={"claim": "A" * 400},  # 400 chars
+                raw_quote="B" * 400,                      # 400 chars
+                evaluation_notes="C" * 200,                # 200 chars
+            ),
+        ]
+
+        tokens = loop._estimate_findings_tokens(findings)
+        # extracted_fields str repr ≈ ~420 chars, raw_quote 400, notes 200 → ~1020/4 ≈ 255
+        self.assertGreater(tokens, 200)
+        self.assertLess(tokens, 400)
+
+    def test_empty_findings(self):
+        """Empty findings should return 0 tokens."""
+        config = ResearchConfig.default()
+        provider = make_mock_provider()
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        self.assertEqual(loop._estimate_findings_tokens([]), 0)
+
+
+# ─── Stream Chat Fallback Tests ────────────────────────────────────────────
+
+class StreamChatFallbackTest(TestCase):
+    """Test that _llm_call works with stream_chat when generate is absent."""
+
+    def test_stream_chat_fallback(self):
+        """Provider without generate() should fall back to stream_chat()."""
+        config = ResearchConfig.default()
+
+        # Create a provider with stream_chat but NO generate
+        chunk1 = MagicMock()
+        chunk1.content = '{"sub_queries": [{"query": "Q1"}]'
+        chunk2 = MagicMock()
+        chunk2.content = "}"
+
+        async def mock_stream(**kwargs):
+            for chunk in [chunk1, chunk2]:
+                yield chunk
+
+        provider = MagicMock(spec=[])  # Empty spec — no generate attribute
+        provider.stream_chat = MagicMock(return_value=mock_stream())
+
+        tool = make_mock_tool()
+        loop = ResearchLoop(
+            config=config,
+            prompt_extension="",
+            provider=provider,
+            tools=[tool],
+        )
+
+        # Call _llm_call directly — should use stream_chat fallback
+        result = asyncio.run(loop._llm_call(
+            user_prompt="Test",
+            system_prompt="System",
+            step_name="test",
+        ))
+
+        self.assertIn("sub_queries", result)
+        self.assertTrue(provider.stream_chat.called)

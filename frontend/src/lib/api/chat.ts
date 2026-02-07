@@ -35,31 +35,6 @@ export const chatAPI = {
     await apiClient.delete(`/chat/threads/${threadId}/`);
   },
 
-  async sendMessage(threadId: string, content: string): Promise<Message> {
-    return apiClient.post<Message>(`/chat/threads/${threadId}/messages/`, { content });
-  },
-
-  async sendMessageStream(
-    threadId: string,
-    content: string,
-    onChunk: (delta: string) => void,
-    onDone: (messageId?: string) => void,
-    signal?: AbortSignal
-  ): Promise<void> {
-    await apiClient.stream(
-      `/chat/threads/${threadId}/messages/?stream=true`,
-      { content },
-      ({ event, data }) => {
-        if (event === 'chunk' && data?.delta) {
-          onChunk(data.delta);
-        } else if (event === 'done') {
-          onDone(data?.message_id);
-        }
-      },
-      signal
-    );
-  },
-
   async getMessages(threadId: string): Promise<Message[]> {
     const response = await apiClient.get<{ results: Message[] }>(
       `/chat/messages/?thread=${threadId}`
@@ -163,11 +138,13 @@ export const chatAPI = {
       onDone?: (result: { messageId?: string; reflectionId?: string; signalsCount?: number; actionHintsCount?: number }) => void;
       onError?: (error: string) => void;
     },
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** Optional mode context for backend system prompt selection */
+    context?: { mode?: string; caseId?: string; inquiryId?: string }
   ): Promise<void> {
     await apiClient.stream(
       `/chat/threads/${threadId}/unified-stream/`,
-      { content },
+      { content, ...(context ? { context } : {}) },
       ({ event, data }) => {
         switch (event) {
           case 'response_chunk':
@@ -205,85 +182,4 @@ export const chatAPI = {
     );
   },
 
-  /**
-   * Generate a title for a thread based on conversation content.
-   * Called after 2nd assistant response.
-   */
-  async generateTitle(threadId: string): Promise<{ title: string; generated: boolean }> {
-    return apiClient.post<{ title: string; generated: boolean }>(
-      `/chat/threads/${threadId}/generate_title/`,
-      {}
-    );
-  },
-
-  /**
-   * Stream title generation for a thread.
-   * Provides real-time title generation with token-by-token streaming.
-   */
-  async streamTitle(
-    threadId: string,
-    callbacks: {
-      onChunk?: (delta: string) => void;
-      onComplete?: (title: string, generated: boolean) => void;
-      onError?: (error: string) => void;
-    }
-  ): Promise<void> {
-    const token = localStorage.getItem('access_token');
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-
-    const response = await fetch(`${baseUrl}/chat/threads/${threadId}/stream-title/`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'text/event-stream',
-      },
-    });
-
-    if (!response.ok) {
-      callbacks.onError?.('Failed to stream title');
-      return;
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) return;
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            const eventType = line.slice(7);
-            continue;
-          }
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.delta) {
-                callbacks.onChunk?.(data.delta);
-              }
-              if (data.title !== undefined) {
-                callbacks.onComplete?.(data.title, data.generated);
-              }
-              if (data.error) {
-                callbacks.onError?.(data.error);
-              }
-            } catch (e) {
-              // Ignore JSON parse errors
-            }
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  },
 };

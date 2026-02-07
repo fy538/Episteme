@@ -124,6 +124,38 @@ def _build_suggestion_prompt(
         if gaps.get('contradictions'):
             gaps_text += f"\nContradictions: {', '.join(gaps['contradictions'][:3])}"
 
+    # Build grounding context from section annotations
+    grounding = case_context.get('grounding', [])
+    grounding_text = ""
+    if grounding:
+        lines = []
+        for sec in grounding:
+            section_line = f"- **{sec['heading']}** ({sec['section_id']}): grounding={sec['grounding_status']}"
+            if sec.get('annotations'):
+                ann_types = [a['type'] for a in sec['annotations']]
+                section_line += f" | annotations: {', '.join(ann_types)}"
+            lines.append(section_line)
+        grounding_text = "\n".join(lines)
+
+        # Identify high-priority issues for targeted suggestions
+        tensions = [s for s in grounding if any(a['type'] == 'tension' for a in s.get('annotations', []))]
+        evidence_deserts = [s for s in grounding if any(a['type'] == 'evidence_desert' for a in s.get('annotations', []))]
+        blind_spots = [s for s in grounding if any(a['type'] == 'blind_spot' for a in s.get('annotations', []))]
+        ungrounded = [s for s in grounding if s.get('grounding_status') in ('empty', 'weak')]
+
+        if tensions:
+            grounding_text += f"\n\n⚠️ TENSIONS DETECTED in: {', '.join(s['heading'] for s in tensions)}"
+            grounding_text += "\nPrioritize suggestions that resolve conflicting evidence."
+        if evidence_deserts:
+            grounding_text += f"\n\n🏜️ EVIDENCE DESERTS in: {', '.join(s['heading'] for s in evidence_deserts)}"
+            grounding_text += "\nPrioritize suggestions that add evidence or citations to these sections."
+        if blind_spots:
+            grounding_text += f"\n\n👁️ BLIND SPOTS in: {', '.join(s['heading'] for s in blind_spots)}"
+            grounding_text += "\nPrioritize suggestions that address missing perspectives."
+        if ungrounded:
+            grounding_text += f"\n\n📉 WEAKLY GROUNDED sections: {', '.join(s['heading'] for s in ungrounded)}"
+            grounding_text += "\nPrioritize suggestions that strengthen these sections."
+
     return f"""Analyze this decision brief and generate up to {max_suggestions} specific suggestions for improvement.
 
 ## Decision Context
@@ -141,12 +173,17 @@ Decision question: {decision_question or "Not specified"}
 ## Identified Gaps
 {gaps_text or "No gaps analysis available"}
 
+## Section Grounding & Annotations
+{grounding_text or "No grounding data available (sections may not be linked to inquiries yet)"}
+
 ## Instructions
 Generate suggestions that will make this brief more:
 1. Evidence-based (add citations, link to signals)
 2. Complete (address gaps, missing perspectives)
 3. Clear (clarify ambiguous statements)
 4. Rigorous (identify and address assumptions)
+
+**IMPORTANT:** If there are tensions, evidence deserts, blind spots, or weakly grounded sections identified above, your suggestions MUST prioritize addressing those issues first. These are the most impactful improvements.
 
 For each suggestion, provide:
 - section_id: Which section of the brief this applies to

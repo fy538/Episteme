@@ -112,8 +112,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex overflow-hidden">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
+      <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex overflow-hidden animate-scale-in">
         {/* Left Sidebar - Tabs */}
         <div className="w-48 bg-neutral-50 dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 p-4">
           <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4 px-2">

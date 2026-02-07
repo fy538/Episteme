@@ -51,7 +51,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
             parsed = parse_skill_md(version.skill_md_content)
         except Exception as e:
             # Skip skills with parsing errors
-            logger.warning(f"Failed to parse skill '{skill.name}': {e}")
+            logger.warning("skill_md_parse_failed", extra={"skill": skill.name, "error": str(e)})
             continue
 
         # Add markdown body to system prompt
@@ -87,7 +87,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
                         context['research_config'], skill_rc
                     )
             except Exception as e:
-                logger.warning(f"Failed to parse research_config from skill '{skill.name}': {e}")
+                logger.warning("skill_research_config_parse_failed", extra={"skill": skill.name, "error": str(e)})
 
     return context
 
@@ -193,7 +193,7 @@ def get_active_skills_for_case_sync(case) -> List[Skill]:
     return list(case.active_skills.filter(status='active'))
 
 
-def _merge_research_configs(base, override):
+def _merge_research_configs(base: 'ResearchConfig', override: 'ResearchConfig') -> 'ResearchConfig':
     """
     Merge two ResearchConfig instances. Non-default fields from *override*
     win over *base*. This allows multiple skills to contribute config pieces
@@ -271,7 +271,7 @@ def _merge_research_configs(base, override):
         min_sources=pick(base.completeness.min_sources, override.completeness.min_sources, default.completeness.min_sources),
         max_sources=pick(base.completeness.max_sources, override.completeness.max_sources, default.completeness.max_sources),
         require_contrary_check=base.completeness.require_contrary_check or override.completeness.require_contrary_check,
-        require_source_diversity=base.completeness.require_source_diversity and override.completeness.require_source_diversity,
+        require_source_diversity=base.completeness.require_source_diversity or override.completeness.require_source_diversity,
         done_when=override.completeness.done_when or base.completeness.done_when,
     )
 
@@ -284,7 +284,6 @@ def _merge_research_configs(base, override):
     )
 
     return ResearchConfig(
-        suggest_defaults=base.suggest_defaults and override.suggest_defaults,
         sources=merged_sources,
         search=merged_search,
         extract=merged_extract,

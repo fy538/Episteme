@@ -141,7 +141,7 @@ export function PopoverContent({
           style={floatingStyles}
           {...getFloatingProps()}
           className={clsx(
-            'z-50 bg-white rounded-lg shadow-lg border border-neutral-200 p-4',
+            'z-50 bg-white rounded-md shadow-md border border-neutral-200/80 p-4',
             'animate-in fade-in-0 zoom-in-95',
             className
           )}

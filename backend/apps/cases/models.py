@@ -319,6 +319,78 @@ class CaseDocument(UUIDModel, TimestampedModel):
         return f"{self.document_type}: {self.title}"
 
 
+class CaseDocumentVersion(UUIDModel):
+    """
+    Version snapshot for CaseDocument content.
+
+    Created automatically before AI overwrites (suggestions, agentic tasks)
+    and optionally on manual saves. Enables rollback and AI attribution.
+    """
+    document = models.ForeignKey(
+        CaseDocument,
+        on_delete=models.CASCADE,
+        related_name='versions'
+    )
+
+    version = models.IntegerField(
+        help_text="Sequential version number"
+    )
+
+    content_markdown = models.TextField(
+        help_text="Full document content at this version"
+    )
+
+    diff_summary = models.TextField(
+        blank=True,
+        help_text="Human-readable summary of what changed"
+    )
+
+    created_by = models.CharField(
+        max_length=30,
+        choices=[
+            ('user', 'User'),
+            ('ai_suggestion', 'AI Suggestion'),
+            ('ai_task', 'AI Agentic Task'),
+            ('auto_save', 'Auto-save'),
+            ('restore', 'Restored from version'),
+        ],
+        help_text="Who/what created this version"
+    )
+
+    task_description = models.TextField(
+        blank=True,
+        help_text="If AI-generated, the task/prompt that triggered the edit"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-version']
+        indexes = [
+            models.Index(fields=['document', '-version']),
+            models.Index(fields=['document', '-created_at']),
+        ]
+        unique_together = [['document', 'version']]
+
+    def __str__(self):
+        return f"v{self.version} of {self.document.title} ({self.created_by})"
+
+    @classmethod
+    def create_snapshot(cls, document, created_by, diff_summary='', task_description=''):
+        """Create a version snapshot of the current document content."""
+        latest = cls.objects.filter(document=document).order_by('-version').first()
+        next_version = (latest.version + 1) if latest else 1
+
+        return cls.objects.create(
+            document=document,
+            version=next_version,
+            content_markdown=document.content_markdown,
+            diff_summary=diff_summary,
+            created_by=created_by,
+            task_description=task_description,
+        )
+
+
 class DocumentCitation(UUIDModel, TimestampedModel):
     """
     Citation from one document to another.

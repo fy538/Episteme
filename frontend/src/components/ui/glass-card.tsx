@@ -19,7 +19,7 @@ export function GlassCard({
   return (
     <div
       className={cn(
-        'rounded-lg border shadow-lg',
+        'rounded-md border shadow-sm',
         {
           'backdrop-blur-md bg-white/80 dark:bg-primary-900/80 border-white/20 dark:border-neutral-700/30':
             variant === 'default',

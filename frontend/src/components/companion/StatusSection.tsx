@@ -52,6 +52,7 @@ export function StatusSection({
       {/* Header */}
       <button
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
         className={cn(
           'w-full px-3 py-2 flex items-center justify-between transition-colors',
           theme.thinking.bgHover,
@@ -59,7 +60,7 @@ export function StatusSection({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className={cn('text-xs', theme.thinking.text)}>{'>'}</span>
+          <span className={cn('text-xs', theme.thinking.text)} aria-hidden="true">{'>'}</span>
           <span className={cn('text-xs tracking-wider font-medium uppercase', theme.thinking.text)}>
             STATUS
           </span>
@@ -74,7 +75,7 @@ export function StatusSection({
             </span>
           )}
         </div>
-        <span className={cn('text-xs', theme.thinking.textMuted)}>
+        <span className={cn('text-xs', theme.thinking.textMuted)} aria-hidden="true">
           {collapsed ? '[+]' : '[-]'}
         </span>
       </button>
@@ -108,10 +109,10 @@ export function StatusSection({
                   <div className={cn('mb-0.5', theme.thinking.textMuted)}>
                     {item.progress}%
                   </div>
-                  <div className={theme.thinking.text}>
+                  <div className={theme.thinking.text} role="progressbar" aria-valuenow={Math.min(item.progress!, 100)} aria-valuemin={0} aria-valuemax={100}>
                     {Array.from({ length: 20 }).map((_, i) => (
                       <span key={i}>
-                        {i < Math.floor(item.progress! / 5) ? '=' : '-'}
+                        {i < Math.floor(Math.min(item.progress!, 100) / 5) ? '=' : '-'}
                       </span>
                     ))}
                   </div>
@@ -128,7 +129,7 @@ export function StatusSection({
                 'border p-2 text-xs',
                 theme.status.completed.bg
               )}
-              style={{ borderColor: 'rgba(34, 197, 94, 0.3)' }} // green-900/30 equivalent
+              style={{ borderColor: theme.status.completed.border }}
             >
               <div className="flex items-center justify-between">
                 <div className={cn('flex items-center gap-2', theme.status.completed.text)}>

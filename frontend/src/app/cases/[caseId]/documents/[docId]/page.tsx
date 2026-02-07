@@ -62,8 +62,8 @@ export default function DocumentPage({
   }
 
   const breadcrumbItems = [
-    { label: 'Workspace', href: '/chat' },
-    ...(caseData ? [{ label: caseData.title, href: `/workspace/cases/${params.caseId}` }] : []),
+    { label: 'Home', href: '/' },
+    ...(caseData ? [{ label: caseData.title, href: `/cases/${params.caseId}` }] : []),
     { label: document.title }
   ];
 
@@ -79,7 +79,7 @@ export default function DocumentPage({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push(`/workspace/cases/${params.caseId}`)}
+            onClick={() => router.push(`/cases/${params.caseId}`)}
           >
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />

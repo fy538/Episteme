@@ -114,12 +114,12 @@ export function RecommendedAction({
   // Build link href
   const getHref = () => {
     if (item.caseId) {
-      return `/workspace/cases/${item.caseId}`;
+      return `/cases/${item.caseId}`;
     }
     if (item.projectId) {
-      return `/workspace/projects/${item.projectId}`;
+      return `/projects/${item.projectId}`;
     }
-    return '/workspace';
+    return '/';
   };
 
   return (

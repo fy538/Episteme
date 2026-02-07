@@ -54,6 +54,105 @@ class AgenticTask:
     completed_at: Optional[str] = None
 
 
+def stream_agentic_task(
+    task_description: str,
+    document_content: str,
+    case_context: Dict[str, Any],
+):
+    """
+    Streaming version of execute_agentic_task that yields SSE events
+    as the task progresses through planning, execution, and review.
+
+    Yields dicts with keys: event (str), data (dict)
+    """
+    import json
+
+    task_id = str(uuid.uuid4())
+    provider = get_llm_provider('default')
+
+    # Phase 1: Planning
+    yield {'event': 'phase', 'data': {'phase': 'planning', 'task_id': task_id}}
+
+    plan = _generate_plan(task_description, document_content, case_context, provider)
+
+    if not plan:
+        yield {'event': 'error', 'data': {'error': 'Failed to generate execution plan'}}
+        return
+
+    yield {
+        'event': 'plan',
+        'data': {
+            'steps': [
+                {'id': s['id'], 'description': s['description'], 'action_type': s['action_type'],
+                 'target_section': s.get('target_section')}
+                for s in plan
+            ],
+        },
+    }
+
+    # Phase 2: Execution
+    yield {'event': 'phase', 'data': {'phase': 'executing'}}
+
+    current_content = document_content
+    executed_steps = []
+    changes = []
+
+    for step in plan:
+        yield {'event': 'step_start', 'data': {'step_id': step['id'], 'description': step['description']}}
+
+        try:
+            result = _execute_step(step, current_content, case_context, provider)
+            step['status'] = 'completed'
+            step['new_content'] = result.get('new_content')
+
+            if result.get('changed') and result.get('new_content'):
+                changes.append({
+                    'step_id': step['id'],
+                    'type': step['action_type'],
+                    'description': step['description'],
+                    'before': current_content,
+                    'after': result['new_content'],
+                })
+                current_content = result['new_content']
+
+            executed_steps.append(step)
+            yield {'event': 'step_complete', 'data': {'step_id': step['id'], 'status': 'completed'}}
+        except Exception as e:
+            step['status'] = 'failed'
+            step['error'] = str(e)
+            executed_steps.append(step)
+            yield {'event': 'step_complete', 'data': {'step_id': step['id'], 'status': 'failed', 'error': str(e)}}
+
+    # Phase 3: Review
+    yield {'event': 'phase', 'data': {'phase': 'reviewing'}}
+
+    review_result = _review_changes(
+        task_description, document_content, current_content, executed_steps, provider
+    )
+
+    final_content = current_content
+    if review_result.get('refinements'):
+        final_content = _apply_refinements(current_content, review_result['refinements'], provider)
+
+    yield {'event': 'review', 'data': {
+        'score': review_result.get('score', 0),
+        'notes': review_result.get('notes', ''),
+    }}
+
+    # Done
+    yield {'event': 'done', 'data': {
+        'task_id': task_id,
+        'status': TaskStatus.COMPLETED.value,
+        'plan': executed_steps,
+        'original_content': document_content,
+        'final_content': final_content,
+        'diff_summary': _generate_diff_summary(document_content, final_content),
+        'review_notes': review_result.get('notes', ''),
+        'review_score': review_result.get('score', 0),
+        'changes': changes,
+    }}
+
+
 def execute_agentic_task(
     task_description: str,
     document_content: str,
@@ -110,8 +209,8 @@ def execute_agentic_task(
                     'step_id': step['id'],
                     'type': step['action_type'],
                     'description': step['description'],
-                    'before': current_content[:500] + '...' if len(current_content) > 500 else current_content,
-                    'after': result['new_content'][:500] + '...' if len(result['new_content']) > 500 else result['new_content'],
+                    'before': current_content,
+                    'after': result['new_content'],
                 })
                 current_content = result['new_content']
 

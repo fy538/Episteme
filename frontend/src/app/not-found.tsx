@@ -41,11 +41,8 @@ export default function NotFound() {
         </p>
 
         <div className="flex items-center justify-center gap-3">
-          <Link href="/workspace">
-            <Button>Go to Workspace</Button>
-          </Link>
-          <Link href="/chat">
-            <Button variant="outline">Start Chat</Button>
+          <Link href="/">
+            <Button>Go Home</Button>
           </Link>
         </div>
       </div>

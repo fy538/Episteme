@@ -19,10 +19,14 @@ import {
   BriefPanel,
   AICopilotPanel,
   AICopilotTrigger,
+  FloatingChatPanel,
+  ChatPanelTrigger,
+  FloatingThinking,
   SignalsPanel,
   ReadinessPanel,
 } from '@/components/canvas';
 import { useEvidenceLinks } from '@/hooks/useEvidenceLinks';
+import { useCompanionState } from '@/hooks/useCompanionState';
 import { casesAPI } from '@/lib/api/cases';
 import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
 
@@ -40,6 +44,11 @@ interface CaseCanvasProps {
   brief: CaseDocument | null;
   inquiries: Inquiry[];
   signals?: Signal[];
+  /** Thread ID for chat panel (shared with case workspace) */
+  threadId?: string;
+  /** External control of chat panel open state */
+  chatOpen?: boolean;
+  onChatOpenChange?: (open: boolean) => void;
   onInquiryClick: (inquiryId: string) => void;
   onAddInquiry: () => void;
   onEditBrief: () => void;
@@ -52,6 +61,9 @@ export function CaseCanvas({
   brief,
   inquiries,
   signals = [],
+  threadId,
+  chatOpen: chatOpenProp,
+  onChatOpenChange,
   onInquiryClick,
   onAddInquiry,
   onEditBrief,
@@ -62,6 +74,22 @@ export function CaseCanvas({
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [signalsOpen, setSignalsOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
+  const [chatOpenInternal, setChatOpenInternal] = useState(false);
+
+  // Unified companion state — reflection, stream callbacks
+  const { streamCallbacks, companionThinking } = useCompanionState({
+    mode: 'case',
+  });
+
+  // Support both controlled and uncontrolled chat open state
+  const chatOpen = chatOpenProp !== undefined ? chatOpenProp : chatOpenInternal;
+  const setChatOpen = (open: boolean) => {
+    if (onChatOpenChange) {
+      onChatOpenChange(open);
+    } else {
+      setChatOpenInternal(open);
+    }
+  };
 
   // Evidence links for the brief panel
   const { claims, loadEvidenceLinks } = useEvidenceLinks({
@@ -100,12 +128,22 @@ export function CaseCanvas({
           e.preventDefault();
           setReadinessOpen((prev) => !prev);
           break;
+        case 'c':
+          if (threadId) {
+            e.preventDefault();
+            setChatOpen(!chatOpen);
+            // Close copilot when opening chat to avoid overlap
+            if (!chatOpen) {
+              setCopilotOpen(false);
+            }
+          }
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [threadId, chatOpen, setChatOpen]);
 
   return (
     <div className="relative w-full h-full">
@@ -177,12 +215,42 @@ export function CaseCanvas({
         }}
       />
 
-      {/* AI Copilot trigger (when closed) */}
-      {!copilotOpen && (
-        <div className="absolute top-4 right-4 z-40">
-          <AICopilotTrigger onClick={() => setCopilotOpen(true)} />
-        </div>
+      {/* Floating chat panel */}
+      {threadId && (
+        <FloatingChatPanel
+          isOpen={chatOpen}
+          onClose={() => setChatOpen(false)}
+          threadId={threadId}
+          caseId={caseData.id}
+          caseName={caseData.title}
+          briefId={brief?.id}
+          streamCallbacks={streamCallbacks}
+        />
       )}
+
+      {/* Floating thinking (auto-appears during reflection, positioned top-left) */}
+      {!chatOpen && (
+        <FloatingThinking
+          content={companionThinking.content}
+          isStreaming={companionThinking.isStreaming}
+        />
+      )}
+
+      {/* Floating triggers (top-right, stacked vertically when panels are closed) */}
+      <div className="absolute top-4 right-4 z-40 flex flex-col gap-2">
+        {!copilotOpen && !chatOpen && (
+          <AICopilotTrigger onClick={() => {
+            setCopilotOpen(true);
+            setChatOpen(false); // Close chat to avoid overlap
+          }} />
+        )}
+        {!chatOpen && !copilotOpen && threadId && (
+          <ChatPanelTrigger onClick={() => {
+            setChatOpen(true);
+            setCopilotOpen(false); // Close copilot to avoid overlap
+          }} />
+        )}
+      </div>
 
       {/* Keyboard shortcuts hint */}
       <div className="absolute bottom-4 left-4 text-xs text-neutral-400">
@@ -190,6 +258,11 @@ export function CaseCanvas({
           <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">B</kbd> Brief
           • <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">N</kbd> Inquiry
           • <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">?</kbd> Copilot
+          {threadId && (
+            <>
+              • <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">C</kbd> Chat
+            </>
+          )}
           • <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">S</kbd> Signals
           • <kbd className="px-1 py-0.5 bg-neutral-100 rounded mx-1">R</kbd> Readiness
         </span>

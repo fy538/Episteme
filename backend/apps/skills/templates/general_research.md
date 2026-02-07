@@ -6,7 +6,6 @@ episteme:
   applies_to_agents:
     - research
   research_config:
-    suggest_defaults: true
     search:
       decomposition: simple
       max_iterations: 5

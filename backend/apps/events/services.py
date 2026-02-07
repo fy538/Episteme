@@ -51,7 +51,17 @@ class EventService:
             # Validate payload is JSON-serializable
             if not isinstance(payload, dict):
                 raise InvalidEventPayload("Payload must be a dictionary")
-            
+
+            # Auto-denormalize case_title into payload for timeline display.
+            # Only runs when case_id is provided and payload lacks case_title.
+            if case_id and 'case_title' not in payload:
+                try:
+                    from apps.cases.models import Case
+                    case_obj = Case.objects.only('title').get(id=case_id)
+                    payload = {**payload, 'case_title': case_obj.title}
+                except Exception:
+                    pass  # Non-fatal — skip if case not found
+
             # Create the event
             event = Event.objects.create(
                 type=event_type,

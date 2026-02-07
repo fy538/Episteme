@@ -97,49 +97,37 @@ class AgentOrchestrator:
             case_id=case.id
         )
         
-        # Step 3: Execute agent workflow (async Celery task)
-        from apps.artifacts.workflows import (
-            generate_research_artifact_v2,
-            generate_critique_artifact,
-            generate_brief_artifact
-        )
+        # Step 3: Execute agent workflow via registry dispatch
+        from apps.agents.registry import AgentRegistry
 
-        task = None
+        registry = AgentRegistry()
+        descriptor = registry.get(agent_type)
 
+        if not descriptor:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+
+        # Build task kwargs from params + standard fields
+        task_kwargs = {
+            'case_id': str(case.id),
+            'user_id': user.id,
+            'correlation_id': str(correlation_id),
+            'placeholder_message_id': str(placeholder.id),
+        }
+
+        # Agent-specific param mapping
         if agent_type == 'research':
-            topic = params.get('topic', case.position)
-            task = generate_research_artifact_v2.delay(
-                case_id=str(case.id),
-                topic=topic,
-                user_id=user.id,
-                correlation_id=str(correlation_id),
-                placeholder_message_id=str(placeholder.id)
-            )
-        
+            task_kwargs['topic'] = params.get('topic', case.position)
         elif agent_type == 'critique':
             target_signal_id = params.get('target_signal_id')
             if not target_signal_id:
-                # Default to first signal
                 first_signal = await case.signals.afirst()
                 target_signal_id = str(first_signal.id) if first_signal else None
-            
-            if target_signal_id:
-                task = generate_critique_artifact.delay(
-                    case_id=str(case.id),
-                    target_signal_id=target_signal_id,
-                    user_id=user.id,
-                    correlation_id=str(correlation_id),
-                    placeholder_message_id=str(placeholder.id)
-                )
-        
-        elif agent_type == 'brief':
-            task = generate_brief_artifact.delay(
-                case_id=str(case.id),
-                user_id=user.id,
-                correlation_id=str(correlation_id),
-                placeholder_message_id=str(placeholder.id)
-            )
-        
+            if not target_signal_id:
+                raise ValueError("No signal available for critique agent")
+            task_kwargs['target_signal_id'] = target_signal_id
+
+        task = descriptor.entry_point.delay(**task_kwargs)
+
         if not task:
             raise ValueError(f"Failed to start {agent_type} agent")
         

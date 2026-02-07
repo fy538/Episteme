@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { ChecklistItem } from './ChecklistItem';
 import { ParentChecklistItem } from './ParentChecklistItem';
 
@@ -54,6 +55,7 @@ export function ReadinessChecklist({
   progress,
   onRefresh,
 }: ReadinessChecklistProps) {
+  const { addToast } = useToast();
   const [generating, setGenerating] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
@@ -84,7 +86,7 @@ export function ReadinessChecklist({
       onRefresh();
     } catch (error) {
       console.error('Failed to generate checklist:', error);
-      alert('Failed to generate checklist. Please try again.');
+      addToast({ title: 'Checklist generation failed', description: 'Please try again.', variant: 'error' });
     } finally {
       setGenerating(false);
     }

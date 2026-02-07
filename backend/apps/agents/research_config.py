@@ -14,6 +14,7 @@ Design decisions (evidence-backed):
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,11 +56,34 @@ class TrustedPublisher:
 
 
 @dataclass
+class MCPServerConfig:
+    """Configuration for an MCP server connection."""
+    name: str
+    command: str = ""      # for stdio transport (e.g. "npx -y @westlaw/mcp-server")
+    url: str = ""          # for SSE transport (e.g. "https://mcp.westlaw.com/sse")
+    tool_filter: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict | str) -> MCPServerConfig:
+        if isinstance(data, str):
+            return cls(name=data)
+        return cls(
+            name=data.get("name", ""),
+            command=data.get("command", ""),
+            url=data.get("url", ""),
+            tool_filter=data.get("tool_filter", []),
+        )
+
+
+@dataclass
 class SourcesConfig:
     primary: list[SourceEntry] = field(default_factory=list)
     supplementary: list[SourceEntry] = field(default_factory=list)
+    # TODO: Wire into evaluate prompt and domain filters when vertical skills are added
     trusted_publishers: list[TrustedPublisher] = field(default_factory=list)
     excluded_domains: list[str] = field(default_factory=list)
+    sub_agents: list[str] = field(default_factory=list)  # e.g. ["critique", "research"]
+    mcp_servers: list[MCPServerConfig] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> SourcesConfig:
@@ -68,6 +92,8 @@ class SourcesConfig:
             supplementary=[SourceEntry.from_dict(s) for s in data.get("supplementary", [])],
             trusted_publishers=[TrustedPublisher.from_dict(p) for p in data.get("trusted_publishers", [])],
             excluded_domains=data.get("excluded_domains", []),
+            sub_agents=data.get("sub_agents", []),
+            mcp_servers=[MCPServerConfig.from_dict(m) for m in data.get("mcp_servers", [])],
         )
 
 
@@ -272,7 +298,6 @@ class ResearchConfig:
     Parsed from a Skill's ``episteme_config.research_config`` dict.
     Every field is optional — missing values get sensible defaults.
     """
-    suggest_defaults: bool = True
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
@@ -292,7 +317,6 @@ class ResearchConfig:
             return cls.default()
 
         return cls(
-            suggest_defaults=data.get("suggest_defaults", True),
             sources=SourcesConfig.from_dict(data["sources"]) if "sources" in data else SourcesConfig(),
             search=SearchConfig.from_dict(data["search"]) if "search" in data else SearchConfig(),
             extract=ExtractConfig.from_dict(data["extract"]) if "extract" in data else ExtractConfig(),
@@ -305,7 +329,6 @@ class ResearchConfig:
     def default(cls) -> ResearchConfig:
         """Sensible defaults for generic research (no vertical)."""
         return cls(
-            suggest_defaults=True,
             search=SearchConfig(
                 decomposition="simple",
                 max_iterations=5,
@@ -457,5 +480,4 @@ class ResearchConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a plain dict (for storage in JSON fields)."""
-        import dataclasses
         return dataclasses.asdict(self)

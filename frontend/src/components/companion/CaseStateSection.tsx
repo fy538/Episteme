@@ -37,6 +37,7 @@ export function CaseStateSection({
       {/* Header */}
       <button
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
         className={cn(
           'w-full px-3 py-2 flex items-center justify-between transition-colors',
           theme.case.bgHover,
@@ -44,7 +45,7 @@ export function CaseStateSection({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className={cn('text-xs', theme.case.text)}>{'>'}</span>
+          <span className={cn('text-xs', theme.case.text)} aria-hidden="true">{'>'}</span>
           <span className={cn('text-xs tracking-wider font-medium uppercase', theme.case.text)}>
             CASE
           </span>
@@ -52,7 +53,7 @@ export function CaseStateSection({
             {caseName}
           </span>
         </div>
-        <span className={cn('text-xs', theme.case.textMuted)}>
+        <span className={cn('text-xs', theme.case.textMuted)} aria-hidden="true">
           {collapsed ? '[+]' : '[-]'}
         </span>
       </button>

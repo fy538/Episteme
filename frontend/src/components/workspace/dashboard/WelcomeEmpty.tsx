@@ -23,16 +23,16 @@ export function WelcomeEmpty({ onCreateProject }: WelcomeEmptyProps) {
       </div>
 
       {/* Welcome message */}
-      <h2 className="text-2xl font-bold text-primary-900 dark:text-primary-50 mb-3">
+      <h2 className="text-3xl font-semibold text-primary-900 dark:text-primary-50 mb-3">
         Welcome to Episteme
       </h2>
-      <p className="text-neutral-600 dark:text-neutral-400 mb-6">
+      <p className="text-base text-neutral-600 dark:text-neutral-400 mb-6">
         Make better decisions by structuring your thinking,
         gathering evidence, and testing assumptions.
       </p>
 
       {/* How it works */}
-      <div className="text-left bg-neutral-100 dark:bg-neutral-800/50 rounded-xl p-5 mb-6">
+      <div className="text-left bg-neutral-100/80 dark:bg-neutral-800/40 rounded-lg p-5 mb-6">
         <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 mb-3">
           How it works:
         </p>

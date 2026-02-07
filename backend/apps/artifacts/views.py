@@ -18,7 +18,7 @@ from apps.artifacts.serializers import (
     GenerateBriefSerializer,
 )
 from apps.artifacts.workflows import (
-    generate_research_artifact,
+    generate_research_artifact_v2,
     generate_critique_artifact,
     generate_brief_artifact,
 )
@@ -161,11 +161,14 @@ class ArtifactViewSet(viewsets.ModelViewSet):
         serializer = GenerateResearchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Trigger async generation
-        task = generate_research_artifact.delay(
+        # Trigger async generation via multi-step research loop
+        import uuid
+        correlation_id = str(uuid.uuid4())
+        task = generate_research_artifact_v2.delay(
             case_id=str(serializer.validated_data['case_id']),
             topic=serializer.validated_data['topic'],
-            user_id=request.user.id
+            user_id=request.user.id,
+            correlation_id=correlation_id,
         )
         
         return Response(

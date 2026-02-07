@@ -169,7 +169,8 @@
   .animate-slide-up,
   .animate-scale-in,
   .animate-fade-in,
-  .animate-slide-down {
+  .animate-slide-down,
+  .animate-slide-in-right {
     will-change: transform, opacity;
     animation-fill-mode: both;
   }

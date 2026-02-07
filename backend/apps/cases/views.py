@@ -12,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Case, WorkingView, CaseDocument, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST
+from .models import Case, CaseStatus, WorkingView, CaseDocument, CaseDocumentVersion, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST
 from .brief_models import BriefSection, BriefAnnotation
 from .serializers import (
     CaseSerializer,
@@ -46,11 +46,18 @@ from apps.chat.serializers import ChatThreadSerializer, ChatThreadDetailSerializ
 
 class CaseViewSet(viewsets.ModelViewSet):
     """ViewSet for cases"""
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     def get_queryset(self):
-        return Case.objects.filter(user=self.request.user)
+        return Case.objects.filter(user=self.request.user).exclude(status=CaseStatus.ARCHIVED)
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete — sets status to ARCHIVED instead of removing the row."""
+        case = self.get_object()
+        case.status = CaseStatus.ARCHIVED
+        case.save(update_fields=['status', 'updated_at'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -1031,10 +1038,15 @@ _What actions follow from this decision?_
             sections = BriefSection.objects.filter(
                 brief=brief,
                 parent_section__isnull=True
-            ).prefetch_related(
-                'annotations', 'annotations__source_signals',
-                'subsections', 'subsections__annotations',
+            ).select_related(
                 'inquiry'
+            ).prefetch_related(
+                'annotations',
+                'annotations__source_signals',
+                'subsections',
+                'subsections__annotations',
+                'subsections__annotations__source_signals',
+                'subsections__inquiry',
             ).order_by('order')
 
             serializer = BriefSectionSerializer(sections, many=True)
@@ -1825,11 +1837,40 @@ Return JSON:
         except Exception:
             pass
 
+        # Include grounding data + annotations from BriefSections
+        grounding_data = []
+        try:
+            from apps.cases.brief_models import BriefSection, AnnotationPriority
+            sections = BriefSection.objects.filter(
+                brief=document,
+                parent_section__isnull=True,
+            ).prefetch_related('annotations').order_by('order')
+            for sec in sections:
+                active_annotations = [
+                    {
+                        'type': a.annotation_type,
+                        'description': a.description,
+                        'priority': a.priority,
+                    }
+                    for a in sec.annotations.all()
+                    if a.dismissed_at is None and a.resolved_at is None
+                ]
+                grounding_data.append({
+                    'section_id': sec.section_id,
+                    'heading': sec.heading,
+                    'grounding_status': sec.grounding_status,
+                    'is_linked': sec.is_linked,
+                    'annotations': active_annotations,
+                })
+        except Exception:
+            pass
+
         case_context = {
             'decision_question': case.decision_question,
             'inquiries': inquiries,
             'signals': signals,
             'gaps': gaps,
+            'grounding': grounding_data,
         }
 
         max_suggestions = request.data.get('max_suggestions', 5)
@@ -1863,6 +1904,14 @@ Return JSON:
                 {'error': 'suggestion is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Snapshot before overwriting
+        CaseDocumentVersion.create_snapshot(
+            document,
+            created_by='ai_suggestion',
+            diff_summary=f"Before applying suggestion: {suggestion.get('suggestion_type', 'unknown')}",
+            task_description=suggestion.get('reason', ''),
+        )
 
         # Apply the suggestion
         updated_content = apply_suggestion(
@@ -2030,6 +2079,60 @@ Return JSON:
 
         return Response(result)
 
+    @action(detail=True, methods=['post'], url_path='execute-task-stream')
+    def execute_task_stream(self, request, pk=None):
+        """
+        Streaming version of execute-task. Returns SSE events as the task progresses.
+
+        POST /api/case-documents/{id}/execute-task-stream/
+        Body: { task: str }
+
+        Events: phase, plan, step_start, step_complete, review, done, error
+        """
+        import json as json_mod
+        from django.http import StreamingHttpResponse
+        from .agentic_tasks import stream_agentic_task
+        from apps.signals.models import Signal
+
+        document = self.get_object()
+        case = document.case
+        task_description = request.data.get('task')
+
+        if not task_description:
+            return Response(
+                {'error': 'task is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
+        signals = list(Signal.objects.filter(case=case).values(
+            'id', 'type', 'text'
+        )[:20])
+
+        case_context = {
+            'decision_question': case.decision_question,
+            'inquiries': inquiries,
+            'signals': signals,
+        }
+
+        def event_stream():
+            for event in stream_agentic_task(
+                task_description=task_description,
+                document_content=document.content_markdown,
+                case_context=case_context,
+            ):
+                event_type = event.get('event', 'message')
+                data = json_mod.dumps(event.get('data', {}), default=str)
+                yield f"event: {event_type}\ndata: {data}\n\n"
+
+        response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        origin = request.headers.get('Origin', 'http://localhost:3000')
+        response['Access-Control-Allow-Origin'] = origin
+        response['Access-Control-Allow-Credentials'] = 'true'
+        return response
+
     @action(detail=True, methods=['post'], url_path='apply-task-result')
     def apply_task_result(self, request, pk=None):
         """
@@ -2051,6 +2154,15 @@ Return JSON:
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Snapshot before overwriting
+        task_desc = request.data.get('task_description', '')
+        CaseDocumentVersion.create_snapshot(
+            document,
+            created_by='ai_task',
+            diff_summary='Before applying agentic task result',
+            task_description=task_desc,
+        )
+
         document.content_markdown = final_content
         document.save(update_fields=['content_markdown', 'updated_at'])
 
@@ -2058,6 +2170,106 @@ Return JSON:
             'success': True,
             'message': 'Task result applied successfully'
         })
+
+    @action(detail=True, methods=['get'], url_path='version-history')
+    def version_history(self, request, pk=None):
+        """
+        Get version history for a document.
+
+        GET /api/case-documents/{id}/version-history/
+
+        Returns list of version snapshots ordered by newest first.
+        """
+        document = self.get_object()
+        versions = CaseDocumentVersion.objects.filter(
+            document=document
+        ).order_by('-version')[:50]
+
+        include_content = request.query_params.get('include_content', 'false').lower() == 'true'
+        return Response([
+            {
+                'id': str(v.id),
+                'version': v.version,
+                'diff_summary': v.diff_summary,
+                'created_by': v.created_by,
+                'task_description': v.task_description,
+                'created_at': v.created_at.isoformat(),
+                **(
+                    {'content_markdown': v.content_markdown}
+                    if include_content else {}
+                ),
+            }
+            for v in versions
+        ])
+
+    @action(detail=True, methods=['post'], url_path='restore-version')
+    def restore_version(self, request, pk=None):
+        """
+        Restore document content from a version snapshot.
+
+        POST /api/case-documents/{id}/restore-version/
+        Body: { version_id: str }
+
+        Creates a new version snapshot of the current content (as 'restore'),
+        then overwrites with the target version's content.
+        """
+        document = self.get_object()
+        version_id = request.data.get('version_id')
+
+        if not version_id:
+            return Response(
+                {'error': 'version_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            target_version = CaseDocumentVersion.objects.get(
+                id=version_id,
+                document=document
+            )
+        except CaseDocumentVersion.DoesNotExist:
+            return Response(
+                {'error': 'Version not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Snapshot current content before restoring
+        CaseDocumentVersion.create_snapshot(
+            document,
+            created_by='restore',
+            diff_summary=f'Before restoring to v{target_version.version}',
+        )
+
+        # Restore
+        document.content_markdown = target_version.content_markdown
+        document.save(update_fields=['content_markdown', 'updated_at'])
+
+        return Response({
+            'success': True,
+            'restored_to_version': target_version.version,
+            'content': document.content_markdown,
+        })
+
+    @action(detail=True, methods=['get'], url_path='validate-markers')
+    def validate_markers(self, request, pk=None):
+        """
+        Validate section marker integrity for a brief document.
+
+        GET /api/case-documents/{id}/validate-markers/
+
+        Returns:
+        {
+            "valid": true/false,
+            "missing_markers": ["sf-abc123"],   // in DB, not in content
+            "orphaned_markers": ["sf-xyz789"],   // in content, no DB row
+            "matched": ["sf-def456"]
+        }
+        """
+        from .document_service import validate_section_markers
+
+        document = self.get_object()
+        result = validate_section_markers(document)
+        return Response(result)
 
     @action(detail=True, methods=['get'], url_path='evidence-links')
     def evidence_links(self, request, pk=None):

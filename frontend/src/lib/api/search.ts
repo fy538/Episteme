@@ -138,26 +138,26 @@ export function getResultTypeLabel(type: SearchResultType): string {
 export function getResultPath(result: SearchResult): string {
   switch (result.type) {
     case 'case':
-      return `/workspace/cases/${result.id}`;
+      return `/cases/${result.id}`;
     case 'inquiry':
       return result.case_id
-        ? `/workspace/cases/${result.case_id}?view=inquiry&inquiry=${result.id}`
-        : `/workspace/inquiries`;
+        ? `/cases/${result.case_id}?view=inquiry&inquiry=${result.id}`
+        : `/inquiries`;
     case 'document':
       return result.case_id
         ? `/cases/${result.case_id}/documents/${result.id}`
-        : `/workspace`;
+        : `/`;
     case 'signal':
       return result.case_id
-        ? `/workspace/cases/${result.case_id}?signal=${result.id}`
-        : `/workspace`;
+        ? `/cases/${result.case_id}?signal=${result.id}`
+        : `/`;
     case 'evidence':
       const docId = result.metadata.document_id;
       if (result.case_id && docId) {
         return `/cases/${result.case_id}/documents/${docId}?evidence=${result.id}`;
       }
-      return result.case_id ? `/workspace/cases/${result.case_id}` : `/workspace`;
+      return result.case_id ? `/cases/${result.case_id}` : `/`;
     default:
-      return '/workspace';
+      return '/';
   }
 }

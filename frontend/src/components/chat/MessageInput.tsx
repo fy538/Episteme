@@ -25,6 +25,8 @@ interface MessageInputProps {
   onStop?: () => void;
   mode?: ChatMode;
   placeholder?: string;
+  /** Hero variant: borderless, no background, larger text — for home page input */
+  variant?: 'default' | 'hero';
 }
 
 // Get context-aware placeholder text
@@ -59,6 +61,7 @@ export function MessageInput({
   onStop,
   mode,
   placeholder: customPlaceholder,
+  variant = 'default',
 }: MessageInputProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -103,8 +106,14 @@ export function MessageInput({
   // Disable send when streaming, processing, waiting, or over limit
   const canSend = !disabled && !isStreaming && !isProcessing && !isWaitingForFirstToken && input.trim() && !isOverLimit;
 
+  const isHero = variant === 'hero';
+
   return (
-    <form onSubmit={handleSubmit} className="border-t border-neutral-200 dark:border-neutral-700 p-4 bg-white dark:bg-neutral-900">
+    <form onSubmit={handleSubmit} className={cn(
+      isHero
+        ? 'p-0 bg-transparent'
+        : 'border-t border-neutral-200 dark:border-neutral-700 p-4 bg-white dark:bg-neutral-900'
+    )}>
       <div className="flex gap-2 items-end">
         <div className="flex-1">
           <Label htmlFor="message" className="sr-only">Message</Label>
@@ -119,6 +128,7 @@ export function MessageInput({
             rows={1}
             className={cn(
               'resize-none overflow-hidden min-h-[42px] max-h-[200px]',
+              isHero && 'border-0 bg-transparent shadow-none ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-base placeholder:text-neutral-400 dark:placeholder:text-neutral-500 dark:bg-transparent px-4 py-3',
               isOverLimit && 'border-error-300 dark:border-error-700 focus:ring-error-500'
             )}
           />

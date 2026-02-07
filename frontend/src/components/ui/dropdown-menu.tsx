@@ -67,7 +67,7 @@ export function DropdownMenu({ trigger, items, align = 'right' }: DropdownMenuPr
             exit={prefersReducedMotion ? {} : { opacity: 0, scale: 0.95, y: -10 }}
             transition={{ duration: 0.15 }}
             className={cn(
-              'absolute z-50 mt-2 w-56 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-primary-900 shadow-lg',
+              'absolute z-50 mt-2 w-56 rounded-md border border-neutral-200/80 dark:border-neutral-700/80 bg-white dark:bg-primary-900 shadow-md',
               align === 'left' ? 'left-0' : 'right-0'
             )}
           >

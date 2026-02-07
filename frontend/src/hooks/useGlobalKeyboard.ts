@@ -14,15 +14,11 @@ export function useGlobalKeyboardShortcuts() {
 
   // Navigation shortcuts
   useKeyboardShortcut(['Cmd', 'Shift', 'W'], () => {
-    router.push('/workspace');
-  });
-
-  useKeyboardShortcut(['Cmd', 'Shift', 'C'], () => {
-    router.push('/chat');
+    router.push('/');
   });
 
   useKeyboardShortcut(['Cmd', 'Shift', 'I'], () => {
-    router.push('/workspace/inquiries');
+    router.push('/inquiries');
   });
 
   // Help shortcut
@@ -47,12 +43,7 @@ export const GLOBAL_SHORTCUTS = [
   },
   {
     keys: ['⌘', '⇧', 'W'],
-    description: 'Go to workspace',
-    category: 'Navigation',
-  },
-  {
-    keys: ['⌘', '⇧', 'C'],
-    description: 'Go to chat',
+    description: 'Go home',
     category: 'Navigation',
   },
   {

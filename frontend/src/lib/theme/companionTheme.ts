@@ -61,6 +61,7 @@ const terminalTheme = {
     completed: {
       text: 'text-green-400',
       bg: 'bg-green-950/20',
+      border: 'rgba(34, 197, 94, 0.3)',
       icon: 'text-green-500',
     },
     error: {
@@ -145,6 +146,7 @@ const professionalTheme = {
     completed: {
       text: 'text-success-600 dark:text-success-400',
       bg: 'bg-success-50 dark:bg-success-950/20',
+      border: 'rgba(34, 197, 94, 0.3)',
       icon: 'text-success-500',
     },
     error: {

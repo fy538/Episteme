@@ -42,6 +42,7 @@ class ChatThreadSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'title',
+            'thread_type',
             'user',
             'primary_case',
             'project',

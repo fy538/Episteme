@@ -70,8 +70,8 @@ export function FloatingActionButton({ actions, primaryAction }: FloatingActionB
                 key={action.id}
                 onClick={() => handleActionClick(action)}
                 className={cn(
-                  'flex items-center gap-3 bg-white rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105',
-                  'px-4 py-3 border border-neutral-200'
+                  'flex items-center gap-3 bg-white rounded-md shadow-sm hover:shadow-md transition-shadow',
+                  'px-4 py-3 border border-neutral-200/80'
                 )}
                 style={{
                   animation: `slideIn 0.2s ease-out ${index * 0.05}s backwards`,
@@ -98,13 +98,13 @@ export function FloatingActionButton({ actions, primaryAction }: FloatingActionB
             }
           }}
           className={cn(
-            'w-14 h-14 rounded-full shadow-xl hover:shadow-2xl shadow-accent/30 hover:shadow-accent/50 transition-all backdrop-blur-sm',
+            'w-14 h-14 rounded-full shadow-md hover:shadow-lg transition-shadow',
             'flex items-center justify-center',
-            'bg-gradient-to-br from-accent-600 to-accent-700 hover:from-accent-700 hover:to-accent-800 text-white',
+            'bg-accent-600 hover:bg-accent-700 text-white',
             isOpen && 'rotate-45'
           )}
-          whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
-          whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
+          whileHover={{}}
+          whileTap={prefersReducedMotion ? {} : { scale: 0.97 }}
           aria-label="Quick actions"
         >
           {isOpen ? (

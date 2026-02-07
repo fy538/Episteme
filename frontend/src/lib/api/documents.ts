@@ -242,6 +242,101 @@ export const documentsAPI = {
   },
 
   /**
+   * Execute an agentic task with SSE streaming for real-time progress.
+   * Returns an EventSource-like interface that yields events as the task progresses.
+   *
+   * Events: phase, plan, step_start, step_complete, review, done, error
+   */
+  executeTaskStream(
+    docId: string,
+    task: string,
+    onEvent: (event: { type: string; data: any }) => void,
+    onDone: (result: any) => void,
+    onError: (error: string) => void,
+  ): { abort: () => void } {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const url = `${API_BASE}/cases/documents/${docId}/execute-task-stream/`;
+    const controller = new AbortController();
+
+    // Use fetch with ReadableStream since EventSource doesn't support POST
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(typeof window !== 'undefined' && localStorage.getItem('auth_token')
+          ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+          : {}),
+      },
+      body: JSON.stringify({ task }),
+      signal: controller.signal,
+      credentials: 'include',
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          onError(`HTTP ${response.status}: ${response.statusText}`);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          onError('No response body');
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE format: "event: type\ndata: json\n\n"
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete chunk
+
+          for (const block of lines) {
+            if (!block.trim()) continue;
+
+            let eventType = 'message';
+            let eventData = '';
+
+            for (const line of block.split('\n')) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6);
+              }
+            }
+
+            if (eventData) {
+              try {
+                const parsed = JSON.parse(eventData);
+                onEvent({ type: eventType, data: parsed });
+
+                if (eventType === 'done') {
+                  onDone(parsed);
+                } else if (eventType === 'error') {
+                  onError(parsed.error || 'Unknown error');
+                }
+              } catch {
+                // Ignore parse errors for partial data
+              }
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          onError(err.message || 'Stream failed');
+        }
+      });
+
+    return { abort: () => controller.abort() };
+  },
+
+  /**
    * Apply the result of an agentic task
    */
   async applyTaskResult(
@@ -295,6 +390,51 @@ export const documentsAPI = {
     saved: boolean;
   }> {
     return apiClient.post(`/cases/documents/${docId}/add-citations/`, { save });
+  },
+
+  /**
+   * Get version history for a document
+   */
+  async getVersionHistory(docId: string): Promise<Array<{
+    id: string;
+    version: number;
+    diff_summary: string;
+    created_by: 'user' | 'ai_suggestion' | 'ai_task' | 'auto_save' | 'restore';
+    task_description: string;
+    created_at: string;
+  }>> {
+    return apiClient.get(`/cases/documents/${docId}/version-history/`);
+  },
+
+  /**
+   * Get version history with full content (for diff comparison).
+   */
+  async getVersionHistoryWithContent(docId: string): Promise<Array<{
+    id: string;
+    version: number;
+    diff_summary: string;
+    created_by: 'user' | 'ai_suggestion' | 'ai_task' | 'auto_save' | 'restore';
+    task_description: string;
+    created_at: string;
+    content_markdown: string;
+  }>> {
+    return apiClient.get(`/cases/documents/${docId}/version-history/?include_content=true`);
+  },
+
+  /**
+   * Restore document content from a version snapshot
+   */
+  async restoreVersion(
+    docId: string,
+    versionId: string
+  ): Promise<{
+    success: boolean;
+    restored_to_version: number;
+    content: string;
+  }> {
+    return apiClient.post(`/cases/documents/${docId}/restore-version/`, {
+      version_id: versionId,
+    });
   },
 
   // Phase 2: Create document

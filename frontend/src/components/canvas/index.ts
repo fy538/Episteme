@@ -6,6 +6,8 @@ export { DecisionCanvas } from './DecisionCanvas';
 export { BriefPanel } from './BriefPanel';
 export { CanvasControls } from './CanvasControls';
 export { AICopilotPanel, AICopilotTrigger } from './AICopilotPanel';
+export { FloatingChatPanel, ChatPanelTrigger } from './FloatingChatPanel';
+export { FloatingThinking } from './FloatingThinking';
 export { SignalsPanel } from './SignalsPanel';
 export { ReadinessPanel } from './ReadinessPanel';
 export { useCanvasLayout } from './useCanvasLayout';

@@ -16,9 +16,25 @@ class StreamChunk:
 class LLMProvider(ABC):
     """Abstract base class for LLM providers"""
 
+    # Default context window sizes per model family (tokens).
+    # Subclasses or instances can override.
+    MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+        "claude-haiku-4-5": 200_000,
+        "claude-sonnet-4-5": 200_000,
+        "claude-opus-4-6": 200_000,
+        "gpt-4o-mini": 128_000,
+        "gpt-4o": 128_000,
+    }
+    DEFAULT_CONTEXT_WINDOW = 128_000
+
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model
+
+    @property
+    def context_window_tokens(self) -> int:
+        """Return the context window size for this provider's model."""
+        return self.MODEL_CONTEXT_WINDOWS.get(self.model, self.DEFAULT_CONTEXT_WINDOW)
 
     @abstractmethod
     async def stream_chat(
