@@ -26,8 +26,8 @@ def build_case_context_prompt(case) -> str:
     if case.position:
         sections.append(f"**Current Position:** {case.position}")
 
-    if case.confidence is not None:
-        sections.append(f"**Confidence:** {int(case.confidence * 100)}%")
+    if case.user_confidence is not None:
+        sections.append(f"**Confidence:** {case.user_confidence}%")
 
     # Constraints
     if case.constraints:
