@@ -31,10 +31,6 @@ export const chatAPI = {
     return apiClient.patch<ChatThread>(`/chat/threads/${threadId}/`, data);
   },
 
-  async deleteThread(threadId: string): Promise<void> {
-    await apiClient.delete(`/chat/threads/${threadId}/`);
-  },
-
   async getMessages(threadId: string): Promise<Message[]> {
     const response = await apiClient.get<{ results: Message[] }>(
       `/chat/messages/?thread=${threadId}`
@@ -42,7 +38,7 @@ export const chatAPI = {
     return response.results || [];
   },
 
-  async analyzeForCase(threadId: string): Promise<{
+  async analyzeForCase(threadId: string, userFocus?: string): Promise<{
     should_suggest: boolean;
     suggested_title: string;
     suggested_question: string;
@@ -61,8 +57,12 @@ export const chatAPI = {
     confidence: number;
     correlation_id: string;
     message_count: number;
+    decision_criteria?: Array<{ criterion: string; measurable?: string }>;
+    assumption_test_strategies?: Record<string, string>;
   }> {
-    return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {});
+    return apiClient.post(`/chat/threads/${threadId}/analyze_for_case/`, {
+      ...(userFocus ? { user_focus: userFocus } : {}),
+    });
   },
 
   async createCaseFromAnalysis(
@@ -73,6 +73,7 @@ export const chatAPI = {
     case: any;
     brief: any;
     inquiries: any[];
+    plan: any;
     correlation_id: string;
   }> {
     return apiClient.post(`/chat/threads/${threadId}/create_case_from_analysis/`, {
@@ -80,46 +81,6 @@ export const chatAPI = {
       correlation_id: analysis.correlation_id,
       user_edits: userEdits,
     });
-  },
-
-  /**
-   * List all threads for a specific case
-   */
-  async listCaseThreads(caseId: string): Promise<ChatThread[]> {
-    return apiClient.get<ChatThread[]>(`/cases/${caseId}/threads/`);
-  },
-
-  /**
-   * Create a new thread for a case
-   */
-  async createCaseThread(caseId: string, data?: { title?: string; thread_type?: string }): Promise<ChatThread> {
-    return apiClient.post<ChatThread>(`/cases/${caseId}/threads/create/`, data || {});
-  },
-
-  /**
-   * Get session receipts for a thread
-   */
-  async getSessionReceipts(
-    threadId: string,
-    options?: { sessionOnly?: boolean; limit?: number }
-  ): Promise<Array<{
-    id: string;
-    type: string;
-    title: string;
-    detail?: string;
-    timestamp: string;
-    relatedCaseId?: string;
-    relatedInquiryId?: string;
-  }>> {
-    const params = new URLSearchParams();
-    if (options?.sessionOnly !== undefined) {
-      params.set('session_only', String(options.sessionOnly));
-    }
-    if (options?.limit !== undefined) {
-      params.set('limit', String(options.limit));
-    }
-    const suffix = params.toString() ? `?${params.toString()}` : '';
-    return apiClient.get(`/chat/threads/${threadId}/session_receipts/${suffix}`);
   },
 
   /**
@@ -135,6 +96,7 @@ export const chatAPI = {
       onReflectionComplete?: (content: string) => void;
       onSignals?: (signals: any[]) => void;
       onActionHints?: (hints: any[]) => void;
+      onTitleUpdate?: (title: string) => void;
       onDone?: (result: { messageId?: string; reflectionId?: string; signalsCount?: number; actionHintsCount?: number }) => void;
       onError?: (error: string) => void;
     },
@@ -164,6 +126,9 @@ export const chatAPI = {
             break;
           case 'action_hints':
             callbacks.onActionHints?.(data?.action_hints || []);
+            break;
+          case 'title_update':
+            callbacks.onTitleUpdate?.(data?.title || '');
             break;
           case 'done':
             callbacks.onDone?.({

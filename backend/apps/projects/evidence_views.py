@@ -1,6 +1,7 @@
 """
 Evidence views
 """
+from django.db import models
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -72,7 +73,7 @@ class EvidenceViewSet(viewsets.ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         evidence.user_credibility_rating = serializer.validated_data['rating']
-        evidence.save()
+        evidence.save(update_fields=['user_credibility_rating', 'updated_at'])
         
         return Response(self.get_serializer(evidence).data)
     
@@ -114,7 +115,7 @@ class EvidenceViewSet(viewsets.ReadOnlyModelViewSet):
         
         try:
             from apps.signals.models import Signal
-            signal = Signal.objects.get(id=signal_id)
+            signal = Signal.objects.get(id=signal_id, case__user=request.user)
             
             if relationship == 'supports':
                 evidence.supports_signals.add(signal)
@@ -138,22 +139,147 @@ class EvidenceViewSet(viewsets.ReadOnlyModelViewSet):
     def related_signals(self, request, pk=None):
         """
         Get signals related to this evidence (Phase 2.3)
-        
+
         GET /api/evidence/{id}/related-signals/
         """
         from apps.signals.serializers import SignalSerializer
-        
+
         evidence = self.get_object()
-        
+
         supporting = evidence.supports_signals.all()
         contradicting = evidence.contradicts_signals.all()
-        
+
         return Response({
             'supports': SignalSerializer(supporting, many=True).data,
             'contradicts': SignalSerializer(contradicting, many=True).data,
         })
 
+    @action(detail=False, methods=['post'], url_path='ingest')
+    def ingest_external(self, request):
+        """
+        Ingest external evidence (pasted text, URL content, etc.)
+        through the universal ingestion pipeline.
 
-# Import for query filter
-from django.db import models
-from rest_framework import status
+        POST /api/evidence/ingest/
+        {
+            "case_id": "uuid",
+            "items": [
+                {
+                    "text": "Market is growing 20% YoY...",
+                    "source_url": "https://...",
+                    "source_title": "Market Report 2025",
+                    "evidence_type": "fact",
+                    "source_published_date": "2025-03-15"
+                }
+            ],
+            "source_label": "Perplexity Research"
+        }
+        """
+        import dataclasses
+
+        from apps.cases.models import Case
+        from apps.projects.ingestion_service import EvidenceInput
+        from tasks.ingestion_tasks import ingest_evidence_async
+
+        case_id = request.data.get('case_id')
+        items = request.data.get('items', [])
+
+        if not case_id:
+            return Response(
+                {'error': 'case_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not items:
+            return Response(
+                {'error': 'items is required and must be non-empty'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            case = Case.objects.get(id=case_id, user=request.user)
+        except Case.DoesNotExist:
+            return Response(
+                {'error': 'Case not found or not owned by you'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        inputs = []
+        for item in items:
+            text = (item.get('text') or '').strip()
+            if not text:
+                continue
+            inputs.append(dataclasses.asdict(EvidenceInput(
+                text=text,
+                evidence_type=item.get('evidence_type', 'fact'),
+                extraction_confidence=float(item.get('confidence', 0.7)),
+                source_url=item.get('source_url', ''),
+                source_title=item.get('source_title', ''),
+                source_published_date=item.get('source_published_date'),
+                retrieval_method='external_paste',
+            )))
+
+        if not inputs:
+            return Response(
+                {'error': 'No valid evidence items (all empty text)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task = ingest_evidence_async.delay(
+            inputs_data=inputs,
+            case_id=str(case_id),
+            user_id=request.user.id,
+            source_label=request.data.get('source_label', 'External Research'),
+        )
+
+        return Response({
+            'status': 'accepted',
+            'task_id': task.id,
+            'items_queued': len(inputs),
+        }, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='fetch-url')
+    def fetch_url(self, request):
+        """
+        Fetch a URL, extract its content, and ingest as evidence.
+
+        Creates a Document from the fetched content and processes it
+        through the full document pipeline (chunk → embed → extract → auto-reason).
+
+        POST /api/evidence/fetch-url/
+        {"url": "https://example.com/article", "case_id": "uuid"}
+        """
+        from apps.cases.models import Case
+        from tasks.ingestion_tasks import fetch_url_and_ingest
+
+        url = (request.data.get('url') or '').strip()
+        case_id = request.data.get('case_id')
+
+        if not url:
+            return Response(
+                {'error': 'url is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not case_id:
+            return Response(
+                {'error': 'case_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            Case.objects.get(id=case_id, user=request.user)
+        except Case.DoesNotExist:
+            return Response(
+                {'error': 'Case not found or not owned by you'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        task = fetch_url_and_ingest.delay(
+            url=url,
+            case_id=str(case_id),
+            user_id=request.user.id,
+        )
+
+        return Response({
+            'status': 'accepted',
+            'task_id': task.id,
+        }, status=status.HTTP_202_ACCEPTED)

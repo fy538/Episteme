@@ -94,9 +94,9 @@ class SignalViewSet(viewsets.ModelViewSet):
             )
         
         signal.dismissed_at = timezone.now()
-        signal.save()
-        
-        # Emit event
+        signal.save(update_fields=['dismissed_at', 'updated_at'])
+
+        # Emit operational event (existing, for structure detector)
         EventService.append(
             event_type=EventType.SIGNAL_EDITED,
             payload={
@@ -108,7 +108,21 @@ class SignalViewSet(viewsets.ModelViewSet):
             case_id=signal.case_id,
             thread_id=signal.thread_id,
         )
-        
+
+        # Emit provenance event
+        EventService.append(
+            event_type=EventType.SIGNAL_DISMISSED,
+            payload={
+                'signal_id': str(signal.id),
+                'signal_text': (signal.text or '')[:100],
+                'signal_type': signal.signal_type,
+            },
+            actor_type=ActorType.USER,
+            actor_id=request.user.id,
+            case_id=signal.case_id,
+            thread_id=signal.thread_id,
+        )
+
         return Response(self.get_serializer(signal).data)
     
     @action(detail=True, methods=['post'])
@@ -128,8 +142,8 @@ class SignalViewSet(viewsets.ModelViewSet):
             )
         
         signal.dismissed_at = None
-        signal.save()
-        
+        signal.save(update_fields=['dismissed_at', 'updated_at'])
+
         # Emit event
         EventService.append(
             event_type=EventType.SIGNAL_EDITED,
@@ -185,7 +199,7 @@ class SignalViewSet(viewsets.ModelViewSet):
             title=title
         )
         
-        # Emit event
+        # Emit operational event (existing, for structure detector)
         EventService.append(
             event_type=EventType.SIGNAL_EDITED,
             payload={
@@ -198,7 +212,22 @@ class SignalViewSet(viewsets.ModelViewSet):
             case_id=signal.case_id,
             thread_id=signal.thread_id,
         )
-        
+
+        # Emit provenance event
+        EventService.append(
+            event_type=EventType.SIGNAL_PROMOTED,
+            payload={
+                'signal_id': str(signal.id),
+                'signal_text': (signal.text or '')[:100],
+                'inquiry_id': str(inquiry.id),
+                'inquiry_title': inquiry.title,
+            },
+            actor_type=ActorType.USER,
+            actor_id=request.user.id,
+            case_id=signal.case_id,
+            thread_id=signal.thread_id,
+        )
+
         return Response({
             'signal': self.get_serializer(signal).data,
             'inquiry_id': str(inquiry.id),
@@ -223,8 +252,8 @@ class SignalViewSet(viewsets.ModelViewSet):
         new_text = serializer.validated_data['text']
         
         signal.text = new_text
-        signal.save()
-        
+        signal.save(update_fields=['text', 'updated_at'])
+
         # Emit event
         EventService.append(
             event_type=EventType.SIGNAL_EDITED,
@@ -409,8 +438,8 @@ class SignalViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            target_signal = Signal.objects.get(id=target_id)
-            
+            target_signal = Signal.objects.get(id=target_id, case__user=request.user)
+
             if relationship == 'depends_on':
                 signal.depends_on.add(target_signal)
             elif relationship == 'contradicts':
@@ -633,6 +662,81 @@ class SignalViewSet(viewsets.ModelViewSet):
             'count': len(response_data),
             'cases_summary': cases_seen,
         })
+
+    @action(detail=False, methods=['post'], url_path='mark-assumption')
+    @transaction.atomic
+    def mark_assumption(self, request):
+        """
+        Mark user-selected text as an assumption signal.
+
+        POST /api/signals/mark-assumption/
+        {
+            "text": "The market is growing 20% YoY",
+            "case_id": "uuid"
+        }
+        """
+        from apps.common.utils import normalize_text, generate_dedupe_key
+        from apps.cases.models import Case
+
+        text = request.data.get('text')
+        case_id = request.data.get('case_id')
+
+        if not text or not case_id:
+            return Response(
+                {'error': 'text and case_id are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            case = Case.objects.get(id=case_id, user=request.user)
+        except Case.DoesNotExist:
+            return Response(
+                {'error': 'Case not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        normalized = normalize_text(text)
+        dedupe = generate_dedupe_key('Assumption', normalized, str(case_id))
+
+        # Check for exact duplicate
+        existing = Signal.objects.filter(dedupe_key=dedupe, case=case, dismissed_at__isnull=True).first()
+        if existing:
+            return Response(self.get_serializer(existing).data)
+
+        # Create event
+        event = EventService.append(
+            event_type=EventType.SIGNAL_EXTRACTED,
+            payload={
+                'signal_text': text[:100],
+                'signal_type': 'Assumption',
+                'source': 'user_marked',
+            },
+            actor_type=ActorType.USER,
+            actor_id=request.user.id,
+            case_id=case.id,
+        )
+
+        # Use max sequence_index + 1 to maintain temporal ordering
+        max_seq = Signal.objects.filter(case=case).aggregate(
+            max_seq=models.Max('sequence_index')
+        )['max_seq'] or 0
+
+        # Create signal
+        signal = Signal.objects.create(
+            event=event,
+            source_type='document',
+            type='Assumption',
+            text=text,
+            normalized_text=normalized,
+            confidence=1.0,
+            sequence_index=max_seq + 1,
+            temperature='warm',
+            assumption_status='untested',
+            dedupe_key=dedupe,
+            case=case,
+        )
+
+        return Response(self.get_serializer(signal).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'])
     def deduplicate(self, request):

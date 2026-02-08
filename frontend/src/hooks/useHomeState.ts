@@ -1,18 +1,20 @@
 /**
  * useHomeState Hook
  *
- * Extracts state from Home.tsx into organized groups:
- * - Thread state: threadId, hasMessages, isInitializing, networkError
- * - Hero → Chat handoff: pendingMessage
- * - Rotating placeholder: placeholderIndex
- * - UI: sidebarCollapsed
+ * Simplified home state — the home page is now dashboard-only.
+ * When the user sends a message via the hero input, we:
+ * 1. Create a thread
+ * 2. Store the initial message in sessionStorage
+ * 3. Navigate to /chat/[threadId]
+ *
+ * No longer manages chat thread state, companion state, or view toggling.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { chatAPI } from '@/lib/api/chat';
 import { useTypewriter } from './useTypewriter';
 import { useReducedMotion } from './useReducedMotion';
-import { useCompanionState } from './useCompanionState';
 
 const PLACEHOLDER_SUGGESTIONS = [
   'Help me think through a hiring decision...',
@@ -24,114 +26,53 @@ const PLACEHOLDER_SUGGESTIONS = [
 ];
 
 export function useHomeState() {
+  const router = useRouter();
+
   // --- UI state ---
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  // --- Thread state ---
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [hasMessages, setHasMessages] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
   const [networkError, setNetworkError] = useState(false);
-
-  // --- Hero → Chat handoff ---
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // --- Typewriter placeholder ---
   const prefersReducedMotion = useReducedMotion();
   const typewriterText = useTypewriter({
     phrases: PLACEHOLDER_SUGGESTIONS,
-    disabled: hasMessages || prefersReducedMotion,
+    disabled: prefersReducedMotion,
   });
 
-  // Initialize thread — always start fresh
-  useEffect(() => {
-    async function initThread() {
-      try {
-        setIsInitializing(true);
-        const newThread = await chatAPI.createThread();
-        setThreadId(newThread.id);
-      } catch (err) {
-        console.error('Failed to initialize thread:', err);
-        setNetworkError(true);
-      } finally {
-        setIsInitializing(false);
-      }
-    }
-    initThread();
-  }, []);
-
-  // Hero input send — fade out home, then swap to chat
-  const handleHeroSend = useCallback((content: string) => {
-    setPendingMessage(content);
-    setIsTransitioning(true);
-    // Wait for fade-out to complete before swapping views
-    setTimeout(() => {
-      setHasMessages(true);
-      setIsTransitioning(false);
-    }, 200);
-  }, []);
-
-  // Create new thread — fade out chat, then swap back to home
-  const handleNewThread = useCallback(async () => {
+  // Hero input send — create thread, store message, navigate to /chat/[threadId]
+  const handleHeroSend = useCallback(async (content: string) => {
     try {
-      const newThread = await chatAPI.createThread();
-      // Trigger fade-out on chat view, then swap to home
+      // Start fade-out animation
       setIsTransitioning(true);
-      setTimeout(() => {
-        setThreadId(newThread.id);
-        setHasMessages(false);
-        setPendingMessage(null);
-        setIsTransitioning(false);
-      }, 200);
+
+      // Create a new thread
+      const thread = await chatAPI.createThread();
+
+      // Store the initial message in sessionStorage for the chat page to pick up
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('episteme_initial_message', content);
+      }
+
+      // Navigate to the conversation page
+      router.push(`/chat/${thread.id}`);
     } catch (err) {
-      console.error('Failed to create thread:', err);
+      console.error('Failed to start conversation:', err);
+      setIsTransitioning(false);
+      setNetworkError(true);
     }
-  }, []);
-
-  // Companion state — reflection, action hints, stream callbacks
-  const onMessageComplete = useCallback(() => {
-    setHasMessages(true);
-  }, []);
-
-  const companion = useCompanionState({
-    mode: 'casual',
-    onMessageComplete,
-  });
+  }, [router]);
 
   return {
-    // UI
-    sidebarCollapsed,
-    setSidebarCollapsed,
-
-    // Thread
-    threadId,
-    hasMessages,
-    isInitializing,
+    // UI state
     networkError,
     setNetworkError,
-
-    // Hero → Chat
-    pendingMessage,
-    setPendingMessage,
-    handleHeroSend,
-    handleNewThread,
     isTransitioning,
+
+    // Hero send
+    handleHeroSend,
 
     // Placeholder
     currentPlaceholder: typewriterText || PLACEHOLDER_SUGGESTIONS[0],
-
-    // Companion — stream callbacks + renderable state
-    streamCallbacks: companion.streamCallbacks,
-    companionThinking: companion.companionThinking,
-    actionHints: companion.actionHints,
-    signals: companion.signals,
-    companionPosition: companion.companionPosition,
-    setCompanionPosition: companion.setCompanionPosition,
-    toggleCompanion: companion.toggleCompanion,
-    rankedSections: companion.rankedSections,
-    pinnedSection: companion.pinnedSection,
-    setPinnedSection: companion.setPinnedSection,
   };
 }
 

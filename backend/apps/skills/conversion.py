@@ -3,6 +3,7 @@ Case-Skill conversion service
 
 Handles bi-directional conversion between Cases and Skills.
 """
+import copy
 from typing import Dict, Any, Optional
 from django.db import transaction, models
 from apps.cases.models import Case
@@ -75,7 +76,7 @@ class CaseSkillConverter:
             case.became_skill = skill
             case.is_skill_template = True
             case.template_scope = scope
-            case.save()
+            case.save(update_fields=['became_skill', 'is_skill_template', 'template_scope', 'updated_at'])
             
             return skill
     
@@ -87,45 +88,68 @@ class CaseSkillConverter:
         **case_kwargs
     ) -> Case:
         """
-        Spawn a new case from a skill
-        
+        Spawn a new case from a skill.
+
+        If the skill defines artifact_template.brief.sections, those sections
+        are used to scaffold the brief instead of the default 3-section structure.
+
         Args:
             skill: Skill to use as template
             case_title: Title for new case
             user: User creating the case
             **case_kwargs: Additional case fields (position, stakes, project_id, thread_id)
-        
+
         Returns:
             Created Case instance
         """
-        from apps.cases.services import CaseService
-        from apps.events.models import Event
-        
-        # Create event for provenance
-        event = Event.objects.create(
-            user=user,
-            event_type='case_from_skill',
-            metadata={'skill_id': str(skill.id), 'skill_name': skill.name}
-        )
-        
-        # Create case
-        case, brief = CaseService.create_case(
-            user=user,
-            title=case_title,
-            position=case_kwargs.get('position', ''),
-            stakes=case_kwargs.get('stakes', 'medium'),
+        from apps.cases.scaffold_service import CaseScaffoldService
+        from apps.skills.injection import extract_brief_sections_from_skill
+        from apps.events.services import EventService
+        from apps.events.models import EventType, ActorType
+
+        # Extract skill brief sections (if defined)
+        skill_sections = extract_brief_sections_from_skill(skill)
+
+        with transaction.atomic():
+            # Create case via scaffold_minimal (creates brief + BriefSection records)
+            result = CaseScaffoldService.scaffold_minimal(
+                title=case_title,
+                user=user,
+                project_id=case_kwargs.get('project_id'),
+                decision_question=case_kwargs.get('position', ''),
+                thread_id=case_kwargs.get('thread_id'),
+                skill_sections=skill_sections,
+            )
+
+            case = result['case']
+
+            # Link to skill
+            case.based_on_skill = skill
+            case.save(update_fields=['based_on_skill', 'updated_at'])
+
+            # Auto-activate the skill (using through model)
+            from apps.cases.models import CaseActiveSkill
+            CaseActiveSkill.objects.get_or_create(
+                case=case,
+                skill=skill,
+                defaults={'order': 0}
+            )
+
+        # Emit provenance event (outside transaction — non-critical)
+        EventService.append(
+            event_type=EventType.CASE_CREATED,
+            payload={
+                'source': 'skill',
+                'skill_id': str(skill.id),
+                'skill_name': skill.name,
+                'skill_sections_count': len(skill_sections) if skill_sections else 0,
+            },
+            actor_type=ActorType.USER,
+            actor_id=user.id,
+            case_id=case.id,
             thread_id=case_kwargs.get('thread_id'),
-            project_id=case_kwargs.get('project_id'),
-            event=event
         )
-        
-        # Link to skill
-        case.based_on_skill = skill
-        case.save()
-        
-        # Auto-activate the skill
-        case.active_skills.add(skill)
-        
+
         return case
     
     @staticmethod
@@ -149,41 +173,47 @@ class CaseSkillConverter:
         scope_hierarchy = ['personal', 'team', 'organization', 'public']
         current_idx = scope_hierarchy.index(skill.scope)
         new_idx = scope_hierarchy.index(new_scope)
-        
+
         if new_idx <= current_idx:
             raise ValueError(f"Cannot promote from {skill.scope} to {new_scope}")
-        
+
         # Check permissions
         if skill.owner != user:
             raise ValueError("Only skill owner can promote")
-        
-        # Update scope
-        skill.scope = new_scope
-        
-        # Update organization if promoting to org/team
-        if new_scope in ['organization', 'team']:
-            from apps.skills.preview import _get_org_for_scope
-            skill.organization = _get_org_for_scope(user, new_scope)
-        
+
         if new_scope == 'team' and not skill.team:
             raise ValueError("Team must be specified for team-scoped skills")
-        
-        skill.save()
-        
-        # Create a new version to mark the promotion
-        latest_version = skill.versions.filter(version=skill.current_version).first()
-        if latest_version:
-            SkillVersion.objects.create(
-                skill=skill,
-                version=skill.current_version + 1,
-                skill_md_content=latest_version.skill_md_content,
-                resources=latest_version.resources,
-                created_by=user,
-                changelog=f"Promoted from {scope_hierarchy[current_idx]} to {new_scope}"
-            )
-            skill.current_version += 1
-            skill.save()
-        
+
+        with transaction.atomic():
+            # Update scope
+            skill.scope = new_scope
+
+            # Update organization if promoting to org/team
+            if new_scope in ['organization', 'team']:
+                from apps.skills.preview import _get_org_for_scope
+                skill.organization = _get_org_for_scope(user, new_scope)
+
+            # Create a new version to mark the promotion
+            latest_version = skill.versions.filter(version=skill.current_version).first()
+            if latest_version:
+                SkillVersion.objects.create(
+                    skill=skill,
+                    version=skill.current_version + 1,
+                    skill_md_content=latest_version.skill_md_content,
+                    resources=copy.deepcopy(latest_version.resources),
+                    created_by=user,
+                    changelog=f"Promoted from {scope_hierarchy[current_idx]} to {new_scope}"
+                )
+                skill.current_version += 1
+
+            # Single save with all changes
+            save_fields = ['scope', 'updated_at']
+            if new_scope in ['organization', 'team']:
+                save_fields.append('organization')
+            if latest_version:
+                save_fields.append('current_version')
+            skill.save(update_fields=save_fields)
+
         return skill
     
     @staticmethod
@@ -209,34 +239,35 @@ class CaseSkillConverter:
         current_version = original_skill.versions.filter(
             version=original_skill.current_version
         ).first()
-        
+
         if not current_version:
             raise ValueError("Original skill has no versions")
-        
-        # Create forked skill
-        forked_skill = Skill.objects.create(
-            name=new_name,
-            description=f"Forked from: {original_skill.name}",
-            domain=original_skill.domain,
-            scope=scope,
-            owner=user,
-            organization=None if scope == 'personal' else original_skill.organization,
-            team=None,  # User can set team later
-            forked_from=original_skill,
-            applies_to_agents=original_skill.applies_to_agents.copy(),
-            episteme_config=dict(original_skill.episteme_config),  # Deep copy
-            status='draft',  # Forked skills start as draft
-            created_by=user
-        )
-        
-        # Copy current version
-        SkillVersion.objects.create(
-            skill=forked_skill,
-            version=1,
-            skill_md_content=current_version.skill_md_content,
-            resources=dict(current_version.resources),  # Deep copy
-            created_by=user,
-            changelog=f"Forked from {original_skill.name} v{original_skill.current_version}"
-        )
-        
+
+        with transaction.atomic():
+            # Create forked skill — use copy.deepcopy for nested dicts/lists
+            forked_skill = Skill.objects.create(
+                name=new_name,
+                description=f"Forked from: {original_skill.name}",
+                domain=original_skill.domain,
+                scope=scope,
+                owner=user,
+                organization=None if scope == 'personal' else original_skill.organization,
+                team=None,  # User can set team later
+                forked_from=original_skill,
+                applies_to_agents=copy.deepcopy(original_skill.applies_to_agents),
+                episteme_config=copy.deepcopy(original_skill.episteme_config),
+                status='draft',  # Forked skills start as draft
+                created_by=user
+            )
+
+            # Copy current version
+            SkillVersion.objects.create(
+                skill=forked_skill,
+                version=1,
+                skill_md_content=current_version.skill_md_content,
+                resources=copy.deepcopy(current_version.resources),
+                created_by=user,
+                changelog=f"Forked from {original_skill.name} v{original_skill.current_version}"
+            )
+
         return forked_skill

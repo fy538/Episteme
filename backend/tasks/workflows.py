@@ -6,6 +6,7 @@ Phase 0: Basic stubs
 Phase 1: Signal extraction workflows
 """
 import logging
+from asgiref.sync import async_to_sync
 from celery import shared_task
 from django.utils import timezone
 
@@ -28,7 +29,6 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
     """
     from apps.chat.models import Message, ChatThread
     from apps.chat.services import ChatService
-    import asyncio
     
     # Get thread and message
     thread = ChatThread.objects.get(id=thread_id)
@@ -40,16 +40,16 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
         from apps.agents.confirmation import check_for_agent_confirmation
         from apps.agents.orchestrator import AgentOrchestrator
         
-        confirmation = asyncio.run(check_for_agent_confirmation(thread, user_message))
+        confirmation = async_to_sync(check_for_agent_confirmation)(thread, user_message)
         
         if confirmation and confirmation['confirmed']:
             # User confirmed! Spawn agent
-            result = asyncio.run(AgentOrchestrator.run_agent_in_chat(
+            result = async_to_sync(AgentOrchestrator.run_agent_in_chat)(
                 thread=thread,
                 agent_type=confirmation['agent_type'],
                 user=thread.user,
                 **confirmation['params']
-            ))
+            )
             
             # Clear pending suggestion
             thread.metadata['pending_agent_suggestion'] = None
@@ -78,7 +78,7 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
         from apps.agents.messages import create_agent_suggestion_message
         
         # Analyze for inflection points
-        inflection = asyncio.run(InflectionDetector.analyze_for_agent_need(thread))
+        inflection = async_to_sync(InflectionDetector.analyze_for_agent_need)(thread)
         
         # Emit event for tracking
         from apps.events.services import EventService
@@ -104,7 +104,7 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
             thread.metadata['pending_agent_suggestion'] = inflection
             
             # Create suggestion message
-            asyncio.run(create_agent_suggestion_message(thread, inflection))
+            async_to_sync(create_agent_suggestion_message)(thread, inflection)
             
             thread.save()
             
@@ -178,32 +178,6 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
                     }
                 )
 
-                # Trigger companion reflection if significant signals extracted
-                # (Silent Observer mode: only on 5+ signals)
-                if signals_extracted >= 5:
-                    try:
-                        from apps.companion.tasks import generate_companion_reflection_task
-
-                        generate_companion_reflection_task.delay(
-                            thread_id=str(thread.id),
-                            trigger_type='signals_extracted',
-                            trigger_context={
-                                'signals_count': signals_extracted,
-                                'messages_in_batch': len(unprocessed_messages)
-                            }
-                        )
-                        logger.info(
-                            "companion_reflection_triggered_by_signals",
-                            extra={
-                                "thread_id": str(thread.id),
-                                "signals_count": signals_extracted
-                            }
-                        )
-                    except Exception:
-                        logger.exception(
-                            "companion_reflection_trigger_failed",
-                            extra={"thread_id": str(thread.id)}
-                        )
         else:
             logger.debug(
                 "batch_threshold_not_met",
@@ -247,11 +221,9 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
                     thread, recent_signals, user_prefs.structure_sensitivity
                 ):
                     # Run deep LLM analysis
-                    structure_analysis = asyncio.run(
-                        StructureReadinessDetector.analyze_structure_readiness(
-                            thread, recent_signals, user_prefs.structure_sensitivity
-                        )
-                    )
+                    structure_analysis = async_to_sync(
+                        StructureReadinessDetector.analyze_structure_readiness
+                    )(thread, recent_signals, user_prefs.structure_sensitivity)
                     
                     # If high confidence, suggest structure
                     if structure_analysis['ready'] and structure_analysis['confidence'] > 0.7:
@@ -287,67 +259,13 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
             extra={"thread_id": str(thread.id)},
         )
     
-    # Trigger async title generation (best-effort)
-    try:
-        generate_chat_title_workflow.delay(thread_id=str(thread.id))
-    except Exception:
-        logger.exception(
-            "chat_title_task_enqueue_failed",
-            extra={"thread_id": str(thread.id)},
-        )
-    
+    # Title generation now happens inline in the SSE stream (unified_stream view)
+
     return {
         'status': 'completed',
         'message_id': str(response.id),
         'signals_extracted': signals_extracted,
     }
-
-
-@shared_task
-def generate_chat_title_workflow(thread_id: str):
-    """
-    Generate a concise title for a chat thread.
-
-    Trigger rules:
-    - After 2 user messages, OR
-    - After 1 user message if it's > 200 chars
-    - Only if title is blank or "New Chat"
-    """
-    from apps.chat.models import ChatThread, Message, MessageRole
-    from apps.common.ai_services import generate_chat_title
-    import asyncio
-
-    try:
-        thread = ChatThread.objects.get(id=thread_id)
-
-        if thread.title and thread.title != "New Chat":
-            return {"status": "skipped", "reason": "title_already_set"}
-
-        user_messages = Message.objects.filter(
-            thread=thread,
-            role=MessageRole.USER
-        ).order_by('created_at')
-
-        count = user_messages.count()
-        if count == 0:
-            return {"status": "skipped", "reason": "no_user_messages"}
-
-        first_msg = user_messages.first()
-        if count < 2 and len(first_msg.content) <= 200:
-            return {"status": "skipped", "reason": "threshold_not_met"}
-
-        messages_text = [msg.content for msg in user_messages[:5]]
-        title = asyncio.run(generate_chat_title(messages_text))
-
-        if title:
-            thread.title = title
-            thread.save(update_fields=['title'])
-            return {"status": "completed", "title": title}
-
-        return {"status": "skipped", "reason": "empty_title"}
-    except Exception:
-        logger.exception("generate_chat_title_failed", extra={"thread_id": thread_id})
-        return {"status": "failed"}
 
 
 @shared_task
@@ -542,7 +460,7 @@ def generate_research_workflow(inquiry_id: str, user_id: int):
         generator = AIDocumentGenerator()
         research_doc = generator.generate_research_for_inquiry(inquiry, user)
         
-        # Emit event
+        # Emit operational event
         EventService.append(
             event_type=EventType.WORKFLOW_COMPLETED,
             payload={
@@ -554,7 +472,32 @@ def generate_research_workflow(inquiry_id: str, user_id: int):
             actor_type=ActorType.SYSTEM,
             case_id=inquiry.case_id
         )
-        
+
+        # Emit provenance events
+        EventService.append(
+            event_type=EventType.RESEARCH_COMPLETED,
+            payload={
+                'inquiry_id': str(inquiry_id),
+                'inquiry_title': inquiry.title,
+                'research_type': 'research',
+                'document_id': str(research_doc.id),
+                'title': research_doc.title,
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+        EventService.append(
+            event_type=EventType.DOCUMENT_ADDED,
+            payload={
+                'document_id': str(research_doc.id),
+                'document_name': research_doc.title,
+                'document_type': research_doc.document_type,
+                'source': 'generated',
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+
         return {
             'status': 'completed',
             'document_id': str(research_doc.id),
@@ -599,7 +542,7 @@ def generate_debate_workflow(inquiry_id: str, personas: list, user_id: int):
         generator = AIDocumentGenerator()
         debate_doc = generator.generate_debate_for_inquiry(inquiry, personas, user)
         
-        # Emit event
+        # Emit operational event
         EventService.append(
             event_type=EventType.WORKFLOW_COMPLETED,
             payload={
@@ -611,7 +554,32 @@ def generate_debate_workflow(inquiry_id: str, personas: list, user_id: int):
             actor_type=ActorType.SYSTEM,
             case_id=inquiry.case_id
         )
-        
+
+        # Emit provenance events
+        EventService.append(
+            event_type=EventType.RESEARCH_COMPLETED,
+            payload={
+                'inquiry_id': str(inquiry_id),
+                'inquiry_title': inquiry.title,
+                'research_type': 'debate',
+                'document_id': str(debate_doc.id),
+                'title': debate_doc.title,
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+        EventService.append(
+            event_type=EventType.DOCUMENT_ADDED,
+            payload={
+                'document_id': str(debate_doc.id),
+                'document_name': debate_doc.title,
+                'document_type': getattr(debate_doc, 'document_type', 'debate'),
+                'source': 'generated',
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+
         return {
             'status': 'completed',
             'document_id': str(debate_doc.id),
@@ -654,7 +622,7 @@ def generate_critique_workflow(inquiry_id: str, user_id: int):
         generator = AIDocumentGenerator()
         critique_doc = generator.generate_critique_for_inquiry(inquiry, user)
         
-        # Emit event
+        # Emit operational event
         EventService.append(
             event_type=EventType.WORKFLOW_COMPLETED,
             payload={
@@ -665,7 +633,32 @@ def generate_critique_workflow(inquiry_id: str, user_id: int):
             actor_type=ActorType.SYSTEM,
             case_id=inquiry.case_id
         )
-        
+
+        # Emit provenance events
+        EventService.append(
+            event_type=EventType.RESEARCH_COMPLETED,
+            payload={
+                'inquiry_id': str(inquiry_id),
+                'inquiry_title': inquiry.title,
+                'research_type': 'critique',
+                'document_id': str(critique_doc.id),
+                'title': critique_doc.title,
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+        EventService.append(
+            event_type=EventType.DOCUMENT_ADDED,
+            payload={
+                'document_id': str(critique_doc.id),
+                'document_name': critique_doc.title,
+                'document_type': getattr(critique_doc, 'document_type', 'critique'),
+                'source': 'generated',
+            },
+            actor_type=ActorType.ASSISTANT,
+            case_id=inquiry.case_id,
+        )
+
         return {
             'status': 'completed',
             'document_id': str(critique_doc.id),

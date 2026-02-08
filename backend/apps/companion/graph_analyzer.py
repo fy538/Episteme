@@ -8,7 +8,7 @@ import numpy as np
 from asgiref.sync import sync_to_async
 
 from apps.chat.models import ChatThread
-from apps.signals.models import Signal
+from apps.signals.models import Signal, SignalType
 from apps.projects.models import Evidence
 from apps.inquiries.models import Inquiry
 from apps.common.graph_utils import GraphUtils
@@ -60,7 +60,7 @@ class GraphAnalyzer:
             thread_signals = Signal.objects.filter(thread=thread, dismissed_at__isnull=True)
             
             # Just find assumptions
-            for signal in thread_signals.filter(type='Assumption'):
+            for signal in thread_signals.filter(type=SignalType.ASSUMPTION):
                 patterns['ungrounded_assumptions'].append({
                     'id': str(signal.id),
                     'text': signal.text,
@@ -81,7 +81,7 @@ class GraphAnalyzer:
         ).prefetch_related('supported_by_evidence', 'contradicted_by_evidence')
         
         # 1. Find ungrounded assumptions
-        for signal in thread_signals.filter(type='Assumption'):
+        for signal in thread_signals.filter(type=SignalType.ASSUMPTION):
             evidence_count = signal.supported_by_evidence.count()
             
             if evidence_count == 0:
@@ -114,7 +114,7 @@ class GraphAnalyzer:
                     })
         
         # 3. Find strongly supported claims
-        for signal in thread_signals.filter(type='Claim'):
+        for signal in thread_signals.filter(type=SignalType.CLAIM):
             supporting_evidence = list(signal.supported_by_evidence.all())
             
             if len(supporting_evidence) >= 2:
@@ -146,7 +146,7 @@ class GraphAnalyzer:
         # 5. Identify missing considerations
         # Check for questions without answers
         unanswered_questions = thread_signals.filter(
-            type='Question',
+            type=SignalType.QUESTION,
             inquiry__isnull=True  # Not elevated to inquiry
         )
         
@@ -313,7 +313,7 @@ class GraphAnalyzer:
         orphaned = []
         assumptions = Signal.objects.filter(
             case=thread.primary_case,
-            type='Assumption',
+            type=SignalType.ASSUMPTION,
             dismissed_at__isnull=True
         ).prefetch_related('supported_by_evidence', 'depends_on')
         
@@ -475,7 +475,7 @@ class GraphAnalyzer:
             return patterns
 
         # 1. Ungrounded assumptions
-        for signal in inquiry_signals.filter(type='Assumption'):
+        for signal in inquiry_signals.filter(type=SignalType.ASSUMPTION):
             if not signal.supported_by_evidence.exists():
                 patterns['ungrounded_assumptions'].append({
                     'id': str(signal.id),
@@ -501,7 +501,7 @@ class GraphAnalyzer:
                     })
 
         # 3. Strong claims
-        for signal in inquiry_signals.filter(type='Claim'):
+        for signal in inquiry_signals.filter(type=SignalType.CLAIM):
             supporting = list(signal.supported_by_evidence.all())
             if len(supporting) >= 2:
                 avg_conf = sum(
@@ -567,7 +567,7 @@ class GraphAnalyzer:
         orphaned = []
         assumptions = Signal.objects.filter(
             inquiry_id=inquiry_id,
-            type='Assumption',
+            type=SignalType.ASSUMPTION,
             dismissed_at__isnull=True,
         ).prefetch_related('supported_by_evidence', 'depends_on')
 

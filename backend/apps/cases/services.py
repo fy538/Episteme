@@ -89,6 +89,14 @@ class CaseService:
         
         return case, case_brief
     
+    # Fields that callers are allowed to update via update_case
+    ALLOWED_UPDATE_FIELDS = frozenset({
+        'title', 'position', 'stakes', 'status',
+        'user_confidence', 'decision_question',
+        'constraints', 'success_criteria', 'stakeholders',
+        'premortem_text', 'what_would_change_mind',
+    })
+
     @staticmethod
     @transaction.atomic
     def update_case(
@@ -98,17 +106,26 @@ class CaseService:
     ) -> Case:
         """
         Update case fields
-        
+
         Args:
             case_id: Case to update
             user: User making the update
             **fields: Fields to update (position, stakes, confidence, status)
-        
+
         Returns:
             Updated Case
+
+        Raises:
+            Case.DoesNotExist: If case not found or not owned by user
+            ValueError: If disallowed field is passed
         """
-        case = Case.objects.get(id=case_id)
-        
+        case = Case.objects.select_for_update().get(id=case_id, user=user)
+
+        # Reject disallowed fields
+        disallowed = set(fields.keys()) - CaseService.ALLOWED_UPDATE_FIELDS
+        if disallowed:
+            raise ValueError(f"Cannot update fields: {', '.join(sorted(disallowed))}")
+
         # Track what changed
         changes = {}
         for field, value in fields.items():
@@ -120,7 +137,7 @@ class CaseService:
                 setattr(case, field, value)
         
         if changes:
-            # 1. Append CasePatched event
+            # 1. Append operational CasePatched event
             EventService.append(
                 event_type=EventType.CASE_PATCHED,
                 payload={
@@ -131,24 +148,57 @@ class CaseService:
                 actor_id=user.id,
                 case_id=case.id,
             )
-            
-            # 2. Save case
-            case.save()
+
+            # 2. Emit specific provenance events for key field changes
+            if 'user_confidence' in changes:
+                old_val = changes['user_confidence']['old']
+                new_val = changes['user_confidence']['new']
+                direction = 'increased' if (new_val or 0) > (old_val or 0) else 'decreased'
+                EventService.append(
+                    event_type=EventType.CONFIDENCE_CHANGED,
+                    payload={
+                        'old_value': old_val,
+                        'new_value': new_val,
+                        'direction': direction,
+                    },
+                    actor_type=ActorType.USER,
+                    actor_id=user.id,
+                    case_id=case.id,
+                )
+
+            if 'position' in changes and changes['position']['old']:
+                EventService.append(
+                    event_type=EventType.POSITION_REVISED,
+                    payload={
+                        'old_length': len(changes['position']['old'] or ''),
+                        'new_length': len(changes['position']['new'] or ''),
+                    },
+                    actor_type=ActorType.USER,
+                    actor_id=user.id,
+                    case_id=case.id,
+                )
+
+            # 3. Save case — only write changed fields
+            case.save(update_fields=list(changes.keys()) + ['updated_at'])
         
         return case
     
     @staticmethod
-    def refresh_working_view(case_id: uuid.UUID) -> WorkingView:
+    def refresh_working_view(case_id: uuid.UUID, user: Optional[User] = None) -> WorkingView:
         """
         Create a new WorkingView snapshot for a case (Phase 1)
-        
+
         Args:
             case_id: Case to snapshot
-        
+            user: Optional user for ownership check (defense-in-depth)
+
         Returns:
             Created WorkingView
         """
-        case = Case.objects.get(id=case_id)
+        filters = {'id': case_id}
+        if user is not None:
+            filters['user'] = user
+        case = Case.objects.get(**filters)
         
         # Get latest event affecting this case
         latest_event = Event.objects.filter(case_id=case_id).order_by('-timestamp').first()
@@ -294,7 +344,7 @@ class CaseService:
                         for a in analysis['assumptions']
                     ]
                 }
-            brief.save()
+            brief.save(update_fields=['content_markdown', 'ai_structure', 'updated_at'])
         
         # Auto-create inquiries from questions
         inquiries = []
@@ -320,5 +370,14 @@ class CaseService:
                 case_id=case.id,
                 correlation_id=correlation_id
             )
-        
-        return case, brief, inquiries
+
+        # Create initial investigation plan
+        from apps.cases.plan_service import PlanService
+        plan, _plan_version = PlanService.create_initial_plan(
+            case=case,
+            analysis=analysis,
+            inquiries=inquiries,
+            correlation_id=correlation_id,
+        )
+
+        return case, brief, inquiries, plan

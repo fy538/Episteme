@@ -158,3 +158,89 @@ class SkillVersion(UUIDModel):
     
     def __str__(self):
         return f"{self.skill.name} v{self.version}"
+
+
+class SkillPack(UUIDModel, TimestampedModel):
+    """
+    Curated bundle of skills that can be activated together.
+
+    Not a dependency system — just a named collection for convenience.
+    A pack like "Consulting Starter" groups [Market Entry, Research Standards, Quality].
+    """
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    slug = models.SlugField(unique=True)
+
+    # The skills in this pack (ordered)
+    skills = models.ManyToManyField(
+        Skill,
+        through='SkillPackMembership',
+        related_name='packs',
+    )
+
+    # Ownership / visibility
+    scope = models.CharField(
+        max_length=20,
+        choices=[
+            ('public', 'Public'),
+            ('organization', 'Organization'),
+        ],
+        default='public',
+    )
+    organization = models.ForeignKey(
+        'common.Organization',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='skill_packs',
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_skill_packs',
+    )
+
+    # Display
+    icon = models.CharField(max_length=10, blank=True, help_text="Emoji or icon identifier")
+
+    status = models.CharField(
+        max_length=20,
+        choices=[('active', 'Active'), ('archived', 'Archived')],
+        default='active',
+    )
+
+    class Meta:
+        db_table = 'skill_packs'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class SkillPackMembership(models.Model):
+    """Through model for SkillPack.skills with ordering and role."""
+    pack = models.ForeignKey(SkillPack, on_delete=models.CASCADE)
+    skill = models.ForeignKey(Skill, on_delete=models.CASCADE)
+    order = models.IntegerField(default=0)
+
+    # Role hint: what this skill contributes to the pack
+    role = models.CharField(
+        max_length=30,
+        choices=[
+            ('domain', 'Domain Knowledge'),
+            ('methodology', 'Research Methodology'),
+            ('quality', 'Quality Standards'),
+            ('general', 'General'),
+        ],
+        default='general',
+    )
+
+    class Meta:
+        db_table = 'skill_pack_memberships'
+        unique_together = [['pack', 'skill']]
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.pack.name} -> {self.skill.name} ({self.role})"

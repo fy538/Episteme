@@ -1,6 +1,8 @@
 /**
  * Empty State Component
  * Beautiful, actionable empty states for when there's no content
+ *
+ * Staggered entrance: illustration → title → description → actions cascade in.
  */
 
 'use client';
@@ -8,6 +10,7 @@
 import { motion } from 'framer-motion';
 import { Button } from './button';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { easingCurves } from '@/lib/motion-config';
 import {
   NoConversationsIllustration,
   NoCasesIllustration,
@@ -15,6 +18,28 @@ import {
   NoInquiriesIllustration,
   NoSearchResultsIllustration,
 } from '@/components/illustrations/EmptyStateIllustrations';
+
+const containerVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.05,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.35,
+      ease: easingCurves.easeOutExpo,
+    },
+  },
+};
 
 interface EmptyStateProps {
   icon?: React.ReactNode;
@@ -43,74 +68,125 @@ export function EmptyState({
 }: EmptyStateProps) {
   const prefersReducedMotion = useReducedMotion();
 
-  const content = (
-    <div className={`text-center ${compact ? 'py-8' : 'py-16'}`}>
-      {/* Illustration or Icon */}
-      {illustration ? (
-        <div className="mb-6 flex justify-center">{illustration}</div>
-      ) : icon ? (
-        <div className="mb-4 flex justify-center">
-          <div className="rounded-full bg-neutral-100 dark:bg-neutral-800 p-4 text-neutral-400 dark:text-neutral-500">
-            {icon}
-          </div>
-        </div>
-      ) : (
-        <div className="mb-4 flex justify-center">
-          <svg
-            className="h-16 w-16 text-neutral-300 dark:text-neutral-700"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-            />
-          </svg>
-        </div>
-      )}
-
-      {/* Title */}
-      <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
-        {title}
-      </h3>
-
-      {/* Description */}
-      {description && (
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-sm mx-auto mb-6">
-          {description}
-        </p>
-      )}
-
-      {/* Actions */}
-      {(action || secondaryAction) && (
-        <div className="flex items-center justify-center gap-3">
-          {action && (
-            <Button onClick={action.onClick}>{action.label}</Button>
-          )}
-          {secondaryAction && (
-            <Button variant="outline" onClick={secondaryAction.onClick}>
-              {secondaryAction.label}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-
   if (prefersReducedMotion) {
-    return content;
+    return (
+      <div className={`text-center ${compact ? 'py-8' : 'py-16'}`}>
+        {illustration ? (
+          <div className="mb-6 flex justify-center">{illustration}</div>
+        ) : icon ? (
+          <div className="mb-4 flex justify-center">
+            <div className="rounded-full bg-neutral-100 dark:bg-neutral-800 p-4 text-neutral-400 dark:text-neutral-500">
+              {icon}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 flex justify-center">
+            <svg
+              className="h-16 w-16 text-neutral-300 dark:text-neutral-700"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+              />
+            </svg>
+          </div>
+        )}
+        <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+          {title}
+        </h3>
+        {description && (
+          <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-sm mx-auto mb-6">
+            {description}
+          </p>
+        )}
+        {(action || secondaryAction) && (
+          <div className="flex items-center justify-center gap-3">
+            {action && (
+              <Button onClick={action.onClick}>{action.label}</Button>
+            )}
+            {secondaryAction && (
+              <Button variant="outline" onClick={secondaryAction.onClick}>
+                {secondaryAction.label}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      className={`text-center ${compact ? 'py-8' : 'py-16'}`}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
     >
-      {content}
+      {/* Illustration or Icon */}
+      <motion.div variants={itemVariants}>
+        {illustration ? (
+          <div className="mb-6 flex justify-center">{illustration}</div>
+        ) : icon ? (
+          <div className="mb-4 flex justify-center">
+            <div className="rounded-full bg-neutral-100 dark:bg-neutral-800 p-4 text-neutral-400 dark:text-neutral-500">
+              {icon}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 flex justify-center">
+            <svg
+              className="h-16 w-16 text-neutral-300 dark:text-neutral-700"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+              />
+            </svg>
+          </div>
+        )}
+      </motion.div>
+
+      {/* Title */}
+      <motion.div variants={itemVariants}>
+        <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+          {title}
+        </h3>
+      </motion.div>
+
+      {/* Description */}
+      {description && (
+        <motion.div variants={itemVariants}>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-sm mx-auto mb-6">
+            {description}
+          </p>
+        </motion.div>
+      )}
+
+      {/* Actions */}
+      {(action || secondaryAction) && (
+        <motion.div variants={itemVariants}>
+          <div className="flex items-center justify-center gap-3">
+            {action && (
+              <Button onClick={action.onClick}>{action.label}</Button>
+            )}
+            {secondaryAction && (
+              <Button variant="outline" onClick={secondaryAction.onClick}>
+                {secondaryAction.label}
+              </Button>
+            )}
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }

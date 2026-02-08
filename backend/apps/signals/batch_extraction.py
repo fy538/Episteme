@@ -7,8 +7,8 @@ Combines Strategy 1 (selective extraction) and Strategy 2 (batched extraction):
 - Resets counters after extraction
 """
 import logging
-import asyncio
 from typing import List
+from asgiref.sync import async_to_sync
 from django.db.models import Q
 from django.db import transaction
 
@@ -175,4 +175,4 @@ def extract_signals_from_batch(
     Returns:
         Total number of signals extracted
     """
-    return asyncio.run(extract_signals_from_batch_async(thread, messages))
+    return async_to_sync(extract_signals_from_batch_async)(thread, messages)

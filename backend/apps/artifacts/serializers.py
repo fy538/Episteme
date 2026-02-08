@@ -28,9 +28,9 @@ class ArtifactSerializer(serializers.ModelSerializer):
     """Serializer for Artifact"""
     
     current_version_blocks = serializers.SerializerMethodField()
-    input_signal_count = serializers.IntegerField(source='input_signals.count', read_only=True)
-    input_evidence_count = serializers.IntegerField(source='input_evidence.count', read_only=True)
-    
+    input_signal_count = serializers.SerializerMethodField()
+    input_evidence_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Artifact
         fields = [
@@ -58,12 +58,26 @@ class ArtifactSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
-    
+
     def get_current_version_blocks(self, obj):
         """Get blocks from current version"""
         if obj.current_version:
             return obj.current_version.blocks
         return []
+
+    def get_input_signal_count(self, obj):
+        """Use prefetched data when available, else fallback to COUNT"""
+        try:
+            return len(obj.input_signals.all())
+        except AttributeError:
+            return 0
+
+    def get_input_evidence_count(self, obj):
+        """Use prefetched data when available, else fallback to COUNT"""
+        try:
+            return len(obj.input_evidence.all())
+        except AttributeError:
+            return 0
 
 
 class CreateArtifactSerializer(serializers.Serializer):

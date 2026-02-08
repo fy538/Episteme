@@ -13,7 +13,7 @@
  * domain-specific state on top.
  */
 
-import { useState, useEffect, useRef, startTransition, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { chatAPI } from '@/lib/api/chat';
 import { TIMEOUT } from '@/lib/constants';
 import type { Message } from '@/lib/types/chat';
@@ -25,8 +25,8 @@ const TOTAL_STREAM_TIMEOUT_MS = TIMEOUT.STREAM_TOTAL;
 
 export interface UseStreamingChatOptions {
   threadId: string;
-  /** Mode context forwarded to backend for system prompt selection */
-  context?: { mode?: string; caseId?: string; inquiryId?: string };
+  /** Mode context forwarded to backend for system prompt selection and metadata */
+  context?: { mode?: string; caseId?: string; inquiryId?: string; source_type?: string; source_id?: string };
   /** Callbacks for reflection, signals, action hints forwarded to parent */
   streamCallbacks?: StreamingCallbacks;
 }
@@ -185,15 +185,15 @@ export function useStreamingChat({
                 }
               }
 
-              startTransition(() => {
-                setMessages(prev =>
-                  prev.map(msg =>
-                    msg.id === tempAssistantId
-                      ? { ...msg, content: `${msg.content}${delta}` }
-                      : msg
-                  )
-                );
-              });
+              // Update synchronously — no startTransition batching, so tokens
+              // render immediately as they arrive from the SSE stream.
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === tempAssistantId
+                    ? { ...msg, content: msg.content + delta }
+                    : msg
+                )
+              );
             },
             onReflectionChunk: (delta) => {
               streamCallbacksRef.current?.onReflectionChunk?.(delta);
@@ -206,6 +206,9 @@ export function useStreamingChat({
             },
             onActionHints: (hints) => {
               streamCallbacksRef.current?.onActionHints?.(hints);
+            },
+            onTitleUpdate: (title) => {
+              streamCallbacksRef.current?.onTitleUpdate?.(title);
             },
             onDone: (result) => {
               clearStreamTimeouts();

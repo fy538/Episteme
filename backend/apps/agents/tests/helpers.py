@@ -51,6 +51,11 @@ def make_test_provider(responses: list[str] | None = None):
 
     provider = MagicMock()
     provider.generate = AsyncMock(side_effect=responses)
+    # Prevent MagicMock from auto-creating these attributes (hasattr returns True
+    # for any attr on MagicMock). The ResearchLoop checks these to decide whether
+    # to create ContextBudgetTracker and CostTracker.
+    del provider.context_window_tokens
+    del provider.model
     return provider
 
 

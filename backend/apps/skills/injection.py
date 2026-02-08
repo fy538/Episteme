@@ -25,7 +25,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
             'custom_signal_types': list,     # Custom signal type definitions
             'evidence_standards': dict,      # Evidence credibility standards
             'artifact_template': dict,       # Artifact structure template
-            'research_config': ResearchConfig | None  # Parsed research config (if any)
+            'research_config': ResearchConfig | None,  # Parsed research config (if any)
         }
     """
     context = {
@@ -162,6 +162,56 @@ def format_system_prompt_with_skills(
             enhanced_prompt += template + "\n"
     
     return enhanced_prompt
+
+
+def extract_brief_sections_from_skill(skill: Skill) -> list[dict] | None:
+    """
+    Extract brief section definitions from a skill's artifact_template.
+
+    Supports two formats:
+    1. Simple string list: ["Legal Summary", "Risk Assessment"]
+    2. Rich dict list: [{"heading": "Legal Summary", "type": "custom", "locked": false}]
+
+    Returns:
+        List of section dicts with {heading, type, is_locked, lock_reason},
+        or None if no artifact_template or no brief sections defined.
+    """
+    from apps.cases.brief_models import SectionType
+
+    template = skill.episteme_config.get('artifact_template', {})
+    if not isinstance(template, dict):
+        return None
+
+    brief_config = template.get('brief', {})
+    if not isinstance(brief_config, dict):
+        return None
+
+    raw_sections = brief_config.get('sections', [])
+    if not raw_sections or not isinstance(raw_sections, list):
+        return None
+
+    valid_types = {choice.value for choice in SectionType}
+    sections = []
+
+    for item in raw_sections:
+        if isinstance(item, str):
+            sections.append({
+                'heading': item,
+                'type': SectionType.CUSTOM,
+                'is_locked': False,
+                'lock_reason': '',
+            })
+        elif isinstance(item, dict):
+            raw_type = item.get('type', 'custom')
+            section_type = SectionType(raw_type) if raw_type in valid_types else SectionType.CUSTOM
+            sections.append({
+                'heading': item.get('heading', item.get('name', 'Untitled')),
+                'type': section_type,
+                'is_locked': item.get('locked', False),
+                'lock_reason': item.get('lock_reason', ''),
+            })
+
+    return sections if sections else None
 
 
 async def get_active_skills_for_case(case) -> List[Skill]:

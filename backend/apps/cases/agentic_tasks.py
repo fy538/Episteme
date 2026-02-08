@@ -9,15 +9,16 @@ Handles complex tasks like:
 """
 import json
 import logging
-
-logger = logging.getLogger(__name__)
-import asyncio
 import uuid
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+from asgiref.sync import async_to_sync
+
 from apps.common.llm_providers import get_llm_provider
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
@@ -318,7 +319,7 @@ Return ONLY the JSON array."""
             logger.warning(f"Failed to parse plan: {e}")
             return []
 
-    return asyncio.run(generate())
+    return async_to_sync(generate)()
 
 
 def _execute_step(
@@ -386,7 +387,7 @@ Return ONLY the JSON object."""
             logger.warning(f"Failed to execute step: {e}")
             return {'changed': False, 'new_content': content, 'error': str(e)}
 
-    return asyncio.run(execute())
+    return async_to_sync(execute)()
 
 
 def _review_changes(
@@ -460,7 +461,7 @@ Return ONLY the JSON object."""
             logger.warning(f"Failed to parse review: {e}")
             return {'score': 70, 'notes': 'Review completed', 'refinements': []}
 
-    return asyncio.run(review())
+    return async_to_sync(review)()
 
 
 def _apply_refinements(
@@ -503,7 +504,7 @@ Return ONLY the document content, no JSON or explanation."""
 
         return full_response.strip()
 
-    return asyncio.run(refine())
+    return async_to_sync(refine)()
 
 
 def _generate_diff_summary(original: str, modified: str) -> str:

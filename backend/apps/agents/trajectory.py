@@ -33,6 +33,9 @@ class TrajectoryEvent:
     metrics: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
     duration_ms: int = 0
+    # Cost tracking (populated when CostTracker is active)
+    tokens_used: int = 0  # input + output tokens for this step
+    cost_usd: float = 0.0  # estimated cost in USD
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -78,6 +81,8 @@ class TrajectoryRecorder:
         decision_rationale: str = "",
         metrics: dict[str, Any] | None = None,
         duration_ms: int = 0,
+        tokens_used: int = 0,
+        cost_usd: float = 0.0,
     ) -> None:
         """Convenience: record a step without constructing TrajectoryEvent manually."""
         self.record(TrajectoryEvent(
@@ -87,6 +92,8 @@ class TrajectoryRecorder:
             decision_rationale=decision_rationale[:self.max_prompt_chars],
             metrics=metrics or {},
             duration_ms=duration_ms,
+            tokens_used=tokens_used,
+            cost_usd=cost_usd,
         ))
 
     def finalize(self) -> dict[str, Any]:
@@ -97,10 +104,14 @@ class TrajectoryRecorder:
         and summary metadata.
         """
         elapsed_ms = int((time.time() - self._start_time) * 1000)
+        total_tokens = sum(e.tokens_used for e in self._events)
+        total_cost = round(sum(e.cost_usd for e in self._events), 6)
         return {
             "correlation_id": self.correlation_id,
             "total_steps": len(self._events),
             "total_duration_ms": elapsed_ms,
+            "total_tokens_used": total_tokens,
+            "total_cost_usd": total_cost,
             "events": [e.to_dict() for e in self._events],
             "finalized_at": datetime.now(timezone.utc).isoformat(),
         }

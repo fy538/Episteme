@@ -56,15 +56,27 @@ class ChatThreadSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
     
     def get_message_count(self, obj):
+        # Use annotated value from queryset when available
+        if hasattr(obj, '_message_count'):
+            return obj._message_count
         return obj.messages.count()
-    
+
     def get_latest_message(self, obj):
-        latest = obj.messages.last()
+        # Use prefetched messages when available, else fallback to query
+        try:
+            messages = obj.messages.all()
+            if messages:
+                latest = list(messages)[-1]  # Use prefetched cache
+            else:
+                return None
+        except AttributeError:
+            latest = obj.messages.last()
         if latest:
+            content = latest.content or ''
             return {
                 'id': str(latest.id),
                 'role': latest.role,
-                'content': latest.content[:100] + '...' if len(latest.content) > 100 else latest.content,
+                'content': content[:100] + '...' if len(content) > 100 else content,
                 'created_at': latest.created_at,
             }
         return None

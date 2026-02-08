@@ -74,6 +74,28 @@ COMPACT_SYSTEM = (
 )
 
 
+# ─── System Prompt Composition ─────────────────────────────────────────────
+
+def build_system_prompt(
+    role_prompt: str,
+    skill_instructions: str = "",
+) -> str:
+    """Compose the system prompt: role definition + cached domain knowledge.
+
+    Skill instructions are placed in the system prompt (not the user prompt)
+    so they benefit from Anthropic's ephemeral prompt caching. Since the
+    system prompt stays stable across all calls within one research session,
+    the KV-cache hit rate is maximized.
+
+    Layout (stable prefix → dynamic suffix):
+        1. Role definition (short, role-specific)
+        2. Domain knowledge from skills (cached across calls)
+    """
+    if not skill_instructions:
+        return role_prompt
+    return f"{role_prompt}\n\n# Domain Knowledge\n{skill_instructions}"
+
+
 # ─── Plan Prompt ────────────────────────────────────────────────────────────
 
 def build_plan_prompt(
@@ -81,9 +103,12 @@ def build_plan_prompt(
     decomposition: str,
     sources: SourcesConfig,
     context: dict,
-    skill_instructions: str = "",
 ) -> str:
-    """Build the prompt for the planning step."""
+    """Build the user prompt for the planning step.
+
+    Note: skill_instructions now live in the system prompt via
+    build_system_prompt() for cache efficiency.
+    """
 
     # Decomposition strategy guidance
     strategy_guidance = _get_decomposition_guidance(decomposition)
@@ -116,7 +141,6 @@ def build_plan_prompt(
 
 {f"## Available Sources{chr(10)}{source_context}" if source_context else ""}
 {f"## Context{chr(10)}{case_context}" if case_context else ""}
-{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
 
 ## Your Task
 Decompose this research question into 2-5 specific sub-queries that a search engine can answer.
@@ -181,9 +205,8 @@ def _get_decomposition_guidance(strategy: str) -> str:
 def build_extract_prompt(
     results: list[dict],
     extract_config: ExtractConfig,
-    skill_instructions: str = "",
 ) -> str:
-    """Build the prompt for the extraction step."""
+    """Build the user prompt for the extraction step."""
 
     # Format source results
     sources_text = ""
@@ -224,7 +247,6 @@ def build_extract_prompt(
 ## Extraction Instructions
 {fields_spec}
 {rel_spec}
-{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
 
 ## Your Task
 For each source, extract the requested information. Include a direct `raw_quote` from the source text to support each extraction.
@@ -250,10 +272,9 @@ Respond in JSON:
 def build_evaluate_prompt(
     findings: list[dict],
     evaluate_config: EvaluateConfig,
-    skill_instructions: str = "",
     effective_rubric: str = "",
 ) -> str:
-    """Build the prompt for the evaluation step."""
+    """Build the user prompt for the evaluation step."""
 
     # Format findings
     findings_text = ""
@@ -294,7 +315,6 @@ def build_evaluate_prompt(
 
 ## Evaluation Criteria
 {criteria_spec}
-{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
 
 ## Your Task
 Score each finding on relevance (0.0-1.0) and quality (0.0-1.0).
@@ -408,10 +428,9 @@ def build_synthesize_prompt(
     plan: dict,
     output_config: OutputConfig,
     original_question: str,
-    skill_instructions: str = "",
     effective_sections: list[str] | None = None,
 ) -> str:
-    """Build the prompt for the synthesis step."""
+    """Build the user prompt for the synthesis step."""
 
     # Format findings by quality
     sorted_findings = sorted(findings, key=lambda f: f.get("quality_score", 0), reverse=True)
@@ -476,8 +495,6 @@ Format: **{output_config.format}**
 {length}
 {citation}
 
-{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
-
 ## Your Task
 Synthesize the findings into a well-structured {output_config.format}.
 - Cite every factual claim with its source
@@ -494,9 +511,8 @@ Write the full report in markdown."""
 def build_compact_prompt(
     dropped_findings: list[dict],
     kept_count: int,
-    skill_instructions: str = "",
 ) -> str:
-    """Build prompt for the compaction step."""
+    """Build the user prompt for the compaction step."""
 
     findings_text = ""
     for f in dropped_findings:
@@ -504,21 +520,28 @@ def build_compact_prompt(
         fields = f.get("extracted_fields", {})
         findings_text += str(fields)[:200] + "\n"
 
+    # Count unique domains in dropped findings
+    domains = set(f.get("source_domain", "") for f in dropped_findings if f.get("source_domain"))
+
     prompt = f"""## Context
 We have {kept_count} high-scoring findings already retained.
-The following {len(dropped_findings)} lower-scoring findings are being compacted.
+The following {len(dropped_findings)} lower-scoring findings from {len(domains)} domains are being compacted.
 
 ## Findings to Digest
 {findings_text}
-{f"## Domain Knowledge{chr(10)}{skill_instructions}" if skill_instructions else ""}
 
 ## Your Task
-Produce a concise digest of any unique insights from these findings
-that are NOT likely covered by the {kept_count} retained high-scoring findings.
-Focus on unique claims, contrary evidence, or niche data points.
+Produce a **structured** digest preserving maximum information density.
+Focus on insights NOT likely covered by the {kept_count} retained high-scoring findings.
 
 Respond in JSON:
 ```json
-{{"digest": "2-3 sentence summary of unique insights from these findings"}}
+{{
+  "key_claims": ["claim 1", "claim 2"],
+  "sources_summary": "{len(dropped_findings)} sources from {len(domains)} domains",
+  "contradictions": ["any claims that conflict with the consensus"],
+  "unique_data_points": ["niche facts or statistics not in top findings"],
+  "digest": "2-3 sentence synthesis of the above"
+}}
 ```"""
     return prompt.strip()

@@ -1,8 +1,8 @@
 """
 Service for triggering proactive interventions based on detected patterns
 """
+import copy
 import logging
-import asyncio
 from typing import List, Optional
 from .models import ChatThread, Message
 from .pattern_detection import PatternDetectionEngine
@@ -10,61 +10,6 @@ from .card_builders import CardBuilder
 from .services import ChatService
 
 logger = logging.getLogger(__name__)
-
-
-async def trigger_companion_reflection_on_card(
-    thread_id,
-    card_type: str,
-    card_heading: str,
-    card_content: dict
-):
-    """
-    Trigger companion reflection when action card is created.
-    
-    Args:
-        thread_id: Thread where card was created
-        card_type: Type of card
-        card_heading: Card heading
-        card_content: Card content dict
-    """
-    try:
-        from apps.companion.services import CompanionService
-        from apps.companion.models import Reflection, ReflectionTriggerType
-        
-        companion = CompanionService()
-        
-        # Generate reflection for this specific action card
-        reflection_text = await companion.generate_action_card_reflection(
-            thread_id=thread_id,
-            card_type=card_type,
-            card_heading=card_heading,
-            card_content=card_content
-        )
-        
-        # Save reflection
-        from asgiref.sync import sync_to_async
-        thread = await sync_to_async(ChatThread.objects.get)(id=thread_id)
-        
-        await sync_to_async(Reflection.objects.create)(
-            thread=thread,
-            reflection_text=reflection_text,
-            trigger_type=ReflectionTriggerType.USER_MESSAGE,
-            analyzed_messages=[],
-            analyzed_signals=[],
-            patterns={'action_card_type': card_type}
-        )
-        
-        logger.info(
-            f"Companion reflection triggered for action card",
-            extra={'thread_id': str(thread_id), 'card_type': card_type}
-        )
-        
-    except Exception:
-        logger.exception(
-            "companion_action_card_reflection_failed",
-            extra={'thread_id': str(thread_id)}
-        )
-        # Don't fail card creation if companion reflection fails
 
 
 class InterventionService:
@@ -133,21 +78,7 @@ class InterventionService:
         
         if top_pattern['pattern_type'] == 'multiple_questions':
             intervention_message = cls._create_organize_questions_card(thread, top_pattern)
-            
-            # Trigger companion reflection on this card (async, non-blocking)
-            if intervention_message:
-                try:
-                    asyncio.create_task(
-                        trigger_companion_reflection_on_card(
-                            thread_id=thread.id,
-                            card_type='card_action_prompt',
-                            card_heading='Organize Questions',
-                            card_content={'pattern': top_pattern}
-                        )
-                    )
-                except Exception:
-                    pass  # Don't fail intervention if companion fails
-        
+
         elif top_pattern['pattern_type'] == 'unvalidated_assumptions':
             intervention_message = cls._create_validate_assumptions_card(thread, top_pattern)
         
@@ -157,12 +88,14 @@ class InterventionService:
         elif top_pattern['pattern_type'] == 'high_signal_density':
             intervention_message = cls._create_organize_signals_card(thread, top_pattern)
         
-        # Update thread metadata
+        # Update thread metadata (deepcopy to ensure Django detects change)
         if intervention_message:
             current_turn = thread.messages.count()
-            thread.metadata['last_intervention_turn'] = current_turn
-            thread.metadata['last_intervention_type'] = top_pattern['pattern_type']
-            thread.save(update_fields=['metadata'])
+            meta = copy.deepcopy(thread.metadata)
+            meta['last_intervention_turn'] = current_turn
+            meta['last_intervention_type'] = top_pattern['pattern_type']
+            thread.metadata = meta
+            thread.save(update_fields=['metadata', 'updated_at'])
             
             logger.info(
                 "intervention_created",
@@ -264,11 +197,13 @@ class InterventionService:
             thread: ChatThread
             suggestion_type: Type of suggestion to dismiss
         """
-        dismissed = thread.metadata.get('dismissed_suggestions', [])
+        meta = copy.deepcopy(thread.metadata)
+        dismissed = meta.get('dismissed_suggestions', [])
         if suggestion_type not in dismissed:
             dismissed.append(suggestion_type)
-            thread.metadata['dismissed_suggestions'] = dismissed
-            thread.save(update_fields=['metadata'])
+            meta['dismissed_suggestions'] = dismissed
+            thread.metadata = meta
+            thread.save(update_fields=['metadata', 'updated_at'])
             
             logger.info(
                 "suggestion_dismissed",

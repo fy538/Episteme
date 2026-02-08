@@ -176,15 +176,24 @@ export function useCommandPalette() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Cmd+K or Ctrl+K
+      // Cmd+K or Ctrl+K — toggle (for keyboard users)
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setIsOpen((prev) => !prev);
       }
     }
 
+    // Programmatic open via custom event (always opens, never toggles)
+    function handleOpenCommand() {
+      setIsOpen(true);
+    }
+
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('episteme:open-command-palette', handleOpenCommand);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('episteme:open-command-palette', handleOpenCommand);
+    };
   }, []);
 
   return { isOpen, setIsOpen };

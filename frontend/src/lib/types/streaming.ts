@@ -20,4 +20,6 @@ export interface StreamingCallbacks {
   onActionHints?: (hints: ActionHint[]) => void;
   /** Called when assistant message is complete */
   onMessageComplete?: (messageId?: string) => void;
+  /** Called when the thread title is auto-generated or refreshed */
+  onTitleUpdate?: (title: string) => void;
 }

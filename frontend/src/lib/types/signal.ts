@@ -20,6 +20,8 @@ export interface Signal {
   content?: string;
   normalized_text: string;
   confidence: number;
+  temperature?: string;
+  assumption_status?: string;
   case?: string;
   thread: string;
   inquiry?: string;

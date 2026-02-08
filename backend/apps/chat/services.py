@@ -2,9 +2,9 @@
 Chat service
 """
 import uuid
-import asyncio
 import logging
 from typing import Optional, List
+from asgiref.sync import async_to_sync
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.conf import settings
@@ -48,25 +48,27 @@ class ChatService:
     def create_user_message(
         thread_id: uuid.UUID,
         content: str,
-        user: User
+        user: User,
+        metadata: dict | None = None,
     ) -> Message:
         """
         Create a user message in a thread
-        
+
         This follows the dual-write pattern:
         1. Append event (source of truth)
         2. Create message (read model)
-        
+
         Args:
             thread_id: Thread to add message to
             content: Message content
             user: User sending the message
-        
+            metadata: Optional metadata dict (mode_context, source info, etc.)
+
         Returns:
             Created Message
         """
         thread = ChatThread.objects.get(id=thread_id)
-        
+
         # 1. Append event (source of truth)
         event = EventService.append(
             event_type=EventType.USER_MESSAGE_CREATED,
@@ -79,15 +81,16 @@ class ChatService:
             actor_id=user.id,
             thread_id=thread_id,
         )
-        
+
         # 2. Create message (read model)
         message = Message.objects.create(
             thread=thread,
             role=MessageRole.USER,
             content=content,
             event_id=event.id,
+            metadata=metadata or {},
         )
-        
+
         return message
     
     @staticmethod
@@ -205,7 +208,7 @@ class ChatService:
         )
 
         try:
-            result = asyncio.run(agent.run(prompt))
+            result = async_to_sync(agent.run)(prompt)
             response_content = result.data
         except Exception:
             logger.exception(

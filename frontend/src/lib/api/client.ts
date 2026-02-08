@@ -19,7 +19,6 @@ export class APIClient {
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', token);
-      console.log('[APIClient] Token saved to localStorage');
     }
   }
 
@@ -28,7 +27,6 @@ export class APIClient {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('refresh_token');
-      console.log('[APIClient] Tokens cleared from localStorage');
     }
   }
 

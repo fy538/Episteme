@@ -2,41 +2,40 @@
 Title Generator Service
 
 Generates concise titles for:
-- Chat threads (after 2nd response)
-- Cases (when suggested)
+- Chat threads (inline during SSE stream)
+- Cases (when scaffolded or suggested)
+- Inquiries (when promoted from signals)
 
-Supports both streaming and non-streaming generation.
+Uses a small, fast model and instruction-after-content prompting
+for reliable short-form generation.
 """
 
-from typing import List, Dict, Optional, AsyncIterator
+import re
+from typing import List, Dict, Optional
 import logging
 
-from apps.common.llm_providers import get_provider
+from apps.common.llm_providers import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
 # Use a fast, cheap model for title generation
-TITLE_MODEL = "claude-3-5-haiku-latest"
+TITLE_MODEL = "claude-haiku-4-5-20251001"
 
-THREAD_TITLE_SYSTEM_PROMPT = """Generate a very short title (3-6 words) for this conversation.
-The title should capture the main topic or intent.
-Return ONLY the title, no quotes, no explanation.
+# Lightweight system prompt — formatting rules go in the user message suffix
+THREAD_TITLE_SYSTEM_PROMPT = (
+    "You are a concise title generator. "
+    "Respond with only the title text, nothing else."
+)
 
-Examples:
-- Debugging Python async errors
-- Marketing strategy for Q2
-- Career change considerations
-- API authentication design"""
+CASE_TITLE_SYSTEM_PROMPT = (
+    "You are a concise title generator for decision cases. "
+    "Respond with only the title text, nothing else."
+)
 
-CASE_TITLE_SYSTEM_PROMPT = """Generate a concise case/decision title (4-8 words) based on these signals.
-The title should describe the decision or investigation being tracked.
-Return ONLY the title, no quotes, no explanation.
-
-Examples:
-- Migrate to microservices architecture
-- Q3 product launch timing decision
-- Engineering team expansion plan
-- Customer churn root cause analysis"""
+INQUIRY_TITLE_SYSTEM_PROMPT = (
+    "You are a concise title generator for investigations. "
+    "Respond with only the title text, nothing else."
+)
 
 
 async def generate_thread_title(
@@ -59,7 +58,7 @@ async def generate_thread_title(
     conversation = _build_conversation_summary(messages)
 
     try:
-        provider = get_provider("anthropic")
+        provider = get_llm_provider("fast")
 
         response = await provider.generate(
             messages=[{"role": "user", "content": conversation}],
@@ -78,51 +77,36 @@ async def generate_thread_title(
         return None
 
 
-async def stream_thread_title(
-    messages: List[Dict[str, str]],
-) -> AsyncIterator[str]:
-    """
-    Stream a title for a chat thread token by token.
-
-    Args:
-        messages: List of message dicts with 'role' and 'content'
-
-    Yields:
-        Title tokens as they're generated
-    """
-    if not messages:
-        return
-
-    conversation = _build_conversation_summary(messages)
-
-    try:
-        provider = get_provider("anthropic")
-
-        async for chunk in provider.stream_chat(
-            messages=[{"role": "user", "content": conversation}],
-            system_prompt=THREAD_TITLE_SYSTEM_PROMPT,
-            max_tokens=30,
-        ):
-            if chunk.content:
-                yield chunk.content
-
-    except Exception as e:
-        logger.error(f"Failed to stream thread title: {e}")
-
-
 def _build_conversation_summary(messages: List[Dict[str, str]]) -> str:
-    """Build a conversation summary for title generation."""
-    return "\n".join([
+    """
+    Build a conversation summary for title generation.
+
+    Uses instruction-after-content pattern for better compliance
+    with small models.
+    """
+    conversation = "\n".join([
         f"{msg['role'].upper()}: {msg['content'][:500]}"
-        for msg in messages[:4]  # First 4 messages max
+        for msg in messages[:6]
     ])
+    return (
+        f"{conversation}\n"
+        "-----\n"
+        "Generate a concise 3-6 word title for the above conversation. "
+        "Do not add quotation marks or formatting. "
+        "Respond with only the title."
+    )
 
 
 def _clean_title(title: str, max_length: int = 50) -> str:
     """Clean and truncate a generated title."""
-    title = title.strip().strip('"\'')
+    # Strip quotes, markdown, asterisks, hashes
+    title = re.sub(r'^[#*"\'`\s]+', '', title)
+    title = re.sub(r'["\'`]+$', '', title)
+    title = title.strip()
+    # Remove common model preambles
+    title = re.sub(r'^(?:Title|Subject|Topic|Here\'s a title):\s*', '', title, flags=re.IGNORECASE)
     if len(title) > max_length:
-        title = title[:max_length-3] + "..."
+        title = title[:max_length - 3] + "..."
     return title
 
 
@@ -142,52 +126,92 @@ async def generate_case_title(
     Returns:
         Generated case title or None if generation fails
     """
-    if not signals:
+    if not signals and not conversation_summary:
         return None
 
-    # Format signals by type
-    signals_text = "\n".join([
-        f"- [{s.get('type', 'Signal')}] {s.get('text', '')[:200]}"
-        for s in signals[:10]
-    ])
-
-    context = f"""Signals extracted:
-{signals_text}
-"""
+    # Build context from signals if present
+    parts = []
+    if signals:
+        signals_text = "\n".join([
+            f"- [{s.get('type', 'Signal')}] {s.get('text', '')[:200]}"
+            for s in signals[:10]
+        ])
+        parts.append(f"Signals extracted:\n{signals_text}")
 
     if conversation_summary:
-        context += f"\nConversation context: {conversation_summary}"
+        parts.append(f"Context: {conversation_summary}")
 
-    system_prompt = """Generate a concise case/decision title (4-8 words) based on these signals.
-The title should describe the decision or investigation being tracked.
-Return ONLY the title, no quotes, no explanation.
-
-Examples:
-- "Migrate to microservices architecture"
-- "Q3 product launch timing decision"
-- "Engineering team expansion plan"
-- "Customer churn root cause analysis"
-"""
+    context = "\n\n".join(parts)
+    context += (
+        "\n-----\n"
+        "Generate a concise 4-8 word title describing the decision or investigation. "
+        "Do not add quotation marks or formatting. "
+        "Respond with only the title."
+    )
 
     try:
-        provider = get_provider("anthropic")
+        provider = get_llm_provider("fast")
 
         response = await provider.generate(
             messages=[{"role": "user", "content": context}],
-            system_prompt=system_prompt,
+            system_prompt=CASE_TITLE_SYSTEM_PROMPT,
             model=TITLE_MODEL,
             max_tokens=40,
             temperature=0.3,
         )
 
-        title = response.strip().strip('"\'')
-
-        if len(title) > max_length:
-            title = title[:max_length-3] + "..."
-
+        title = _clean_title(response, max_length)
         logger.info(f"Generated case title: {title}")
         return title
 
     except Exception as e:
         logger.error(f"Failed to generate case title: {e}")
+        return None
+
+
+async def generate_inquiry_title(
+    source_text: str,
+    signal_type: str = "assumption",
+    max_length: int = 80
+) -> Optional[str]:
+    """
+    Generate a concise investigation title from a signal or assumption.
+
+    Args:
+        source_text: The signal/assumption text to convert
+        signal_type: Type of signal (assumption, question, claim, etc.)
+        max_length: Maximum title length
+
+    Returns:
+        Generated inquiry title or None if generation fails
+    """
+    if not source_text:
+        return None
+
+    content = (
+        f"[{signal_type.upper()}] {source_text[:300]}\n"
+        "-----\n"
+        "Convert the above into a concise 4-8 word investigation title. "
+        "Frame it as an active investigation or question to resolve. "
+        "Do not add quotation marks or formatting. "
+        "Respond with only the title."
+    )
+
+    try:
+        provider = get_llm_provider("fast")
+
+        response = await provider.generate(
+            messages=[{"role": "user", "content": content}],
+            system_prompt=INQUIRY_TITLE_SYSTEM_PROMPT,
+            model=TITLE_MODEL,
+            max_tokens=30,
+            temperature=0.3,
+        )
+
+        title = _clean_title(response, max_length)
+        logger.info(f"Generated inquiry title: {title}")
+        return title
+
+    except Exception as e:
+        logger.error(f"Failed to generate inquiry title: {e}")
         return None

@@ -68,6 +68,7 @@ class AnthropicProvider(LLMProvider):
         model: Optional[str] = None,
         max_tokens: int = 1024,
         temperature: float = 0.7,
+        use_prompt_caching: bool = True,
         **kwargs
     ) -> str:
         """
@@ -79,6 +80,8 @@ class AnthropicProvider(LLMProvider):
             model: Optional model override
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
+            use_prompt_caching: Enable ephemeral prompt caching (default True).
+                Cache reads cost 10% of base input price; writes cost 1.25x.
 
         Returns:
             Generated text content
@@ -88,10 +91,23 @@ class AnthropicProvider(LLMProvider):
 
         use_model = model or self.model
 
+        # Enable prompt caching for system prompts (ephemeral cache, 5 min TTL)
+        # Matches stream_chat() caching pattern — reduces cost by ~90% on cache hits.
+        if use_prompt_caching and system_prompt and len(system_prompt) > 100:
+            system_param = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        else:
+            system_param = system_prompt or ""
+
         response = await self.client.messages.create(
             model=use_model,
             messages=messages,
-            system=system_prompt or "",
+            system=system_param,
             max_tokens=max_tokens,
             temperature=temperature,
             **kwargs

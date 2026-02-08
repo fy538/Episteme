@@ -21,7 +21,12 @@ import type {
   CreateBriefSectionData,
   UpdateBriefSectionData,
   ScaffoldResult,
+  SectionJudgmentSummary,
 } from '../types/case';
+
+// Re-export types that were previously defined in this file
+export type { CaseHealthMetrics, SectionJudgmentSummary } from '../types/case';
+export type { SectionJudgmentSection, SectionJudgmentMismatch } from '../types/case';
 
 interface CreateCaseResponse {
   case: Case;
@@ -54,27 +59,6 @@ export const casesAPI = {
     return apiClient.delete(`/cases/${caseId}/`);
   },
 
-  async getCaseDocuments(caseId: string): Promise<CaseDocument[]> {
-    const response = await apiClient.get<{ results: CaseDocument[] }>(
-      `/cases/documents/?case=${caseId}`
-    );
-    return response.results || [];
-  },
-
-  async getOnboarding(caseId: string): Promise<any> {
-    return apiClient.get(`/cases/${caseId}/onboarding/`);
-  },
-
-  /**
-   * Generate a brief outline for a case
-   */
-  async generateBriefOutline(caseId: string): Promise<{ outline: string; case_id: string }> {
-    return apiClient.post<{ outline: string; case_id: string }>(
-      `/cases/${caseId}/generate-brief-outline/`,
-      {}
-    );
-  },
-
   /**
    * Update decision frame fields
    */
@@ -91,37 +75,17 @@ export const casesAPI = {
   },
 
   /**
-   * Get AI suggestions for inquiries
-   */
-  async suggestInquiries(caseId: string): Promise<Array<{
-    title: string;
-    description: string;
-    reason: string;
-    priority: number;
-  }>> {
-    return apiClient.post(`/cases/${caseId}/suggest-inquiries/`, {});
-  },
-
-  /**
-   * Suggest evidence sources for an inquiry
-   */
-  async suggestEvidenceSources(caseId: string, inquiryId: string): Promise<Array<{
-    inquiry_id: string;
-    suggestion: string;
-    source_type: string;
-    why_helpful: string;
-    how_to_find: string;
-  }>> {
-    return apiClient.post(`/cases/${caseId}/suggest-evidence-sources/`, {
-      inquiry_id: inquiryId,
-    });
-  },
-
-  /**
    * Get evidence landscape (counts, not scores)
    */
   async getEvidenceLandscape(caseId: string): Promise<EvidenceLandscape> {
     return apiClient.get(`/cases/${caseId}/evidence-landscape/`);
+  },
+
+  /**
+   * Save user's premortem text
+   */
+  async savePremortem(caseId: string, text: string): Promise<{ premortem_text: string; premortem_at: string }> {
+    return apiClient.patch(`/cases/${caseId}/premortem/`, { premortem_text: text });
   },
 
   /**
@@ -315,18 +279,126 @@ export const casesAPI = {
   },
 
   /**
-   * Scaffold a minimal case
+   * Scaffold a minimal case.
+   *
+   * Optionally pass a skill pack slug or individual skill ID to scaffold
+   * with domain-specific brief sections and auto-activate skills.
    */
   async scaffoldMinimal(
     projectId: string,
     title: string,
-    decisionQuestion?: string
+    decisionQuestion?: string,
+    options?: { packSlug?: string; skillId?: string }
   ): Promise<ScaffoldResult> {
     return apiClient.post('/cases/scaffold/', {
       project_id: projectId,
       title,
       decision_question: decisionQuestion,
       mode: 'minimal',
+      ...(options?.packSlug ? { pack_slug: options.packSlug } : {}),
+      ...(options?.skillId ? { skill_id: options.skillId } : {}),
     });
   },
+
+  /**
+   * Save user's response to the "what would change your mind" resurface prompt.
+   */
+  async saveWhatChangedMindResponse(
+    caseId: string,
+    response: 'updated_view' | 'proceeding_anyway' | 'not_materialized'
+  ): Promise<{ what_changed_mind_response: string; what_changed_mind_response_at: string }> {
+    return apiClient.patch(`/cases/${caseId}/what-changed-mind-response/`, { response });
+  },
+
+  /**
+   * Get synthesis summary comparing user judgment vs structural grounding
+   */
+  async getSectionJudgmentSummary(caseId: string): Promise<SectionJudgmentSummary> {
+    return apiClient.get(`/cases/${caseId}/section-judgment-summary/`);
+  },
+
+  /**
+   * Export case brief as markdown (client-side assembly)
+   *
+   * Downloads the brief and plan data and assembles a
+   * shareable markdown document locally.
+   */
+  async exportBriefMarkdown(caseId: string): Promise<string> {
+    const [caseData, sections, home] = await Promise.all([
+      this.getCase(caseId),
+      this.getBriefSections(caseId).catch(() => ({ sections: [] })),
+      apiClient.get(`/cases/${caseId}/home/`).catch(() => null) as Promise<any>,
+    ]);
+
+    const lines: string[] = [];
+    lines.push(`# ${caseData.title}`);
+    lines.push('');
+    if (caseData.decision_question) {
+      lines.push(`**Decision:** ${caseData.decision_question}`);
+      lines.push('');
+    }
+
+    // Plan stage
+    if (home?.plan?.stage) {
+      lines.push(`**Stage:** ${home.plan.stage}`);
+      lines.push('');
+    }
+
+    // Position statement
+    if (home?.plan?.position_statement) {
+      lines.push(`> ${home.plan.position_statement}`);
+      lines.push('');
+    }
+
+    // Brief sections
+    const sectionList = (sections as any)?.sections ?? [];
+    if (sectionList.length > 0) {
+      lines.push('## Brief');
+      lines.push('');
+      for (const section of sectionList) {
+        lines.push(`### ${section.heading}`);
+        lines.push('');
+        lines.push(section.content || '');
+        lines.push('');
+      }
+    }
+
+    // Assumptions
+    const assumptions = home?.plan?.current_content?.assumptions ?? [];
+    if (assumptions.length > 0) {
+      lines.push('## Assumptions');
+      lines.push('');
+      for (const a of assumptions) {
+        lines.push(`- **[${a.status.toUpperCase()}]** ${a.text}`);
+        if (a.evidence_summary) {
+          lines.push(`  - Evidence: ${a.evidence_summary}`);
+        }
+      }
+      lines.push('');
+    }
+
+    // Decision criteria
+    const criteria = home?.plan?.current_content?.decision_criteria ?? [];
+    if (criteria.length > 0) {
+      lines.push('## Decision Criteria');
+      lines.push('');
+      for (const c of criteria) {
+        lines.push(`- [${c.is_met ? 'x' : ' '}] ${c.text}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('---');
+    lines.push(`*Exported from Episteme on ${new Date().toLocaleDateString()}*`);
+
+    return lines.join('\n');
+  },
+
+  /**
+   * Export case as structured JSON (full reasoning graph IR)
+   */
+  async exportJSON(caseId: string): Promise<Record<string, unknown>> {
+    return apiClient.get(`/cases/${caseId}/export/?type=full`);
+  },
 };
+

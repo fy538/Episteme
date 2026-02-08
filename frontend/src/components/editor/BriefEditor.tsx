@@ -1,5 +1,5 @@
 /**
- * Brief editor - low friction editing with auto-save
+ * Brief editor - low friction editing with auto-save and section awareness
  *
  * Features:
  * - TipTap rich text editor with auto-save (1s debounce)
@@ -7,6 +7,7 @@
  * - Citation autocomplete ([[doc-name]])
  * - Floating action menu on text selection
  * - Version history with one-click restore
+ * - Section marker awareness for grounding gutter integration
  */
 
 'use client';
@@ -23,8 +24,10 @@ import { FloatingActionMenu } from './FloatingActionMenu';
 import { InlineSuggestion } from './InlineSuggestion';
 import { SuggestionMark } from './SuggestionMark';
 import { SuggestionPopover } from './SuggestionPopover';
+import { SectionNode, preprocessSectionMarkers, postprocessSectionMarkers } from './SectionNode';
+import { SectionGroundingGutter } from './SectionGroundingGutter';
 import { documentsAPI } from '@/lib/api/documents';
-import type { CaseDocument } from '@/lib/types/case';
+import type { CaseDocument, BriefSection } from '@/lib/types/case';
 import type { BriefSectionSuggestion } from '@/components/cases/BriefSuggestion';
 
 interface DocumentVersion {
@@ -55,6 +58,14 @@ interface BriefEditorProps {
   suggestions?: BriefSectionSuggestion[];
   onAcceptSuggestion?: (suggestion: BriefSectionSuggestion, editedContent?: string) => void;
   onRejectSuggestion?: (suggestion: BriefSectionSuggestion) => void;
+  /** Section data for grounding gutter (optional — gutter only renders when provided) */
+  sections?: BriefSection[];
+  /** Currently active section ID (marker ID, e.g. "sf-abc12345") */
+  activeSectionId?: string | null;
+  /** Called when cursor moves into a different section */
+  onActiveSectionChange?: (sectionId: string | null) => void;
+  /** Hide the built-in header (when embedded in UnifiedBriefView which has its own header) */
+  hideHeader?: boolean;
 }
 
 export function BriefEditor({
@@ -66,6 +77,10 @@ export function BriefEditor({
   suggestions,
   onAcceptSuggestion,
   onRejectSuggestion,
+  sections,
+  activeSectionId,
+  onActiveSectionChange,
+  hideHeader = false,
 }: BriefEditorProps) {
   const [content, setContent] = useState(document.content_markdown);
   const [debouncedContent] = useDebounce(content, 1000); // 1s delay
@@ -86,6 +101,9 @@ export function BriefEditor({
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
+  // Preprocess content to convert section markers for TipTap
+  const initialContent = preprocessSectionMarkers(document.content_markdown);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -103,8 +121,9 @@ export function BriefEditor({
         placeholder: 'Start writing your brief... Use [[document-name]] to cite other documents.',
       }),
       SuggestionMark,
+      SectionNode,
     ],
-    content: document.content_markdown,
+    content: initialContent,
     editorProps: {
       attributes: {
         class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] px-6 py-4',
@@ -127,8 +146,10 @@ export function BriefEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      const markdown = editor.getHTML(); // Get HTML for now, can parse to markdown later
-      setContent(markdown);
+      // Postprocess to convert section marker divs back to comments for storage
+      const html = editor.getHTML();
+      const processed = postprocessSectionMarkers(html);
+      setContent(processed);
     },
     onSelectionUpdate: ({ editor }) => {
       const { from, to } = editor.state.selection;
@@ -147,6 +168,27 @@ export function BriefEditor({
         }
       } else {
         setShowFloatingMenu(false);
+      }
+
+      // Track which section the cursor is in
+      if (onActiveSectionChange && sections) {
+        const resolved = editor.state.doc.resolve(from);
+        let sectionId: string | null = null;
+
+        // Walk backwards through the document to find the nearest section marker
+        for (let pos = from; pos >= 0; pos--) {
+          try {
+            const node = editor.state.doc.nodeAt(pos);
+            if (node?.type.name === 'sectionMarker') {
+              sectionId = node.attrs.sectionId;
+              break;
+            }
+          } catch {
+            // Position may be invalid, continue searching
+          }
+        }
+
+        onActiveSectionChange(sectionId);
       }
     },
   });
@@ -271,7 +313,8 @@ export function BriefEditor({
     try {
       const result = await documentsAPI.restoreVersion(document.id, versionId);
       if (result.success && editor) {
-        editor.commands.setContent(result.content);
+        const preprocessed = preprocessSectionMarkers(result.content);
+        editor.commands.setContent(preprocessed);
         setContent(result.content);
         setLastSaved(new Date());
         // Refresh version list to show the restore snapshot
@@ -284,39 +327,72 @@ export function BriefEditor({
     }
   }, [document.id, editor, loadVersionHistory]);
 
+  // Scroll to a section marker in the editor
+  const scrollToSection = useCallback((sectionId: string) => {
+    if (!editorContainerRef.current) return;
+    const marker = editorContainerRef.current.querySelector(`[data-section-id="${sectionId}"]`);
+    if (marker) {
+      marker.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
+  const showGutter = !!sections && sections.length > 0;
+
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col h-full bg-white dark:bg-neutral-950">
       {/* Header with title, save status, and version history */}
-      <div className="border-b border-neutral-200 px-6 py-4 flex items-center justify-between bg-white">
-        <div>
-          <h1 className="text-lg font-semibold text-neutral-900">
-            {document.title}
-          </h1>
-          <p className="text-sm text-neutral-600">
-            {document.document_type === 'case_brief' ? 'Case Brief' : 'Inquiry Brief'} • Edit freely
-          </p>
+      {!hideHeader && (
+        <div className="border-b border-neutral-200 dark:border-neutral-800 px-6 py-4 flex items-center justify-between bg-white dark:bg-neutral-950">
+          <div>
+            <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+              {document.title}
+            </h1>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              {document.document_type === 'case_brief' ? 'Case Brief' : 'Inquiry Brief'} • Edit freely
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-neutral-500">
+              {isSaving && 'Saving...'}
+              {!isSaving && lastSaved && `Saved ${lastSaved.toLocaleTimeString()}`}
+            </div>
+            <button
+              onClick={handleToggleVersionHistory}
+              className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+                showVersionHistory
+                  ? 'bg-accent-50 border-accent-200 text-accent-700'
+                  : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+              }`}
+            >
+              History
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-sm text-neutral-500">
+      )}
+
+      {/* Save status bar (when header is hidden, show compact status) */}
+      {hideHeader && (
+        <div className="flex items-center justify-between px-4 py-1.5 border-b border-neutral-100 dark:border-neutral-900 bg-neutral-50/50 dark:bg-neutral-900/50">
+          <div className="text-xs text-neutral-400">
             {isSaving && 'Saving...'}
             {!isSaving && lastSaved && `Saved ${lastSaved.toLocaleTimeString()}`}
           </div>
           <button
             onClick={handleToggleVersionHistory}
-            className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+            className={`text-xs px-2 py-1 rounded-md border transition-colors ${
               showVersionHistory
                 ? 'bg-accent-50 border-accent-200 text-accent-700'
-                : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800'
             }`}
           >
             History
           </button>
         </div>
-      </div>
+      )}
 
       {/* Version History Panel (slides down) */}
       {showVersionHistory && (
-        <div className="border-b border-neutral-200 bg-neutral-50 max-h-64 overflow-y-auto">
+        <div className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 max-h-64 overflow-y-auto">
           <div className="px-6 py-3">
             <h3 className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
               Version History
@@ -330,7 +406,7 @@ export function BriefEditor({
                 {versions.map((v) => (
                   <div
                     key={v.id}
-                    className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-neutral-100 group"
+                    className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 group"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -369,9 +445,25 @@ export function BriefEditor({
       {/* Toolbar */}
       <EditorToolbar editor={editor} />
 
-      {/* Editor */}
-      <div className="flex-1 overflow-y-auto">
-        <EditorContent editor={editor} />
+      {/* Editor area with optional grounding gutter */}
+      <div ref={editorContainerRef} className="flex-1 overflow-y-auto flex">
+        {/* Grounding gutter — only renders when sections are provided */}
+        {showGutter && (
+          <SectionGroundingGutter
+            sections={sections!}
+            activeSectionId={activeSectionId ?? null}
+            editorContainerRef={editorContainerRef}
+            onSectionClick={(sectionId) => {
+              onActiveSectionChange?.(sectionId);
+              scrollToSection(sectionId);
+            }}
+          />
+        )}
+
+        {/* Editor content */}
+        <div className="flex-1 min-w-0">
+          <EditorContent editor={editor} />
+        </div>
       </div>
 
       {/* Citation autocomplete */}

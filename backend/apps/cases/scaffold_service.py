@@ -81,6 +81,7 @@ class CaseScaffoldService:
         user: User,
         project_id: uuid.UUID,
         thread_id: Optional[uuid.UUID] = None,
+        skill_context: Optional[dict] = None,
     ) -> dict:
         """
         Extract structure from scaffolding chat and create full case.
@@ -90,12 +91,26 @@ class CaseScaffoldService:
             user: User creating the case
             project_id: Project to create case in
             thread_id: Optional thread ID for provenance
+            skill_context: Optional skill context dict from build_skill_context()
+                          (enhances LLM extraction with domain knowledge)
 
         Returns:
             Dict with: case, brief, inquiries, sections, signals
         """
-        # 1. Extract structure via LLM
-        extraction = await cls._extract_structure(transcript)
+        # 1. Extract structure via LLM (skill-aware if context provided)
+        extraction = await cls._extract_structure(transcript, skill_context=skill_context)
+
+        # 1b. Generate a concise case title (keep extraction.decision_question intact)
+        case_title = extraction.decision_question[:200] if extraction.decision_question else "Untitled Case"
+        if extraction.decision_question and len(extraction.decision_question) > 60:
+            from apps.intelligence.title_generator import generate_case_title
+            short_title = await generate_case_title(
+                signals=[],
+                conversation_summary=extraction.decision_question,
+                max_length=60,
+            )
+            if short_title:
+                case_title = short_title
 
         # 2. Create case and all related objects
         result = cls._create_scaffolded_case(
@@ -103,6 +118,7 @@ class CaseScaffoldService:
             user=user,
             project_id=project_id,
             thread_id=thread_id,
+            case_title=case_title,
         )
 
         # 3. Emit scaffolding event
@@ -130,6 +146,7 @@ class CaseScaffoldService:
         project_id: uuid.UUID,
         decision_question: Optional[str] = None,
         thread_id: Optional[uuid.UUID] = None,
+        skill_sections: Optional[list[dict]] = None,
     ) -> dict:
         """
         Create a blank case with minimal structure.
@@ -157,7 +174,7 @@ class CaseScaffoldService:
             )
 
             # Generate minimal brief markdown with section markers
-            sections_data = cls._generate_minimal_sections(title, decision_question)
+            sections_data = cls._generate_minimal_sections(title, decision_question, skill_sections=skill_sections)
             brief_markdown = cls._build_brief_markdown(title, sections_data)
 
             # Update brief content
@@ -179,6 +196,21 @@ class CaseScaffoldService:
                 )
                 sections.append(section)
 
+            # Bootstrap investigation plan (minimal — no assumptions or criteria)
+            try:
+                from apps.cases.plan_service import PlanService
+                PlanService.create_initial_plan(
+                    case=case,
+                    analysis={
+                        'assumptions': [],
+                        'decision_criteria': [],
+                        'position_draft': '',
+                    },
+                    inquiries=[],
+                )
+            except Exception as e:
+                logger.warning(f"Could not auto-create plan for case {case.id}: {e}")
+
             return {
                 'case': case,
                 'brief': brief,
@@ -188,9 +220,17 @@ class CaseScaffoldService:
             }
 
     @classmethod
-    async def _extract_structure(cls, transcript: list[dict]) -> ScaffoldExtraction:
+    async def _extract_structure(
+        cls,
+        transcript: list[dict],
+        skill_context: Optional[dict] = None,
+    ) -> ScaffoldExtraction:
         """
         Use LLM to extract decision structure from chat transcript.
+
+        When skill_context is provided, domain knowledge is injected into
+        the system prompt so the LLM can extract more relevant uncertainties,
+        assumptions, and domain-specific constraints.
         """
         provider = get_llm_provider('fast')
 
@@ -202,11 +242,21 @@ class CaseScaffoldService:
 
         prompt = SCAFFOLD_EXTRACTION_PROMPT.format(transcript=formatted)
 
+        # Build system prompt — optionally enhanced with domain knowledge
+        system_prompt = "You extract decision structures from conversations. Return only valid JSON."
+        if skill_context and skill_context.get('system_prompt_extension'):
+            system_prompt += (
+                "\n\nYou have domain expertise that should inform your extraction. "
+                "Use this knowledge to identify domain-specific uncertainties, "
+                "constraints, and assumptions that a generalist might miss.\n"
+                + skill_context['system_prompt_extension']
+            )
+
         # Call LLM
         full_response = ""
         async for chunk in provider.stream_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="You extract decision structures from conversations. Return only valid JSON."
+            system_prompt=system_prompt
         ):
             full_response += chunk.content
 
@@ -239,6 +289,7 @@ class CaseScaffoldService:
         user: User,
         project_id: uuid.UUID,
         thread_id: Optional[uuid.UUID] = None,
+        case_title: Optional[str] = None,
     ) -> dict:
         """
         Create the full case from extracted structure.
@@ -257,7 +308,7 @@ class CaseScaffoldService:
         # 1. Create case
         case, brief = CaseService.create_case(
             user=user,
-            title=extraction.decision_question[:200],  # Title from question
+            title=case_title or extraction.decision_question[:200],
             position=extraction.initial_position or '',
             stakes=stakes_map.get(extraction.stakes_level, StakesLevel.MEDIUM),
             thread_id=thread_id,
@@ -343,6 +394,21 @@ class CaseScaffoldService:
             )
             signals.append(signal)
 
+        # 6. Bootstrap investigation plan
+        try:
+            from apps.cases.plan_service import PlanService
+            PlanService.create_initial_plan(
+                case=case,
+                analysis={
+                    'assumptions': list(extraction.assumptions) if extraction.assumptions else [],
+                    'decision_criteria': [],
+                    'position_draft': extraction.initial_position or '',
+                },
+                inquiries=inquiries,
+            )
+        except Exception as e:
+            logger.warning(f"Could not auto-create plan for case {case.id}: {e}")
+
         return {
             'case': case,
             'brief': brief,
@@ -352,14 +418,38 @@ class CaseScaffoldService:
         }
 
     @staticmethod
-    def _generate_minimal_sections(title: str, decision_question: Optional[str]) -> list[dict]:
-        """Generate section data for a minimal/blank case."""
+    def _generate_minimal_sections(
+        title: str,
+        decision_question: Optional[str],
+        skill_sections: Optional[list[dict]] = None,
+    ) -> list[dict]:
+        """
+        Generate section data for a minimal/blank case.
+
+        If skill_sections are provided (from a Skill's artifact_template),
+        they are inserted between the Decision Frame and the synthesis sections
+        (Trade-offs, Recommendation).
+        """
         sections = [
             {
                 'section_id': BriefSection.generate_section_id(),
                 'heading': 'Decision Frame',
                 'type': SectionType.DECISION_FRAME,
             },
+        ]
+
+        # Insert skill-defined sections between Decision Frame and synthesis sections
+        if skill_sections:
+            for skill_sec in skill_sections:
+                sections.append({
+                    'section_id': BriefSection.generate_section_id(),
+                    'heading': skill_sec['heading'],
+                    'type': skill_sec.get('type', SectionType.CUSTOM),
+                    'is_locked': skill_sec.get('is_locked', False),
+                    'lock_reason': skill_sec.get('lock_reason', ''),
+                })
+
+        sections.extend([
             {
                 'section_id': BriefSection.generate_section_id(),
                 'heading': 'Trade-offs & Considerations',
@@ -374,7 +464,7 @@ class CaseScaffoldService:
                 'is_locked': True,
                 'lock_reason': 'Complete your analysis to build toward a recommendation',
             },
-        ]
+        ])
         return sections
 
     @staticmethod
@@ -431,7 +521,7 @@ class CaseScaffoldService:
             elif section['type'] == SectionType.RECOMMENDATION:
                 lines.append('*Suggested — builds from your inquiry conclusions*\n')
             else:
-                lines.append('\n')
+                lines.append(f'[Analyze: {section["heading"]}]\n')
         lines.append('---')
         lines.append('*Edit freely — this is YOUR brief.*')
         return '\n'.join(lines)

@@ -6,16 +6,17 @@
  * Delegates streaming to useStreamingChat and adds:
  * - Signals state (loaded once, updated via stream)
  * - UI state (collapsed, signals expanded)
- * - Case analysis state (auto-trigger after 4 turns)
+ * - Inline action cards (driven by LLM action hints)
+ * - Case creation flow state
  *
  * Uses the shared StreamingCallbacks type.
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { chatAPI } from '@/lib/api/chat';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { signalsAPI } from '@/lib/api/signals';
 import { useStreamingChat } from './useStreamingChat';
 import type { Signal } from '@/lib/types/signal';
+import type { ActionHint, InlineActionCard } from '@/lib/types/chat';
 import type { ModeContext } from '@/lib/types/companion';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
 
@@ -26,13 +27,26 @@ interface UseChatPanelStateOptions {
   streamCallbacks?: StreamingCallbacks;
   /** Current chat mode context — forwarded to backend for system prompt selection */
   mode?: ModeContext;
+  /** Source context from "chat about" deep links — merged into context for the next message */
+  chatSource?: { source_type: string; source_id: string } | null;
   /** Auto-send this message on mount (used by Home hero input handoff) */
   initialMessage?: string;
   /** Called after initialMessage has been sent */
   onInitialMessageSent?: () => void;
 }
 
-export function useChatPanelState({ threadId, onCreateCase, streamCallbacks, mode, initialMessage, onInitialMessageSent }: UseChatPanelStateOptions) {
+export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource, initialMessage, onInitialMessageSent }: UseChatPanelStateOptions) {
+  // --- Inline action cards state ---
+  const [inlineCards, setInlineCards] = useState<InlineActionCard[]>([]);
+  const [creatingCase, setCreatingCase] = useState(false);
+
+  // Track the latest assistant message ID so we can anchor cards to it
+  const latestAssistantMessageIdRef = useRef<string | null>(null);
+
+  // Accumulate signals during a single stream so we can create an inline card on completion
+  // Uses a Map keyed by signal ID to deduplicate across multiple onSignals callbacks
+  const pendingSignalsRef = useRef<Map<string, { text: string; type: string }>>(new Map());
+
   // --- Core streaming (delegated) ---
   const streaming = useStreamingChat({
     threadId,
@@ -40,35 +54,86 @@ export function useChatPanelState({ threadId, onCreateCase, streamCallbacks, mod
       mode: mode.mode,
       caseId: mode.caseId,
       inquiryId: mode.inquiryId,
+      ...(chatSource ? { source_type: chatSource.source_type, source_id: chatSource.source_id } : {}),
     } : undefined,
     streamCallbacks: {
       ...streamCallbacks,
-      // Intercept signals to merge into local state
+      // Intercept signals to merge into local state + accumulate for inline card
       onSignals: (newSignals) => {
         setSignals(prev => {
           const existingIds = new Set(prev.map(s => s.id));
           const unique = newSignals.filter(s => !existingIds.has(s.id));
           return unique.length > 0 ? [...prev, ...unique] : prev;
         });
+        // Accumulate for inline card creation on message complete (deduplicated by ID)
+        for (const sig of newSignals) {
+          if (!pendingSignalsRef.current.has(sig.id)) {
+            pendingSignalsRef.current.set(sig.id, { text: sig.text, type: sig.type });
+          }
+        }
         // Also forward to parent
         streamCallbacks?.onSignals?.(newSignals);
       },
-      // Intercept onMessageComplete for case analysis trigger
+      // Track latest assistant message + create signals inline card
       onMessageComplete: (messageId) => {
-        conversationTurns.current += 1;
-        streamCallbacks?.onMessageComplete?.(messageId);
+        if (messageId) {
+          latestAssistantMessageIdRef.current = messageId;
 
-        // Trigger case analysis after 4 turns
-        if (conversationTurns.current >= 4 && onCreateCase && !showCaseSuggestion && !analyzing) {
-          setAnalyzing(true);
-          chatAPI.analyzeForCase(threadId).then(analysis => {
-            setCaseAnalysis(analysis);
-            setShowCaseSuggestion(true);
-          }).catch(err => {
-            console.error('Failed to analyze for case:', err);
-          }).finally(() => {
-            setAnalyzing(false);
-          });
+          // Create signals_collapsed inline card if signals were extracted during this stream
+          const pending = Array.from(pendingSignalsRef.current.values());
+          if (pending.length > 0) {
+            const newCard: InlineActionCard = {
+              id: `signals-${messageId}`,
+              type: 'signals_collapsed',
+              afterMessageId: messageId,
+              data: { signals: pending, totalCount: pending.length },
+              createdAt: new Date().toISOString(),
+            };
+            setInlineCards(prev => [...prev, newCard]);
+            pendingSignalsRef.current = new Map();
+          }
+        }
+        streamCallbacks?.onMessageComplete?.(messageId);
+      },
+      // Convert action hints to inline cards
+      onActionHints: (hints: ActionHint[]) => {
+        // Forward to parent (companion panel) first
+        streamCallbacks?.onActionHints?.(hints);
+
+        // Convert suggest_case hints to inline cards
+        const caseHint = hints.find(h => h.type === 'suggest_case');
+        if (caseHint && latestAssistantMessageIdRef.current) {
+          const cardId = `case-suggestion-${Date.now()}`;
+          const newCard: InlineActionCard = {
+            id: cardId,
+            type: 'case_creation_prompt',
+            afterMessageId: latestAssistantMessageIdRef.current,
+            data: {
+              aiReason: caseHint.reason,
+              suggestedTitle: (caseHint.data as Record<string, unknown>).suggested_title,
+              signalCount: (caseHint.data as Record<string, unknown>).signal_count || 0,
+            },
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
+        }
+
+        // Convert suggest_plan_diff hints to plan diff proposal cards
+        const planDiffHint = hints.find(h => h.type === 'suggest_plan_diff');
+        if (planDiffHint && latestAssistantMessageIdRef.current) {
+          const hintData = planDiffHint.data as Record<string, unknown>;
+          const newCard: InlineActionCard = {
+            id: `plan-diff-${Date.now()}`,
+            type: 'plan_diff_proposal',
+            afterMessageId: latestAssistantMessageIdRef.current,
+            data: {
+              diffSummary: planDiffHint.reason,
+              proposedContent: hintData.proposed_content,
+              diffData: hintData.diff_data,
+            },
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
         }
       },
     },
@@ -81,14 +146,18 @@ export function useChatPanelState({ threadId, onCreateCase, streamCallbacks, mod
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [signalsExpanded, setSignalsExpanded] = useState(false);
 
-  // --- Case analysis state ---
-  const [showCaseSuggestion, setShowCaseSuggestion] = useState(false);
-  const [caseAnalysis, setCaseAnalysis] = useState<any>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [creatingCase, setCreatingCase] = useState(false);
-  const [showAssembly, setShowAssembly] = useState(false);
+  // --- Card actions ---
+  const dismissCard = useCallback((cardId: string) => {
+    setInlineCards(prev =>
+      prev.map(card =>
+        card.id === cardId ? { ...card, dismissed: true } : card
+      )
+    );
+  }, []);
 
-  const conversationTurns = useRef(0);
+  const addInlineCard = useCallback((card: InlineActionCard) => {
+    setInlineCards(prev => [...prev, card]);
+  }, []);
 
   // Load signals once on thread change
   useEffect(() => {
@@ -133,9 +202,16 @@ export function useChatPanelState({ threadId, onCreateCase, streamCallbacks, mod
     }
   }, [initialMessage, streaming.isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Wrap sendMessage to clear pending signals before each new message
+  const sendMessage = useCallback(async (content: string) => {
+    pendingSignalsRef.current = new Map();
+    return streaming.sendMessage(content);
+  }, [streaming.sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
-    // Core streaming state (spread from useStreamingChat)
+    // Core streaming state (spread from useStreamingChat, with wrapped sendMessage)
     ...streaming,
+    sendMessage,
 
     // Signals
     signals,
@@ -146,13 +222,11 @@ export function useChatPanelState({ threadId, onCreateCase, streamCallbacks, mod
     isCollapsed,
     setIsCollapsed,
 
-    // Case analysis
-    showCaseSuggestion,
-    setShowCaseSuggestion,
-    caseAnalysis,
+    // Inline action cards
+    inlineCards,
+    addInlineCard,
+    dismissCard,
     creatingCase,
     setCreatingCase,
-    showAssembly,
-    setShowAssembly,
   };
 }

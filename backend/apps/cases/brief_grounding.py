@@ -12,6 +12,7 @@ import logging
 from typing import Dict, List, Any
 
 from django.db import models, transaction
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from apps.cases.brief_models import (
@@ -19,7 +20,8 @@ from apps.cases.brief_models import (
     GroundingStatus, AnnotationType, AnnotationPriority,
 )
 from apps.common.graph_utils import GraphUtils
-from apps.signals.models import Signal
+from apps.projects.models import Evidence as ProjectEvidence
+from apps.signals.models import Signal, SignalType
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +42,17 @@ class BriefGroundingEngine:
     """
 
     @staticmethod
-    def compute_section_grounding(section: BriefSection) -> Dict[str, Any]:
+    def compute_section_grounding(section: BriefSection, evidence_threshold: str = 'medium') -> Dict[str, Any]:
         """
         Compute grounding status for a single section.
 
         For inquiry_brief sections: follows section → inquiry → signals + evidence.
         For custom sections with tagged_signals: computes from tagged signals.
         For unlinked sections: returns empty grounding.
+
+        Args:
+            section: The BriefSection to compute grounding for.
+            evidence_threshold: 'low', 'medium', or 'high' — controls STRONG/MODERATE thresholds.
 
         Returns:
             {
@@ -72,10 +78,10 @@ class BriefGroundingEngine:
         }
 
         if section.inquiry:
-            return BriefGroundingEngine._compute_from_inquiry(section.inquiry, result)
+            return BriefGroundingEngine._compute_from_inquiry(section.inquiry, result, evidence_threshold)
         elif section.is_linked and section.tagged_signals.exists():
             return BriefGroundingEngine._compute_from_signals(
-                section.tagged_signals.all(), result
+                section.tagged_signals.all(), result, evidence_threshold
             )
         else:
             # Decision frame sections get "set" status if decision_question exists
@@ -88,7 +94,7 @@ class BriefGroundingEngine:
             return result
 
     @staticmethod
-    def _compute_from_inquiry(inquiry, result: Dict) -> Dict:
+    def _compute_from_inquiry(inquiry, result: Dict, evidence_threshold: str = 'medium') -> Dict:
         """Compute grounding from an inquiry's evidence and signals."""
         # Count evidence by direction
         evidence_items = inquiry.evidence_items.all()
@@ -104,22 +110,33 @@ class BriefGroundingEngine:
         # Count unvalidated assumptions
         assumptions = Signal.objects.filter(
             inquiry=inquiry,
-            type='Assumption',
+            type=SignalType.ASSUMPTION,
             dismissed_at__isnull=True,
+        ).annotate(
+            has_supporting=Exists(
+                ProjectEvidence.objects.filter(supports_signals=OuterRef('pk'))
+            ),
         )
-        for assumption in assumptions:
-            has_evidence = assumption.supported_by_evidence.exists()
-            if not has_evidence:
-                result['unvalidated_assumptions'] += 1
+        result['unvalidated_assumptions'] = assumptions.filter(has_supporting=False).count()
 
         # Count tensions (contradicting signals)
-        signals = inquiry.related_signals.filter(dismissed_at__isnull=True)
-        tension_count = 0
-        for signal in signals:
-            contradictions = signal.contradicts.filter(dismissed_at__isnull=True)
-            contradicted_by = signal.contradicted_by.filter(dismissed_at__isnull=True)
-            if contradictions.exists() or contradicted_by.exists():
-                tension_count += 1
+        signals = inquiry.related_signals.filter(dismissed_at__isnull=True).annotate(
+            has_contradictions=Exists(
+                Signal.objects.filter(
+                    contradicted_by=OuterRef('pk'),
+                    dismissed_at__isnull=True,
+                )
+            ),
+            has_contradicted_by=Exists(
+                Signal.objects.filter(
+                    contradicts=OuterRef('pk'),
+                    dismissed_at__isnull=True,
+                )
+            ),
+        )
+        tension_count = signals.filter(
+            models.Q(has_contradictions=True) | models.Q(has_contradicted_by=True)
+        ).count()
         # Deduplicate (A contradicts B counts once, not twice)
         result['tensions_count'] = tension_count // 2 if tension_count > 1 else tension_count
 
@@ -130,11 +147,11 @@ class BriefGroundingEngine:
                 result['confidence_avg'] = round(sum(confidences) / len(confidences), 2)
 
         # Determine status
-        result['status'] = BriefGroundingEngine._determine_status(result)
+        result['status'] = BriefGroundingEngine._determine_status(result, evidence_threshold)
         return result
 
     @staticmethod
-    def _compute_from_signals(signals, result: Dict) -> Dict:
+    def _compute_from_signals(signals, result: Dict, evidence_threshold: str = 'medium') -> Dict:
         """Compute grounding from tagged signals (custom sections)."""
         for signal in signals:
             # Check for evidence
@@ -145,19 +162,32 @@ class BriefGroundingEngine:
             result['evidence_count'] += supporting + contradicting
 
             # Check for unvalidated assumptions
-            if signal.type == 'Assumption' and not signal.supported_by_evidence.exists():
+            if signal.type == SignalType.ASSUMPTION and not signal.supported_by_evidence.exists():
                 result['unvalidated_assumptions'] += 1
 
             # Check for tensions
             if signal.contradicts.exists() or signal.contradicted_by.exists():
                 result['tensions_count'] += 1
 
-        result['status'] = BriefGroundingEngine._determine_status(result)
+        result['status'] = BriefGroundingEngine._determine_status(result, evidence_threshold)
         return result
 
+    # Evidence threshold presets: {strong_min, moderate_min, strong_requires_no_unvalidated}
+    EVIDENCE_THRESHOLDS = {
+        'low': {'strong_min': 1, 'moderate_min': 1, 'strong_requires_no_unvalidated': False},
+        'medium': {'strong_min': 3, 'moderate_min': 1, 'strong_requires_no_unvalidated': True},
+        'high': {'strong_min': 5, 'moderate_min': 2, 'strong_requires_no_unvalidated': True},
+    }
+
     @staticmethod
-    def _determine_status(data: Dict) -> str:
-        """Determine GroundingStatus from computed data."""
+    def _determine_status(data: Dict, evidence_threshold: str = 'medium') -> str:
+        """Determine GroundingStatus from computed data.
+
+        Args:
+            data: Computed grounding data dict.
+            evidence_threshold: 'low', 'medium', or 'high' — controls how
+                much evidence is required for STRONG / MODERATE.
+        """
         evidence = data['evidence_count']
         tensions = data['tensions_count']
         unvalidated = data['unvalidated_assumptions']
@@ -171,10 +201,19 @@ class BriefGroundingEngine:
         if evidence == 0 and unvalidated > 0:
             return GroundingStatus.WEAK
 
-        if evidence >= 3 and unvalidated == 0:
+        thresholds = BriefGroundingEngine.EVIDENCE_THRESHOLDS.get(
+            evidence_threshold,
+            BriefGroundingEngine.EVIDENCE_THRESHOLDS['medium'],
+        )
+
+        strong_ok = evidence >= thresholds['strong_min']
+        if thresholds['strong_requires_no_unvalidated']:
+            strong_ok = strong_ok and unvalidated == 0
+
+        if strong_ok:
             return GroundingStatus.STRONG
 
-        if evidence >= 1:
+        if evidence >= thresholds['moderate_min']:
             return GroundingStatus.MODERATE
 
         return GroundingStatus.WEAK
@@ -215,7 +254,70 @@ class BriefGroundingEngine:
                     section, inquiry
                 )
 
+            # Check for low-credibility evidence (user ratings 1-2 stars)
+            try:
+                annotations.extend(
+                    BriefGroundingEngine._check_low_credibility(inquiry)
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Low-credibility check failed for inquiry {inquiry.id}: {e}"
+                )
+
         return annotations
+
+    @staticmethod
+    def _check_low_credibility(inquiry) -> List[Dict[str, Any]]:
+        """
+        Check if the majority of rated evidence for an inquiry has low
+        user credibility (1-2 stars).
+
+        Looks up user_credibility_rating from projects.Evidence via the
+        shared document chunk links on the inquiry's evidence items.
+
+        Returns a list with zero or one annotation dicts.
+        """
+        from apps.projects.models import Evidence as ProjectEvidence
+
+        # Collect all source chunk IDs from the inquiry's evidence items
+        evidence_items = inquiry.evidence_items.all()
+        chunk_ids = set()
+        for item in evidence_items:
+            chunk_ids.update(
+                item.source_chunks.values_list('id', flat=True)
+            )
+
+        if not chunk_ids:
+            return []
+
+        # Find project-level evidence with user ratings for those chunks
+        rated_evidence = ProjectEvidence.objects.filter(
+            chunk_id__in=chunk_ids,
+            user_credibility_rating__isnull=False,
+        ).values_list('user_credibility_rating', flat=True)
+
+        rated_list = list(rated_evidence)
+        if not rated_list:
+            return []
+
+        low_count = sum(1 for r in rated_list if r <= 2)
+        total_rated = len(rated_list)
+
+        # Majority means more than half of rated evidence is low
+        if low_count > total_rated / 2:
+            return [{
+                'type': AnnotationType.LOW_CREDIBILITY,
+                'description': (
+                    f'{low_count} of {total_rated} rated evidence item(s) '
+                    f'have low credibility (1-2 stars). '
+                    f'This section may rely on weak sources.'
+                ),
+                'priority': AnnotationPriority.IMPORTANT,
+                'signal_ids': [],
+                'inquiry_id': inquiry.id,
+            }]
+
+        return []
 
     @staticmethod
     def _annotations_from_patterns(
@@ -345,7 +447,7 @@ class BriefGroundingEngine:
                     })
 
         # Ungrounded assumptions
-        for assumption in signals.filter(type='Assumption'):
+        for assumption in signals.filter(type=SignalType.ASSUMPTION):
             if not assumption.supported_by_evidence.exists():
                 annotations.append({
                     'type': AnnotationType.UNGROUNDED,
@@ -367,7 +469,7 @@ class BriefGroundingEngine:
             })
 
         # Well-grounded claims
-        for claim in signals.filter(type='Claim'):
+        for claim in signals.filter(type=SignalType.CLAIM):
             supporting = claim.supported_by_evidence.count()
             if supporting >= 2 and not claim.contradicted_by_evidence.exists():
                 annotations.append({
@@ -468,7 +570,14 @@ class BriefGroundingEngine:
     def _evolve_brief_inner(cls, case) -> Dict[str, Any]:
         """Inner evolution logic, runs within a transaction."""
         brief = case.main_brief
-        sections = BriefSection.objects.filter(brief=brief).select_related('inquiry')
+        sections = BriefSection.objects.filter(brief=brief).select_related('inquiry').prefetch_related(
+            'annotations',
+            'annotations__source_signals',
+        )
+
+        # Read per-case investigation preferences
+        prefs = getattr(case, 'investigation_preferences', None) or {}
+        evidence_threshold = prefs.get('evidence_threshold', 'medium')
 
         updated_sections = []
         new_annotations = []
@@ -476,7 +585,7 @@ class BriefGroundingEngine:
 
         for section in sections:
             # 1. Recompute grounding
-            grounding = cls.compute_section_grounding(section)
+            grounding = cls.compute_section_grounding(section, evidence_threshold)
             old_status = section.grounding_status
             new_status = grounding.pop('status')
 
@@ -580,7 +689,22 @@ def _update_locked_sections(brief, sections):
 
     Recommendation unlocks when all inquiry sections are at least 'moderate'.
     Trade-offs/synthesis unlock when at least one inquiry section has evidence.
+
+    If the case's investigation_preferences has disable_locks=True, all
+    synthesis/recommendation sections are immediately unlocked.
     """
+    # Check for per-case lock override
+    case = brief.case
+    prefs = getattr(case, 'investigation_preferences', None) or {}
+    if prefs.get('disable_locks'):
+        for section in sections:
+            if section.section_type in ('recommendation', 'synthesis', 'trade_offs'):
+                if section.is_locked:
+                    section.is_locked = False
+                    section.lock_reason = ''
+                    section.save(update_fields=['is_locked', 'lock_reason', 'updated_at'])
+        return
+
     inquiry_sections = [s for s in sections if s.section_type == 'inquiry_brief']
 
     # Count inquiry grounding states

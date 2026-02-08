@@ -13,12 +13,20 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
-import asyncio
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
-from apps.common.llm_providers import get_llm_provider
+from asgiref.sync import async_to_sync
+
+from apps.cases.constants import (
+    EVIDENCE_MATCH_PREFIX_LEN,
+    EVIDENCE_MATCH_LIMIT,
+    EVIDENCE_CLAIM_TEXT_LIMIT,
+    EVIDENCE_EMBEDDING_SIMILARITY_THRESHOLD,
+)
+
+from apps.common.llm_providers import get_llm_provider, stream_json, stream_and_collect, strip_markdown_fences
 from apps.common.embeddings import generate_embedding
 from apps.signals.similarity import cosine_similarity
 
@@ -92,6 +100,93 @@ def extract_and_link_claims(
     }
 
 
+def persist_evidence_links(
+    linked_claims: List[Dict[str, Any]],
+    case_id: str,
+) -> Dict[str, int]:
+    """
+    Persist evidence-to-signal relationships from linker results.
+
+    For each substantiated claim with linked signals, find the corresponding
+    Evidence record and populate the supports_signals M2M field.
+
+    Strategy:
+    1. Fast text prefix match (icontains)
+    2. Embedding-based semantic match as fallback
+
+    Returns: {links_created: int, signals_linked: int}
+    """
+    from apps.projects.models import Evidence as ProjectEvidence
+    from apps.signals.models import Signal
+
+    links_created = 0
+    signals_linked = set()
+
+    # Pre-fetch all case evidence once to avoid repeated queries
+    case_evidence = list(
+        ProjectEvidence.objects.filter(
+            document__case_id=case_id,
+        ).only('id', 'text', 'embedding')[:200]  # Cap for large cases
+    )
+
+    if not case_evidence:
+        return {'links_created': 0, 'signals_linked': 0}
+
+    for claim in linked_claims:
+        if not claim.get('is_substantiated') or not claim.get('linked_signals'):
+            continue
+
+        signal_ids = [
+            link['signal_id'] for link in claim['linked_signals']
+            if link.get('signal_id')
+        ]
+        if not signal_ids:
+            continue
+
+        signals = Signal.objects.filter(id__in=signal_ids)
+        if not signals.exists():
+            continue
+
+        claim_text = claim.get('text', '')
+        if not claim_text:
+            continue
+
+        # Strategy 1: Fast text prefix match
+        prefix = claim_text[:EVIDENCE_MATCH_PREFIX_LEN].lower()
+        matching = [
+            e for e in case_evidence
+            if prefix in (e.text or '').lower()
+        ][:EVIDENCE_MATCH_LIMIT]
+
+        # Strategy 2: Embedding fallback if no text match
+        if not matching:
+            try:
+                claim_embedding = generate_embedding(claim_text[:500])
+                if claim_embedding:
+                    scored = []
+                    for e in case_evidence:
+                        e_embedding = getattr(e, 'embedding', None)
+                        if e_embedding:
+                            score = cosine_similarity(claim_embedding, e_embedding)
+                            if score >= EVIDENCE_EMBEDDING_SIMILARITY_THRESHOLD:
+                                scored.append((score, e))
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    matching = [e for _, e in scored[:EVIDENCE_MATCH_LIMIT]]
+            except Exception as e:
+                logger.debug("Embedding fallback failed for claim: %s", e)
+
+        for evidence in matching:
+            for signal in signals:
+                evidence.supports_signals.add(signal)
+                links_created += 1
+                signals_linked.add(str(signal.id))
+
+    return {
+        'links_created': links_created,
+        'signals_linked': len(signals_linked),
+    }
+
+
 def _extract_claims(content: str, provider) -> List[Dict[str, Any]]:
     """Extract claims from document content."""
 
@@ -125,37 +220,23 @@ Return JSON array:
 Focus on substantive claims, not trivial statements.
 Return ONLY the JSON array."""
 
-    async def extract():
-        full_response = ""
-        async for chunk in provider.stream_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt="You extract claims from documents for evidence verification."
-        ):
-            full_response += chunk.content
+    claims = async_to_sync(stream_json)(
+        provider,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt="You extract claims from documents for evidence verification.",
+        fallback=[],
+        description="claim extraction",
+    )
 
-        try:
-            response_text = full_response.strip()
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
+    # Find positions in content
+    if isinstance(claims, list):
+        for claim in claims:
+            text = claim.get('text', '')
+            idx = content.find(text[:50])  # Partial match
+            claim['start_index'] = idx if idx >= 0 else 0
+            claim['end_index'] = idx + len(text) if idx >= 0 else len(text)
 
-            claims = json.loads(response_text)
-
-            # Find positions in content
-            for claim in claims:
-                text = claim.get('text', '')
-                idx = content.find(text[:50])  # Partial match
-                claim['start_index'] = idx if idx >= 0 else 0
-                claim['end_index'] = idx + len(text) if idx >= 0 else len(text)
-
-            return claims
-        except Exception as e:
-            logger.warning(f"Failed to extract claims: {e}")
-            return []
-
-    return asyncio.run(extract())
+    return claims if isinstance(claims, list) else []
 
 
 def _prefilter_signals_by_embedding(
@@ -300,77 +381,70 @@ Return JSON array matching claim indices:
 
 Return ONLY the JSON array."""
 
-    async def link():
-        full_response = ""
-        async for chunk in provider.stream_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt="You match claims to supporting evidence and assess confidence."
-        ):
-            full_response += chunk.content
+    unlinked_fallback = [
+        {
+            **claim,
+            'linked_signals': [],
+            'confidence': 0.3,
+            'is_substantiated': False,
+            'suggestion': 'Evidence matching failed.'
+        }
+        for claim in claims
+    ]
 
-        try:
-            response_text = full_response.strip()
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
+    matches = async_to_sync(stream_json)(
+        provider,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt="You match claims to supporting evidence and assess confidence.",
+        fallback=None,
+        description="claim-signal linking",
+    )
 
-            matches = json.loads(response_text)
+    if not isinstance(matches, list):
+        return unlinked_fallback
 
-            # Merge matches back into claims
-            result = []
-            for match in matches:
-                claim_idx = match.get('claim_index', 0)
-                if claim_idx < len(claims):
-                    claim = claims[claim_idx].copy()
+    try:
+        # Merge matches back into claims
+        result = []
+        for match in matches:
+            claim_idx = match.get('claim_index', 0)
+            if claim_idx < len(claims):
+                claim = claims[claim_idx].copy()
 
-                    # Resolve signal references
-                    linked = []
-                    for link in match.get('linked_signals', []):
-                        sig_idx = link.get('signal_index', 0)
-                        if sig_idx < len(signals):
-                            linked.append({
-                                'signal_id': signals[sig_idx].get('id'),
-                                'signal_type': signals[sig_idx].get('type', signals[sig_idx].get('signal_type')),
-                                'relevance': link.get('relevance', 0.5),
-                                'excerpt': link.get('excerpt', '')
-                            })
+                # Resolve signal references
+                linked = []
+                for link_item in match.get('linked_signals', []):
+                    sig_idx = link_item.get('signal_index', 0)
+                    if sig_idx < len(signals):
+                        linked.append({
+                            'signal_id': signals[sig_idx].get('id'),
+                            'signal_type': signals[sig_idx].get('type', signals[sig_idx].get('signal_type')),
+                            'relevance': link_item.get('relevance', 0.5),
+                            'excerpt': link_item.get('excerpt', '')
+                        })
 
-                    claim['linked_signals'] = linked
-                    claim['confidence'] = match.get('confidence', 0.5)
-                    claim['is_substantiated'] = match.get('is_substantiated', False)
-                    claim['suggestion'] = match.get('suggestion')
-                    result.append(claim)
+                claim['linked_signals'] = linked
+                claim['confidence'] = match.get('confidence', 0.5)
+                claim['is_substantiated'] = match.get('is_substantiated', False)
+                claim['suggestion'] = match.get('suggestion')
+                result.append(claim)
 
-            # Add any claims that weren't in the matches
-            matched_indices = {m.get('claim_index') for m in matches}
-            for i, claim in enumerate(claims):
-                if i not in matched_indices:
-                    result.append({
-                        **claim,
-                        'linked_signals': [],
-                        'confidence': 0.3,
-                        'is_substantiated': False,
-                        'suggestion': 'No matching evidence found.'
-                    })
-
-            return result
-        except Exception as e:
-            logger.warning(f"Failed to link claims: {e}")
-            # Return claims without links
-            return [
-                {
+        # Add any claims that weren't in the matches
+        matched_indices = {m.get('claim_index') for m in matches}
+        for i, claim in enumerate(claims):
+            if i not in matched_indices:
+                result.append({
                     **claim,
                     'linked_signals': [],
                     'confidence': 0.3,
                     'is_substantiated': False,
-                    'suggestion': 'Evidence matching failed.'
-                }
-                for claim in claims
-            ]
+                    'suggestion': 'No matching evidence found.'
+                })
 
-    return asyncio.run(link())
+        return result
+    except Exception as e:
+        logger.warning(f"Failed to process claim links: {e}")
+        return unlinked_fallback
 
 
 def get_evidence_suggestions(
@@ -417,27 +491,13 @@ Return JSON array:
 
 Return ONLY the JSON array."""
 
-    async def suggest():
-        full_response = ""
-        async for chunk in provider.stream_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt="You suggest evidence sources for decision-making."
-        ):
-            full_response += chunk.content
-
-        try:
-            response_text = full_response.strip()
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
-
-            return json.loads(response_text)
-        except Exception:
-            return []
-
-    return asyncio.run(suggest())
+    return async_to_sync(stream_json)(
+        provider,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt="You suggest evidence sources for decision-making.",
+        fallback=[],
+        description="evidence suggestions",
+    )
 
 
 def create_inline_citations(

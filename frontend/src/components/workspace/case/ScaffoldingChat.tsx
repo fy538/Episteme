@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { chatAPI } from '@/lib/api/chat';
 import { casesAPI } from '@/lib/api/cases';
+import { SkillPicker } from './SkillPicker';
 
 interface ScaffoldingChatProps {
   projectId: string;
@@ -42,7 +43,7 @@ interface ChatMessage {
   isStreaming?: boolean;
 }
 
-type ScaffoldingPhase = 'initializing' | 'chatting' | 'scaffolding' | 'complete' | 'error';
+type ScaffoldingPhase = 'picking' | 'initializing' | 'chatting' | 'scaffolding' | 'complete' | 'error';
 
 // Initial greeting — shown while the thread is being created
 const INITIAL_GREETING = "What decision are you working through? I'll ask a few quick questions to understand the context, then scaffold a structured case for you.";
@@ -57,7 +58,10 @@ export function ScaffoldingChat({
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [phase, setPhase] = useState<ScaffoldingPhase>('initializing');
+  // Start at 'picking' unless we're resuming from an existing thread
+  const [phase, setPhase] = useState<ScaffoldingPhase>(
+    existingThreadId ? 'initializing' : 'picking'
+  );
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [threadError, setThreadError] = useState<string | null>(null);
@@ -79,9 +83,11 @@ export function ScaffoldingChat({
     }
   }, [phase]);
 
-  // ── Initialize thread on mount ──────────────────────────────────
+  // ── Initialize thread (runs when phase transitions to 'initializing') ──
 
   useEffect(() => {
+    if (phase !== 'initializing') return;
+
     let mounted = true;
 
     async function initThread() {
@@ -187,7 +193,7 @@ export function ScaffoldingChat({
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [phase]);
 
   // ── Retry thread creation ────────────────────────────────────
   const retryInit = useCallback(async () => {
@@ -313,6 +319,41 @@ export function ScaffoldingChat({
     }
   }, [threadId, projectId, onCaseCreated]);
 
+  // ── Skill Picker handlers ────────────────────────────────────
+
+  const handleSelectPack = useCallback(async (slug: string) => {
+    // Skip the chat interview — scaffold immediately with pack template
+    setPhase('scaffolding');
+    try {
+      const result = await casesAPI.scaffoldMinimal(projectId, 'New Case', undefined, { packSlug: slug });
+      setCreatedCaseId(result.case.id);
+      setPhase('complete');
+      onCaseCreated?.(result.case.id);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to scaffold with pack');
+      setPhase('error');
+    }
+  }, [projectId, onCaseCreated]);
+
+  const handleSelectSkill = useCallback(async (skillId: string) => {
+    // Scaffold immediately using the skill
+    setPhase('scaffolding');
+    try {
+      const result = await casesAPI.scaffoldMinimal(projectId, 'New Case', undefined, { skillId });
+      setCreatedCaseId(result.case.id);
+      setPhase('complete');
+      onCaseCreated?.(result.case.id);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to scaffold with skill');
+      setPhase('error');
+    }
+  }, [projectId, onCaseCreated]);
+
+  const handleSkipPicker = useCallback(() => {
+    // Move from picking → initializing (starts the Socratic interview)
+    setPhase('initializing');
+  }, []);
+
   // ── Create blank case ─────────────────────────────────────────
 
   const handleCreateBlank = useCallback(async () => {
@@ -387,7 +428,19 @@ export function ScaffoldingChat({
         </div>
       </div>
 
+      {/* Skill Picker — shown before the chat */}
+      {phase === 'picking' && (
+        <div className="flex-1 overflow-y-auto">
+          <SkillPicker
+            onSelectPack={handleSelectPack}
+            onSelectSkill={handleSelectSkill}
+            onSkip={handleSkipPicker}
+          />
+        </div>
+      )}
+
       {/* Messages */}
+      {phase !== 'picking' && (
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {/* Initializing state */}
         {phase === 'initializing' && messages.length === 0 && (
@@ -479,7 +532,7 @@ export function ScaffoldingChat({
 
         {/* Error state */}
         {phase === 'error' && (
-          <div className="flex justify-center py-6">
+          <div className="flex justify-center py-6" role="alert">
             <div className="text-center px-6 py-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
               <p className="text-sm font-medium text-red-700 dark:text-red-300">
                 Something went wrong
@@ -487,19 +540,34 @@ export function ScaffoldingChat({
               <p className="text-xs text-red-500 dark:text-red-400 mt-1 mb-3">
                 {errorMessage}
               </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setPhase('chatting')}
-              >
-                Try Again
-              </Button>
+              <div className="flex items-center justify-center gap-2">
+                {!existingThreadId && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setErrorMessage('');
+                      setPhase('picking');
+                    }}
+                  >
+                    Back to templates
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPhase('chatting')}
+                >
+                  Try Again
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
+      )}
 
       {/* Scaffolding nudge — shown after 2+ user messages */}
       {phase === 'chatting' && userMessageCount >= 2 && !isSending && !threadError && (

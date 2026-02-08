@@ -24,8 +24,7 @@ class PlanPromptTest(TestCase):
             decomposition="simple",
             sources=SourcesConfig(),
             context={},
-            skill_instructions="",
-        )
+                    )
         self.assertIn("What are the risks of AI?", prompt)
 
     def test_includes_decomposition_guidance(self):
@@ -34,9 +33,9 @@ class PlanPromptTest(TestCase):
             decomposition="issue_spotting",
             sources=SourcesConfig(),
             context={},
-            skill_instructions="",
-        )
-        self.assertIn("issue_spotting", prompt.lower().replace("_", " ").replace("-", " ") or prompt)
+                    )
+        # issue_spotting guidance mentions "legal/analytical issues"
+        self.assertIn("legal/analytical issues", prompt)
 
     def test_includes_source_types(self):
         sources = SourcesConfig(
@@ -48,19 +47,22 @@ class PlanPromptTest(TestCase):
             decomposition="simple",
             sources=sources,
             context={},
-            skill_instructions="",
-        )
+                    )
         self.assertIn("court_opinions", prompt)
 
-    def test_includes_skill_instructions(self):
-        prompt = prompts.build_plan_prompt(
-            question="Test",
-            decomposition="simple",
-            sources=SourcesConfig(),
-            context={},
+    def test_build_system_prompt_with_skills(self):
+        """Skill instructions now live in system prompt via build_system_prompt()."""
+        system = prompts.build_system_prompt(
+            prompts.PLAN_SYSTEM,
             skill_instructions="Always prefer peer-reviewed sources.",
         )
-        self.assertIn("Always prefer peer-reviewed sources", prompt)
+        self.assertIn("Always prefer peer-reviewed sources", system)
+        self.assertIn("Domain Knowledge", system)
+
+    def test_build_system_prompt_without_skills(self):
+        """Without skills, system prompt is just the role prompt."""
+        system = prompts.build_system_prompt(prompts.PLAN_SYSTEM)
+        self.assertEqual(system, prompts.PLAN_SYSTEM)
 
     def test_includes_context(self):
         prompt = prompts.build_plan_prompt(
@@ -68,8 +70,7 @@ class PlanPromptTest(TestCase):
             decomposition="simple",
             sources=SourcesConfig(),
             context={"case_title": "FDA Analysis", "case_position": "Approve drug X"},
-            skill_instructions="",
-        )
+                    )
         self.assertIn("FDA Analysis", prompt)
 
 
@@ -83,8 +84,7 @@ class ExtractPromptTest(TestCase):
         prompt = prompts.build_extract_prompt(
             results=results,
             extract_config=ExtractConfig(),
-            skill_instructions="",
-        )
+                    )
         self.assertIn("Test Article", prompt)
 
     def test_includes_field_schema(self):
@@ -97,8 +97,7 @@ class ExtractPromptTest(TestCase):
         prompt = prompts.build_extract_prompt(
             results=[{"title": "Test", "url": "x", "snippet": "s"}],
             extract_config=config,
-            skill_instructions="",
-        )
+                    )
         self.assertIn("holding", prompt)
         self.assertIn("favorable", prompt)
 
@@ -106,8 +105,7 @@ class ExtractPromptTest(TestCase):
         prompt = prompts.build_extract_prompt(
             results=[{"title": "Test", "url": "x", "snippet": "s"}],
             extract_config=ExtractConfig(),
-            skill_instructions="",
-        )
+                    )
         # Should still produce a valid prompt for generic extraction
         self.assertTrue(len(prompt) > 50)
 
@@ -122,8 +120,7 @@ class EvaluatePromptTest(TestCase):
         prompt = prompts.build_evaluate_prompt(
             findings=findings,
             evaluate_config=EvaluateConfig(),
-            skill_instructions="",
-        )
+                    )
         self.assertIn("Article A", prompt)
 
     def test_includes_rubric(self):
@@ -131,8 +128,7 @@ class EvaluatePromptTest(TestCase):
         prompt = prompts.build_evaluate_prompt(
             findings=[{"source_title": "A", "source_url": "x", "extracted_fields": {}}],
             evaluate_config=config,
-            skill_instructions="",
-        )
+                    )
         self.assertIn("authoritative", prompt)
 
     def test_includes_criteria(self):
@@ -144,10 +140,9 @@ class EvaluatePromptTest(TestCase):
         prompt = prompts.build_evaluate_prompt(
             findings=[{"source_title": "A", "source_url": "x", "extracted_fields": {}}],
             evaluate_config=config,
-            skill_instructions="",
-        )
+                    )
         self.assertIn("Authority", prompt)
-        self.assertIn("critical", prompt)
+        self.assertIn("CRITICAL", prompt)
 
 
 class CompletenessPromptTest(TestCase):
@@ -178,23 +173,28 @@ class SynthesizePromptTest(TestCase):
             plan={"strategy_notes": "Focus on risks"},
             output_config=config,
             original_question="What about X?",
-            skill_instructions="",
-        )
+                    )
         self.assertIn("memo", prompt)
         # Citation style may be rendered as "Bluebook" with capitalization
         prompt_lower = prompt.lower()
         self.assertIn("bluebook", prompt_lower)
         self.assertIn("Summary", prompt)
 
-    def test_includes_skill_instructions(self):
+    def test_skill_instructions_in_system_prompt(self):
+        """Skill instructions are in system prompt, not user prompt."""
+        system = prompts.build_system_prompt(
+            prompts.SYNTHESIZE_SYSTEM,
+            skill_instructions="Be concise and cite everything.",
+        )
+        self.assertIn("Be concise", system)
+        # User prompt should NOT contain skill instructions
         prompt = prompts.build_synthesize_prompt(
             findings=[],
             plan={},
             output_config=OutputConfig(),
             original_question="Q?",
-            skill_instructions="Be concise and cite everything.",
         )
-        self.assertIn("Be concise", prompt)
+        self.assertNotIn("Domain Knowledge", prompt)
 
 
 class ContraryPromptTest(TestCase):
@@ -205,7 +205,8 @@ class ContraryPromptTest(TestCase):
             findings_summary=[{"source_title": "Pro-X Article", "extracted_fields": {"claim": "X is good"}}],
             original_question="Is X good?",
         )
-        self.assertIn("Pro-X Article", prompt)
+        # Contrary prompt renders extracted_fields in consensus, not source_title
+        self.assertIn("X is good", prompt)
         self.assertIn("Is X good?", prompt)
 
 

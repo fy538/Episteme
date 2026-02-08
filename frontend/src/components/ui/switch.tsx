@@ -1,9 +1,15 @@
 /**
  * Switch component - toggle switch for boolean options
+ *
+ * Uses Framer Motion spring physics for a bouncy thumb transition.
+ * Falls back to CSS translate when `prefers-reduced-motion` is active.
  */
 
 import * as React from 'react';
+import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { springConfig } from '@/lib/motion-config';
 
 export interface SwitchProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
@@ -12,10 +18,22 @@ export interface SwitchProps
 }
 
 const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
-  ({ className, label, id, onCheckedChange, onChange, ...props }, ref) => {
-    const switchId = id || `switch-${Math.random().toString(36).substr(2, 9)}`;
+  ({ className, label, id, onCheckedChange, onChange, checked, defaultChecked, ...props }, ref) => {
+    const switchId = id || `switch-${React.useId()}`;
+    const prefersReducedMotion = useReducedMotion();
+
+    // Track checked state locally so Framer Motion can animate the thumb.
+    // Supports both controlled (`checked` prop) and uncontrolled (`defaultChecked`) modes.
+    const [isChecked, setIsChecked] = React.useState(defaultChecked ?? checked ?? false);
+
+    React.useEffect(() => {
+      if (checked !== undefined) {
+        setIsChecked(checked);
+      }
+    }, [checked]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setIsChecked(e.target.checked);
       onChange?.(e);
       onCheckedChange?.(e.target.checked);
     };
@@ -35,6 +53,8 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
             id={switchId}
             className="peer sr-only"
             onChange={handleChange}
+            checked={checked}
+            defaultChecked={checked === undefined ? defaultChecked : undefined}
             ref={ref}
             {...props}
           />
@@ -46,13 +66,23 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
               'bg-primary-300'
             )}
           >
-            <span
-              className={cn(
-                'inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform',
-                'translate-x-0.5',
-                'peer-checked:translate-x-[1.375rem]'
-              )}
-            />
+            {prefersReducedMotion ? (
+              /* Reduced motion: instant CSS translate */
+              <span
+                className={cn(
+                  'inline-block h-5 w-5 rounded-full bg-white shadow-sm',
+                  'mt-0.5',
+                  isChecked ? 'translate-x-[1.375rem]' : 'translate-x-0.5'
+                )}
+              />
+            ) : (
+              /* Full motion: spring-animated thumb */
+              <motion.span
+                className="inline-block h-5 w-5 rounded-full bg-white shadow-sm mt-0.5"
+                animate={{ x: isChecked ? 22 : 2 }}
+                transition={springConfig.bouncy}
+              />
+            )}
           </span>
         </label>
         {label && (

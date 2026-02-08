@@ -80,8 +80,12 @@ class ContextBudgetTracker:
         )
 
     def estimate_tokens(self, text: str) -> int:
-        """Rough token estimate from text length."""
-        return len(text) // CHARS_PER_TOKEN
+        """Estimate tokens using tiktoken when available, else char÷4 fallback."""
+        try:
+            from apps.common.token_utils import count_tokens
+            return count_tokens(text)
+        except Exception:
+            return len(text) // CHARS_PER_TOKEN
 
     def track_prompt(self, prompt_text: str) -> None:
         """Track tokens used by a prompt."""
@@ -110,6 +114,121 @@ class ContextBudgetTracker:
             "needs_continuation": self.budget.needs_continuation,
             "can_continue": self.budget.can_continue,
             "continuations": self.budget.continuations,
+        }
+
+
+# ─── Cost Tracking ────────────────────────────────────────────────────────
+
+# Per-million-token pricing (USD). Updated as of 2025-06.
+# Source: https://docs.anthropic.com/en/docs/about-claude/models
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Anthropic
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.00, "cache_read": 0.08, "cache_write": 1.00},
+    "claude-sonnet-4-5": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-opus-4-6": {"input": 15.00, "output": 75.00, "cache_read": 1.50, "cache_write": 18.75},
+    # OpenAI
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cache_read": 0.075, "cache_write": 0.15},
+    "gpt-4o": {"input": 2.50, "output": 10.00, "cache_read": 1.25, "cache_write": 2.50},
+}
+DEFAULT_PRICING = {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75}
+
+
+@dataclass
+class LLMCallCost:
+    """Cost breakdown for a single LLM call."""
+
+    step_name: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+class CostTracker:
+    """
+    Accumulates token usage and estimated cost across a research session.
+
+    Usage:
+        tracker = CostTracker(model="claude-haiku-4-5")
+        tracker.record_call("plan", input_tokens=1200, output_tokens=400)
+        tracker.record_call("extract", input_tokens=2000, output_tokens=800,
+                            cache_read_tokens=1000)
+        print(tracker.summary())
+    """
+
+    def __init__(self, model: str = "claude-haiku-4-5"):
+        self.model = model
+        self._pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+        self._calls: list[LLMCallCost] = []
+
+    def record_call(
+        self,
+        step_name: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> LLMCallCost:
+        """Record a single LLM call's token usage and compute cost."""
+        cost = (
+            (input_tokens * self._pricing["input"])
+            + (output_tokens * self._pricing["output"])
+            + (cache_read_tokens * self._pricing["cache_read"])
+            + (cache_write_tokens * self._pricing["cache_write"])
+        ) / 1_000_000  # pricing is per million tokens
+
+        call = LLMCallCost(
+            step_name=step_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            cost_usd=round(cost, 6),
+        )
+        self._calls.append(call)
+        return call
+
+    @property
+    def total_input_tokens(self) -> int:
+        return sum(c.input_tokens for c in self._calls)
+
+    @property
+    def total_output_tokens(self) -> int:
+        return sum(c.output_tokens for c in self._calls)
+
+    @property
+    def total_cache_read_tokens(self) -> int:
+        return sum(c.cache_read_tokens for c in self._calls)
+
+    @property
+    def total_cache_write_tokens(self) -> int:
+        return sum(c.cache_write_tokens for c in self._calls)
+
+    @property
+    def total_cost_usd(self) -> float:
+        return round(sum(c.cost_usd for c in self._calls), 6)
+
+    def summary(self) -> dict[str, Any]:
+        """Return a JSON-serializable cost summary."""
+        return {
+            "model": self.model,
+            "total_calls": len(self._calls),
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
+            "total_cache_write_tokens": self.total_cache_write_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "calls": [
+                {
+                    "step": c.step_name,
+                    "input_tokens": c.input_tokens,
+                    "output_tokens": c.output_tokens,
+                    "cache_read_tokens": c.cache_read_tokens,
+                    "cost_usd": c.cost_usd,
+                }
+                for c in self._calls
+            ],
         }
 
 

@@ -7,6 +7,7 @@ import type { RichCard } from './cards';
 export interface ChatThread {
   id: string;
   title: string;
+  title_manually_edited?: boolean;
   thread_type?: 'general' | 'research' | 'inquiry' | 'document';
   primary_case?: string;
   project?: string | null;
@@ -49,10 +50,12 @@ export interface CreateMessageRequest {
 export type InlineCardType =
   | 'signals_collapsed'
   | 'case_creation_prompt'
+  | 'case_preview'
   | 'evidence_suggestion'
   | 'inquiry_resolution'
   | 'research_results'
-  | 'inquiry_focus_prompt';
+  | 'inquiry_focus_prompt'
+  | 'plan_diff_proposal';
 
 /**
  * An action card that appears inline after a message
@@ -83,6 +86,24 @@ export interface CaseCreationPromptData {
   keyQuestions?: string[];
   /** AI-generated reason for suggesting case creation */
   aiReason?: string;
+}
+
+/**
+ * Data payload for case preview card (shown after analysis)
+ */
+export interface CasePreviewData {
+  suggestedTitle: string;
+  positionDraft: string;
+  keyQuestions: string[];
+  assumptions: string[];
+  confidence: number;
+  correlationId: string;
+  /** Full analysis object needed for case creation */
+  analysis: Record<string, unknown>;
+  /** Decision criteria extracted from analysis */
+  decisionCriteria?: Array<{ criterion: string; measurable?: string }>;
+  /** Per-assumption test strategies from analysis */
+  assumptionTestStrategies?: Record<string, string>;
 }
 
 /**
@@ -139,7 +160,8 @@ export type ActionHintType =
   | 'suggest_case'
   | 'suggest_inquiry'
   | 'suggest_evidence'
-  | 'suggest_resolution';
+  | 'suggest_resolution'
+  | 'suggest_plan_diff';
 
 /**
  * An action hint from the AI suggesting what the user might do next
@@ -183,3 +205,21 @@ export interface SuggestResolutionHintData {
   inquiry_title?: string;
   suggested_conclusion?: string;
 }
+
+/**
+ * Data payload for plan diff proposal card
+ */
+export interface PlanDiffProposalData {
+  diffSummary: string;
+  proposedContent: Record<string, unknown>;
+  diffData: {
+    added_assumptions?: Array<{ text: string; risk_level: string }>;
+    removed_assumptions?: string[];
+    updated_assumptions?: Array<{ id: string; status: string; evidence_summary?: string }>;
+    added_criteria?: Array<{ text: string }>;
+    removed_criteria?: string[];
+    updated_criteria?: Array<{ id: string; is_met: boolean }>;
+    stage_change?: { from: string; to: string; rationale: string };
+  };
+}
+

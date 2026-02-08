@@ -8,11 +8,12 @@ Provides continuous background analysis of case documents:
 - Claim verification
 """
 import hashlib
+import json
 import logging
 
+from asgiref.sync import async_to_sync
+
 logger = logging.getLogger(__name__)
-import json
-import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from django.core.cache import cache
@@ -136,7 +137,7 @@ You provide actionable, specific feedback."""
                 }
             }
 
-    analysis = asyncio.run(analyze())
+    analysis = async_to_sync(analyze)()
 
     # Cache the results
     cache_analysis(document_id, content, analysis)

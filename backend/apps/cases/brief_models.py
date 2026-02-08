@@ -43,6 +43,7 @@ class AnnotationType(models.TextChoices):
     WELL_GROUNDED = 'well_grounded', 'Strong evidence'
     STALE = 'stale', 'Evidence may be outdated'
     CIRCULAR = 'circular', 'Circular reasoning detected'
+    LOW_CREDIBILITY = 'low_credibility', 'Relies on low-credibility evidence'
 
 
 class AnnotationPriority(models.TextChoices):
@@ -161,6 +162,20 @@ class BriefSection(UUIDModel, TimestampedModel):
     is_collapsed = models.BooleanField(
         default=False,
         help_text='User preference for collapsed/expanded state'
+    )
+
+    # Decomposed user judgment (Phase 4)
+    # User rates their confidence in each section during synthesizing stage
+    # 1=Low, 2=Some doubts, 3=Moderate, 4=High confidence
+    user_confidence = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="User's confidence in this section's conclusion (1-4)"
+    )
+    user_confidence_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When user last rated this section"
     )
 
     class Meta:

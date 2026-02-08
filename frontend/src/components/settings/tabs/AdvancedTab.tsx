@@ -1,13 +1,22 @@
 /**
- * Advanced Tab - Debug options and experimental features
+ * Advanced Tab — Debug options, skills, and danger zone
+ *
+ * Uses Accordion for collapsible skills section,
+ * SettingsRow + Switch for debug toggles,
+ * SettingsDangerZone + DangerAction for destructive actions.
  */
 
 'use client';
 
 import * as React from 'react';
-import { Label } from '@/components/ui/label';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Accordion } from '@/components/ui/accordion';
+import { SettingsGroup, SettingsRow, SettingsDangerZone, DangerAction } from '../SettingsSection';
+import { skillsAPI } from '@/lib/api/skills';
+import type { Skill } from '@/lib/types/skill';
 import type { UserPreferences } from '@/lib/api/preferences';
 
 interface AdvancedTabProps {
@@ -15,125 +24,171 @@ interface AdvancedTabProps {
   onChange: (updates: Partial<UserPreferences>) => void;
 }
 
+const SCOPE_LABELS: Record<string, string> = {
+  personal: 'Personal',
+  team: 'Team',
+  organization: 'Org',
+  public: 'Public',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  active: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
+  draft: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+  archived: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500',
+};
+
 export function AdvancedTab({ preferences, onChange }: AdvancedTabProps) {
-  const [showSkills, setShowSkills] = React.useState(false);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [showSkills, setShowSkills] = useState(false);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+
+  const loadSkills = async () => {
+    if (showSkills) {
+      setShowSkills(false);
+      return;
+    }
+    setLoadingSkills(true);
+    try {
+      const result = await skillsAPI.list();
+      setSkills(result);
+      setShowSkills(true);
+    } catch (error) {
+      console.error('Failed to load skills:', error);
+    } finally {
+      setLoadingSkills(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Skills Section (Collapsed by default) */}
-      <div className="border border-neutral-200 dark:border-neutral-700 rounded-lg overflow-hidden">
-        <button
-          onClick={() => setShowSkills(!showSkills)}
-          className="w-full p-4 flex items-center justify-between text-left hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-        >
-          <div>
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-              Skills & Templates
-              <Badge variant="neutral" className="text-xs">
-                Optional
-              </Badge>
-            </h3>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
-              Configure domain-specific templates for AI agents
-            </p>
-          </div>
-          <svg
-            className={`w-5 h-5 text-neutral-400 dark:text-neutral-500 transition-transform ${
-              showSkills ? 'rotate-180' : ''
-            }`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+    <div className="space-y-8">
+      {/* Skills Section - using Accordion */}
+      <SettingsGroup
+        title="Skills & Templates"
+        description="Configure domain-specific templates for AI agents"
+      >
+        <Accordion
+          items={[
+            {
+              id: 'skills',
+              title: 'View Skills Configuration',
+              content: (
+                <div className="space-y-3">
+                  <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                    Skills are powerful but optional. Most users work great with organization defaults.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={loadSkills}
+                      disabled={loadingSkills}
+                    >
+                      {loadingSkills ? 'Loading...' : showSkills ? 'Hide Skills' : 'View My Skills'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={loadSkills}
+                      disabled={loadingSkills}
+                    >
+                      Browse Templates
+                    </Button>
+                  </div>
 
-        {showSkills && (
-          <div className="p-4 border-t border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
-            <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-3">
-              Skills are powerful but optional. Most users work great with organization defaults.
-            </p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline">
-                View My Skills
-              </Button>
-              <Button size="sm" variant="ghost">
-                Browse Templates
-              </Button>
-            </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-3">
-              Skills auto-inject domain knowledge into agents when activated for a case.
-            </p>
-          </div>
-        )}
-      </div>
+                  {/* Inline skill list */}
+                  {showSkills && (
+                    <div className="space-y-2 pt-2">
+                      {skills.length === 0 ? (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 italic">
+                          No skills found. Skills are auto-seeded for your organization, or you can create custom ones from a case.
+                        </p>
+                      ) : (
+                        skills.map(skill => (
+                          <div
+                            key={skill.id}
+                            className="flex items-start gap-3 p-3 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900/50"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate">
+                                  {skill.name}
+                                </span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${STATUS_COLORS[skill.status] ?? STATUS_COLORS.draft}`}>
+                                  {skill.status}
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                                {skill.description}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] text-neutral-400 uppercase">
+                                  {skill.domain}
+                                </span>
+                                <span className="text-[10px] text-neutral-400">
+                                  {SCOPE_LABELS[skill.scope] ?? skill.scope}
+                                </span>
+                                {skill.applies_to_agents.length > 0 && (
+                                  <span className="text-[10px] text-neutral-400">
+                                    → {skill.applies_to_agents.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-neutral-400 shrink-0">
+                              v{skill.current_version}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <Badge variant="neutral" className="text-xs">Optional</Badge>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                      Skills auto-inject domain knowledge into agents when activated for a case.
+                    </span>
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+          className="border border-neutral-200 dark:border-neutral-700 rounded-xl px-4"
+        />
+      </SettingsGroup>
 
       {/* Debug Options */}
-      <section>
-        <Label className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Debug Options</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
-          For troubleshooting and transparency
-        </p>
-        <div className="space-y-3">
-          <label className="flex items-center gap-3 cursor-pointer p-3 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-            <input
-              type="checkbox"
-              checked={preferences.show_debug_info ?? false}
-              onChange={(e) => onChange({ show_debug_info: e.target.checked })}
-              className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-            />
-            <div>
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                Show event IDs and correlation IDs
-              </span>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                Display technical identifiers for debugging
-              </p>
-            </div>
-          </label>
+      <SettingsGroup title="Debug Options" description="For troubleshooting and transparency" divider>
+        <SettingsRow
+          label="Show event IDs and correlation IDs"
+          description="Display technical identifiers for debugging"
+        >
+          <Switch
+            checked={preferences.show_debug_info ?? false}
+            onCheckedChange={(checked) => onChange({ show_debug_info: checked })}
+          />
+        </SettingsRow>
 
-          <label className="flex items-center gap-3 cursor-pointer p-3 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-            <input
-              type="checkbox"
-              checked={preferences.show_ai_prompts ?? false}
-              onChange={(e) => onChange({ show_ai_prompts: e.target.checked })}
-              className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-            />
-            <div>
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                Show AI prompts (transparency mode)
-              </span>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                See the prompts sent to AI models
-              </p>
-            </div>
-          </label>
-        </div>
-      </section>
+        <SettingsRow
+          label="Show AI prompts (transparency mode)"
+          description="See the prompts sent to AI models"
+        >
+          <Switch
+            checked={preferences.show_ai_prompts ?? false}
+            onCheckedChange={(checked) => onChange({ show_ai_prompts: checked })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
       {/* Danger Zone */}
-      <section className="border-t border-neutral-200 dark:border-neutral-700 pt-6">
-        <Label className="text-base font-semibold text-error-600 dark:text-error-400">Danger Zone</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
-          Irreversible actions
-        </p>
-        <div className="p-4 border border-error-200 dark:border-error-900 rounded-lg bg-error-50 dark:bg-error-900/20">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-error-900 dark:text-error-200">
-                Reset all preferences
-              </p>
-              <p className="text-xs text-error-700 dark:text-error-400">
-                Restore all settings to their defaults
-              </p>
-            </div>
-            <Button variant="outline" size="sm" className="border-error-300 text-error-700 hover:bg-error-100 dark:border-error-700 dark:text-error-300 dark:hover:bg-error-900/40">
-              Reset
-            </Button>
-          </div>
-        </div>
-      </section>
+      <SettingsDangerZone>
+        <DangerAction
+          title="Reset all preferences"
+          description="Restore all settings to their defaults"
+          buttonLabel="Reset"
+          variant="warning"
+        />
+      </SettingsDangerZone>
     </div>
   );
 }

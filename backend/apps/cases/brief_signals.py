@@ -28,8 +28,9 @@ def on_signal_created(sender, instance, created, **kwargs):
 @receiver(post_save, sender='inquiries.Evidence')
 def on_evidence_created(sender, instance, created, **kwargs):
     """
-    When new evidence is added to an inquiry, trigger brief evolution.
-    Evidence is linked to inquiry, which is linked to case.
+    When new evidence is added to an inquiry:
+    1. Trigger brief evolution (Mechanism B — existing)
+    2. Bridge to projects.Evidence for knowledge graph (if meaningful)
     """
     if created:
         try:
@@ -37,6 +38,16 @@ def on_evidence_created(sender, instance, created, **kwargs):
             _schedule_brief_evolve(case_id)
         except Exception as e:
             logger.warning(f"Could not trigger brief evolve for evidence {instance.id}: {e}")
+
+        # Bridge meaningful evidence into the project evidence layer
+        # so it enters the knowledge graph and can link to signals
+        if instance.evidence_text and len(instance.evidence_text.strip()) >= 20:
+            try:
+                _bridge_to_project_evidence(instance)
+            except Exception as e:
+                logger.warning(
+                    f"Could not bridge inquiry evidence {instance.id} to project: {e}"
+                )
 
 
 @receiver(post_save, sender='inquiries.Inquiry')
@@ -75,3 +86,43 @@ def _schedule_brief_evolve(case_id: str):
             BriefGroundingEngine.evolve_brief(case_id)
         except Exception as e2:
             logger.error(f"Synchronous brief evolve also failed for case {case_id}: {e2}")
+
+
+def _bridge_to_project_evidence(inquiry_evidence):
+    """
+    Create a corresponding projects.Evidence record so this user observation
+    enters the knowledge graph and can link to signals via auto-reasoning.
+
+    Runs asynchronously via Celery to avoid blocking the post_save handler.
+    Guards against double-bridging via the inquiry_evidence FK.
+    """
+    import dataclasses
+
+    from apps.projects.models import Evidence as ProjectEvidence
+
+    # Guard: skip if already bridged
+    if ProjectEvidence.objects.filter(
+        inquiry_evidence_id=inquiry_evidence.id
+    ).exists():
+        return
+
+    from apps.projects.ingestion_service import EvidenceInput
+    from tasks.ingestion_tasks import ingest_evidence_async
+
+    case = inquiry_evidence.inquiry.case
+
+    ev_input = EvidenceInput(
+        text=inquiry_evidence.evidence_text,
+        evidence_type='claim',
+        extraction_confidence=inquiry_evidence.credibility or 0.5,
+        retrieval_method='chat_bridged',
+        inquiry_evidence_id=str(inquiry_evidence.id),
+    )
+
+    ingest_evidence_async.delay(
+        inputs_data=[dataclasses.asdict(ev_input)],
+        case_id=str(case.id),
+        user_id=inquiry_evidence.created_by_id,
+        source_label=f"User observation: {inquiry_evidence.evidence_text[:50]}",
+        run_auto_reasoning=True,
+    )

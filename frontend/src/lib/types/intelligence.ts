@@ -145,9 +145,6 @@ export interface CaseReadiness {
   caseId: string;
   caseTitle: string;
 
-  // Overall score (0-100)
-  score: number;
-
   // Breakdown
   inquiries: {
     total: number;

@@ -72,6 +72,8 @@ class BriefSectionSerializer(serializers.ModelSerializer):
             'is_linked',
             'grounding_status',
             'grounding_data',
+            'user_confidence',
+            'user_confidence_at',
             'is_locked',
             'lock_reason',
             'is_collapsed',

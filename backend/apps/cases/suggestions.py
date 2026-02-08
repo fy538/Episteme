@@ -9,13 +9,14 @@ Generates actionable suggestions for brief content based on:
 """
 import json
 import logging
-
-logger = logging.getLogger(__name__)
-import asyncio
 import uuid
 from typing import List, Dict, Any, Optional
 
+from asgiref.sync import async_to_sync
+
 from apps.common.llm_providers import get_llm_provider
+
+logger = logging.getLogger(__name__)
 
 
 def generate_brief_suggestions(
@@ -90,7 +91,7 @@ Your suggestions are actionable and specific. Each suggestion includes:
             logger.warning(f"Failed to parse suggestions: {e}")
             return []
 
-    return asyncio.run(generate())
+    return async_to_sync(generate)()
 
 
 def _build_suggestion_prompt(
@@ -262,7 +263,7 @@ Return ONLY the JSON array."""
         except Exception:
             return []
 
-    return asyncio.run(generate())
+    return async_to_sync(generate)()
 
 
 def get_inline_completion(
@@ -312,7 +313,7 @@ Return ONLY the completion text, nothing else."""
             return None
         return completion
 
-    return asyncio.run(generate())
+    return async_to_sync(generate)()
 
 
 def apply_suggestion(

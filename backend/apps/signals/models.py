@@ -24,6 +24,15 @@ class SignalSourceType(models.TextChoices):
     DOCUMENT = 'document', 'Document'
     ARTIFACT = 'artifact', 'Artifact'  # Future
     ANALYSIS = 'analysis', 'Analysis'  # Future: derived from clustering, etc.
+    RESEARCH = 'research', 'Research Discovery'
+    GROUNDING = 'grounding', 'Grounding Inference'
+
+
+class AssumptionStatus(models.TextChoices):
+    UNTESTED = 'untested', 'Untested'
+    CONFIRMED = 'confirmed', 'Confirmed'
+    CHALLENGED = 'challenged', 'Challenged'
+    REFUTED = 'refuted', 'Refuted'
 
 
 class SignalTemperature(models.TextChoices):
@@ -88,7 +97,17 @@ class Signal(UUIDModel, TimestampedModel):
         blank=True,
         help_text="If user marked this signal as not relevant"
     )
-    
+
+    # Assumption lifecycle (only meaningful for type='Assumption')
+    assumption_status = models.CharField(
+        max_length=20,
+        choices=AssumptionStatus.choices,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Lifecycle status for Assumption-type signals: untested → confirmed/challenged/refuted"
+    )
+
     # Memory tier (for retrieval optimization)
     temperature = models.CharField(
         max_length=10,
@@ -199,6 +218,7 @@ class Signal(UUIDModel, TimestampedModel):
             models.Index(fields=['case', 'dismissed_at', 'created_at']),  # Case signal queries
             models.Index(fields=['thread', 'dismissed_at', 'type']),  # Thread signals by type
             models.Index(fields=['case', 'dismissed_at', 'type']),  # Case signals by type
+            models.Index(fields=['case', 'assumption_status']),  # Assumption lifecycle queries
         ]
     
     def __str__(self):

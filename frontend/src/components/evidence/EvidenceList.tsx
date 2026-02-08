@@ -7,8 +7,25 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { evidenceAPI, type Evidence } from '@/lib/api/evidence';
 import { EvidenceCard } from './EvidenceCard';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { easingCurves, transitionDurations } from '@/lib/motion-config';
+
+const listContainerVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.04 } },
+};
+
+const listItemVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: transitionDurations.fast, ease: easingCurves.easeOutExpo },
+  },
+};
 
 interface EvidenceListProps {
   caseId?: string;
@@ -20,6 +37,7 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [filteredEvidence, setFilteredEvidence] = useState<Evidence[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const prefersReducedMotion = useReducedMotion();
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [minRating, setMinRating] = useState<number>(0);
 
@@ -112,26 +130,33 @@ export function EvidenceList({ caseId, documentId, projectId }: EvidenceListProp
       </div>
 
       {/* Evidence list */}
-      <div className="space-y-3">
+      <motion.div
+        className="space-y-3"
+        variants={prefersReducedMotion ? undefined : listContainerVariants}
+        initial="hidden"
+        animate="visible"
+        key={`${typeFilter}-${minRating}`}
+      >
         {filteredEvidence.length === 0 ? (
           <div className="text-center py-8 text-neutral-500">
             No evidence found
           </div>
         ) : (
           filteredEvidence.map((item) => (
-            <EvidenceCard
-              key={item.id}
-              evidence={item}
-              onUpdate={(updated) => {
-                setEvidence(prev =>
-                  prev.map(e => e.id === updated.id ? updated : e)
-                );
-              }}
-              showLinkButton
-            />
+            <motion.div key={item.id} variants={prefersReducedMotion ? undefined : listItemVariants}>
+              <EvidenceCard
+                evidence={item}
+                onUpdate={(updated) => {
+                  setEvidence(prev =>
+                    prev.map(e => e.id === updated.id ? updated : e)
+                  );
+                }}
+                showLinkButton
+              />
+            </motion.div>
           ))
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

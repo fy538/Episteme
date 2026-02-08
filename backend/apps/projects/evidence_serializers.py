@@ -24,6 +24,11 @@ class EvidenceSerializer(serializers.ModelSerializer):
             'extraction_confidence',
             'user_credibility_rating',
             'embedding',
+            'source_url',
+            'source_title',
+            'source_domain',
+            'source_published_date',
+            'retrieval_method',
             'extracted_at',
             'created_at',
         ]
@@ -33,6 +38,11 @@ class EvidenceSerializer(serializers.ModelSerializer):
             'document',
             'extraction_confidence',
             'embedding',
+            'source_url',
+            'source_title',
+            'source_domain',
+            'source_published_date',
+            'retrieval_method',
             'extracted_at',
             'created_at',
         ]

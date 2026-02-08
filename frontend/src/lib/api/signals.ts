@@ -43,40 +43,14 @@ export const signalsAPI = {
     return apiClient.patch<Signal>(`/signals/${signalId}/edit/`, { text });
   },
 
-  // Phase 2.3: Graph queries
-  async getDependencies(signalId: string): Promise<any> {
-    return apiClient.get(`/signals/${signalId}/dependencies/`);
-  },
-
-  async getEvidence(signalId: string): Promise<any> {
-    return apiClient.get(`/signals/${signalId}/evidence/`);
-  },
-
-  async getContradictions(signalId: string): Promise<any> {
-    return apiClient.get(`/signals/${signalId}/contradictions/`);
-  },
-
-  async linkSignal(
-    signalId: string,
-    targetSignalId: string,
-    relationship: 'depends_on' | 'contradicts'
-  ): Promise<Signal> {
-    return apiClient.post(`/signals/${signalId}/link/`, {
-      target_signal_id: targetSignalId,
-      relationship,
-    });
-  },
-
   /**
-   * Generate a suggested title for a case based on signals.
+   * Mark user-selected text as an assumption signal.
    */
-  async suggestCaseTitle(
-    signalIds: string[],
-    conversationSummary?: string
-  ): Promise<{ suggested_title: string }> {
-    return apiClient.post('/signals/suggest_case_title/', {
-      signal_ids: signalIds,
-      conversation_summary: conversationSummary || '',
+  async markAssumption(text: string, caseId: string): Promise<Signal> {
+    return apiClient.post<Signal>('/signals/mark-assumption/', {
+      text,
+      case_id: caseId,
     });
   },
+
 };

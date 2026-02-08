@@ -21,6 +21,8 @@ class SignalSerializer(serializers.ModelSerializer):
             'normalized_text',
             'span',
             'confidence',
+            'temperature',
+            'assumption_status',
             'dedupe_key',
             'case',
             'thread',

@@ -10,8 +10,110 @@ import warnings
 from celery import shared_task
 from django.utils import timezone
 from django.db import transaction
+from apps.cases.constants import EVIDENCE_RELEVANCE_THRESHOLD
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Evidence Extraction ─────────────────────────────────────────────────────
+
+def extract_evidence_from_findings(
+    findings: list,
+    case,
+    artifact=None,
+) -> list:
+    """
+    Convert research ScoredFindings into Evidence records via the universal
+    ingestion pipeline.
+
+    For each high-quality finding (relevance_score >= 0.6), creates an Evidence
+    record with full provenance and signal linking. This closes the loop from
+    research -> evidence -> signal linking -> assumption cascade -> grounding.
+
+    Args:
+        findings: List of ScoredFinding objects (or dicts from .to_dict())
+        case: Case model instance
+        artifact: Optional Artifact instance (used for title/metadata)
+
+    Returns:
+        List of created Evidence record IDs
+    """
+    from apps.projects.ingestion_service import (
+        EvidenceIngestionService,
+        EvidenceInput,
+    )
+
+    if not findings:
+        return []
+
+    inputs = []
+
+    for finding in findings:
+        # Support both ScoredFinding objects and dicts
+        if hasattr(finding, 'relevance_score'):
+            relevance = finding.relevance_score
+            quality = finding.quality_score
+            raw_quote = finding.raw_quote
+            source_title = finding.source.title if finding.source else ''
+            source_url = finding.source.url if finding.source else ''
+            source_domain = finding.source.domain if finding.source else ''
+            extracted = finding.extracted_fields or {}
+        else:
+            relevance = finding.get('relevance_score', 0)
+            quality = finding.get('quality_score', 0)
+            raw_quote = finding.get('raw_quote', '')
+            source_title = finding.get('source_title', '')
+            source_url = finding.get('source_url', '')
+            source_domain = finding.get('source_domain', '')
+            extracted = finding.get('extracted_fields', {})
+
+        # Only persist high-quality findings
+        if relevance < EVIDENCE_RELEVANCE_THRESHOLD:
+            continue
+
+        # Build evidence text from the finding
+        text = raw_quote if raw_quote else ''
+        if not text and extracted:
+            text = '; '.join(
+                f"{k}: {v}" for k, v in extracted.items()
+                if isinstance(v, str) and len(str(v)) < 500
+            )[:1000]
+
+        if not text:
+            continue
+
+        # Determine evidence type from the finding
+        evidence_type = 'fact'
+        if extracted.get('type') == 'metric' or any(
+            k in extracted for k in ('percentage', 'number', 'rate', 'count')
+        ):
+            evidence_type = 'metric'
+        elif extracted.get('type') == 'quote':
+            evidence_type = 'quote'
+
+        inputs.append(EvidenceInput(
+            text=text,
+            evidence_type=evidence_type,
+            extraction_confidence=min(relevance * quality, 1.0),
+            source_url=source_url,
+            source_title=source_title,
+            source_domain=source_domain,
+            retrieval_method='research_loop',
+        ))
+
+    if not inputs:
+        return []
+
+    artifact_title = artifact.title if artifact else "Research"
+    result = EvidenceIngestionService.ingest(
+        inputs=inputs,
+        case=case,
+        user=case.user,
+        source_label=f"{artifact_title} — extracted evidence",
+        run_auto_reasoning=True,
+    )
+
+    return result.evidence_ids
 
 
 # ─── Shared Helpers ──────────────────────────────────────────────────────────
@@ -349,7 +451,12 @@ async def generate_brief_artifact(case_id: str, user_id: int):
 
 # ─── Research Loop v2 ────────────────────────────────────────────────────────
 
-@shared_task
+@shared_task(
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=2,
+)
 async def generate_research_artifact_v2(
     case_id: str,
     topic: str,
@@ -584,6 +691,25 @@ async def generate_research_artifact_v2(
                 "error": str(e),
             },
         )
+        # Emit AGENT_FAILED event so failures are visible in event store
+        try:
+            from apps.events.services import EventService
+            from apps.events.models import ActorType
+            EventService.append(
+                event_type="AgentFailed",
+                payload={
+                    "agent_type": "research",
+                    "topic": topic,
+                    "error": str(e)[:500],
+                    "error_type": type(e).__name__,
+                },
+                actor_type=ActorType.SYSTEM,
+                correlation_id=correlation_id,
+                case_id=case_id,
+            )
+        except Exception:
+            pass  # Best-effort event emission
+
         # Notify user of failure if we have a placeholder
         if placeholder_message_id and correlation_id:
             try:
@@ -625,6 +751,34 @@ async def generate_research_artifact_v2(
         skills_used=active_skills if active_skills else None,
     )
 
+    # ── Extract Evidence from findings ──────────────────────────────────
+    # Convert high-quality research findings into Evidence records
+    # so they feed into the grounding engine and knowledge graph.
+    evidence_ids = []
+    try:
+        if result.findings:
+            from asgiref.sync import sync_to_async
+
+            evidence_ids = await sync_to_async(extract_evidence_from_findings)(
+                findings=result.findings,
+                case=case,
+                artifact=artifact,
+            )
+            if evidence_ids:
+                logger.info(
+                    "research_evidence_extracted",
+                    extra={
+                        "case_id": case_id,
+                        "artifact_id": str(artifact.id),
+                        "evidence_count": len(evidence_ids),
+                    },
+                )
+    except Exception as e:
+        logger.warning(
+            "research_evidence_extraction_failed",
+            extra={"case_id": case_id, "error": str(e)},
+        )
+
     # ── Complete agent ───────────────────────────────────────────────────
     if placeholder_message_id:
         await AgentOrchestrator.complete_agent(
@@ -643,4 +797,5 @@ async def generate_research_artifact_v2(
         'skills_used': len(active_skills),
         'sources_found': result.metadata.get('total_sources', 0),
         'iterations': result.metadata.get('iterations', 0),
+        'evidence_extracted': len(evidence_ids),
     }

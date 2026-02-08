@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 
 from apps.projects.models import Evidence
-from apps.signals.models import Signal
+from apps.signals.models import Signal, SignalType
 from apps.inquiries.models import Inquiry, Objection
 from apps.common.llm_providers.factory import get_llm_provider
 
@@ -118,34 +118,42 @@ class AutoReasoningPipeline:
         
         similar_nodes = []
         evidence_embedding = np.array(evidence.embedding)
-        
+
         # Search for similar signals in same case
         if evidence.document.case:
-            signals = Signal.objects.filter(
-                case=evidence.document.case,
-                dismissed_at__isnull=True,
-                embedding__isnull=False
-            ).exclude(
-                type='EvidenceMention'  # Skip evidence mentions
+            signals = list(
+                Signal.objects.filter(
+                    case=evidence.document.case,
+                    dismissed_at__isnull=True,
+                    embedding__isnull=False,
+                ).exclude(
+                    type=SignalType.EVIDENCE_MENTION  # Skip evidence mentions
+                ).only('id', 'text', 'type', 'embedding')
             )
-            
-            for signal in signals:
-                signal_embedding = np.array(signal.embedding)
-                similarity = self._cosine_similarity(evidence_embedding, signal_embedding)
-                
-                if similarity >= self.similarity_threshold:
-                    similar_nodes.append({
-                        'id': signal.id,
-                        'type': 'signal',
-                        'text': signal.text,
-                        'signal_type': signal.type,
-                        'similarity': similarity,
-                        'object': signal
-                    })
-        
+
+            if signals:
+                # Vectorised cosine similarity — one matrix operation instead of N loops
+                signal_embeddings = np.array([s.embedding for s in signals])
+                ev_norm = evidence_embedding / (np.linalg.norm(evidence_embedding) + 1e-10)
+                sig_norms = signal_embeddings / (
+                    np.linalg.norm(signal_embeddings, axis=1, keepdims=True) + 1e-10
+                )
+                similarities = sig_norms @ ev_norm  # shape: (N,)
+
+                for signal, sim in zip(signals, similarities):
+                    if sim >= self.similarity_threshold:
+                        similar_nodes.append({
+                            'id': signal.id,
+                            'type': 'signal',
+                            'text': signal.text,
+                            'signal_type': signal.type,
+                            'similarity': float(sim),
+                            'object': signal,
+                        })
+
         # Sort by similarity
         similar_nodes.sort(key=lambda x: x['similarity'], reverse=True)
-        
+
         return similar_nodes
     
     async def _classify_relationship(

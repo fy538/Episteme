@@ -1,14 +1,18 @@
 /**
- * AI & Behavior Tab - Model selection, agent behavior, and structure discovery
+ * AI & Behavior Tab — Model selection, structure discovery, agent behavior
+ *
+ * Uses SettingsCard for model selection, SettingsRow + Switch for toggles,
+ * and segmented buttons for detection frequency.
  */
 
 'use client';
 
 import * as React from 'react';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
+import { SettingsGroup, SettingsRow, SettingsCard, SettingsCardGrid } from '../SettingsSection';
 import type { UserPreferences } from '@/lib/api/preferences';
 
 interface AITabProps {
@@ -24,6 +28,11 @@ const AVAILABLE_MODELS = [
     description: 'Fastest, best for real-time chat',
     speed: 'fast',
     cost: 'low',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    ),
   },
   {
     id: 'anthropic:claude-sonnet-4-5',
@@ -32,6 +41,11 @@ const AVAILABLE_MODELS = [
     description: 'Best for complex tasks and agents',
     speed: 'medium',
     cost: 'medium',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+      </svg>
+    ),
   },
   {
     id: 'anthropic:claude-opus-4-5',
@@ -40,6 +54,11 @@ const AVAILABLE_MODELS = [
     description: 'Maximum intelligence',
     speed: 'medium',
     cost: 'high',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+      </svg>
+    ),
   },
   {
     id: 'openai:gpt-4o-mini',
@@ -48,6 +67,11 @@ const AVAILABLE_MODELS = [
     description: 'Fast and affordable',
     speed: 'fast',
     cost: 'low',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    ),
   },
   {
     id: 'openai:gpt-4o',
@@ -56,249 +80,180 @@ const AVAILABLE_MODELS = [
     description: 'Most capable OpenAI model',
     speed: 'medium',
     cost: 'high',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+      </svg>
+    ),
   },
+];
+
+const FREQUENCY_OPTIONS = [
+  { value: 5, label: 'Low' },
+  { value: 3, label: 'Medium' },
+  { value: 1, label: 'High' },
 ];
 
 export function AITab({ preferences, onChange }: AITabProps) {
   return (
     <div className="space-y-8">
       {/* Chat Model */}
-      <section>
-        <Label className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Chat Model</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-3">
-          Choose the AI model for conversations
-        </p>
-
+      <SettingsGroup title="Chat Model" description="Choose the AI model for conversations">
         <div className="space-y-2">
           {AVAILABLE_MODELS.map((model) => (
-            <label
+            <SettingsCard
               key={model.id}
-              className={`block p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                preferences.chat_model === model.id
-                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
-                  : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
-              }`}
+              active={preferences.chat_model === model.id}
+              onClick={() => onChange({ chat_model: model.id })}
+              icon={model.icon}
+              title={model.name}
+              description={model.description}
+              meta={
+                <Badge variant={model.provider === 'anthropic' ? 'default' : 'success'} className="text-[10px]">
+                  {model.provider}
+                </Badge>
+              }
             >
-              <div className="flex items-start">
-                <input
-                  type="radio"
-                  name="chat_model"
-                  value={model.id}
-                  checked={preferences.chat_model === model.id}
-                  onChange={(e) => onChange({ chat_model: e.target.value })}
-                  className="mt-1 mr-3"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium text-neutral-900 dark:text-neutral-100">{model.name}</span>
-                    <Badge variant={model.provider === 'anthropic' ? 'default' : 'success'} className="text-xs">
-                      {model.provider}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-2">{model.description}</p>
-                  <div className="flex gap-4 text-xs text-neutral-500 dark:text-neutral-500">
-                    <span>Speed: {model.speed}</span>
-                    <span>Cost: {model.cost}</span>
-                  </div>
-                </div>
+              <div className="flex gap-3 text-[10px] text-neutral-500 dark:text-neutral-400 mt-1 uppercase tracking-wider">
+                <span>Speed: {model.speed}</span>
+                <span>Cost: {model.cost}</span>
               </div>
-            </label>
+            </SettingsCard>
           ))}
         </div>
-      </section>
+      </SettingsGroup>
 
-      {/* Structure Discovery - consolidated from WorkspaceTab */}
-      <section className="border-t border-neutral-200 dark:border-neutral-700 pt-6">
-        <Label className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Structure Discovery</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
-          Control how the system detects and suggests creating cases and inquiries
-        </p>
+      {/* Structure Discovery */}
+      <SettingsGroup title="Structure Discovery" description="Control how the system detects and suggests creating cases and inquiries" divider>
+        <SettingsRow
+          label="Auto-detect decision points"
+          description="AI suggests creating structure when it detects decision-making conversations"
+        >
+          <Switch
+            checked={preferences.structure_auto_detect ?? true}
+            onCheckedChange={(checked) => onChange({ structure_auto_detect: checked })}
+          />
+        </SettingsRow>
 
-        <div className="space-y-4">
-          {/* Auto-detect toggle */}
-          <div className="p-3 border border-neutral-200 dark:border-neutral-700 rounded-lg">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={preferences.structure_auto_detect ?? true}
-                onChange={(e) => onChange({ structure_auto_detect: e.target.checked })}
-                className="mt-0.5 w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-              />
-              <div>
-                <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                  Auto-detect decision points
-                </span>
-                <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
-                  AI will suggest creating structure when it detects decision-making conversations
-                </p>
-              </div>
-            </label>
-          </div>
+        <SettingsRow
+          label="Auto-create inquiries"
+          description="Create inquiries from detected questions"
+        >
+          <Switch
+            checked={preferences.auto_create_inquiries ?? true}
+            onCheckedChange={(checked) => onChange({ auto_create_inquiries: checked })}
+          />
+        </SettingsRow>
 
-          {/* Auto-create items */}
-          <div className="space-y-3 pl-1">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={preferences.auto_create_inquiries ?? true}
-                onChange={(e) => onChange({ auto_create_inquiries: e.target.checked })}
-                className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-              />
-              <span className="text-sm text-neutral-900 dark:text-neutral-100">
-                Auto-create inquiries from questions
-              </span>
-            </label>
+        <SettingsRow
+          label="Auto-detect assumptions"
+          description="Flag assumptions in conversations"
+        >
+          <Switch
+            checked={preferences.auto_detect_assumptions ?? true}
+            onCheckedChange={(checked) => onChange({ auto_detect_assumptions: checked })}
+          />
+        </SettingsRow>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={preferences.auto_detect_assumptions ?? true}
-                onChange={(e) => onChange({ auto_detect_assumptions: e.target.checked })}
-                className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-              />
-              <span className="text-sm text-neutral-900 dark:text-neutral-100">
-                Auto-detect assumptions
-              </span>
-            </label>
+        <SettingsRow
+          label="Auto-generate titles"
+          description="Generate titles for cases and inquiries"
+        >
+          <Switch
+            checked={preferences.auto_generate_titles ?? true}
+            onCheckedChange={(checked) => onChange({ auto_generate_titles: checked })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={preferences.auto_generate_titles ?? true}
-                onChange={(e) => onChange({ auto_generate_titles: e.target.checked })}
-                className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600"
-              />
-              <span className="text-sm text-neutral-900 dark:text-neutral-100">
-                Auto-generate titles for cases and inquiries
-              </span>
-            </label>
-          </div>
-
-          {/* Signal Highlighting */}
-          <div className="pt-2">
-            <Label className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Inline Signal Highlighting</Label>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-3">
-              Highlight detected signals directly in chat messages
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={preferences.highlight_assumptions ?? true}
-                  onChange={(e) => onChange({ highlight_assumptions: e.target.checked })}
-                  className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600"
-                />
-                <span className="text-sm text-neutral-700 dark:text-neutral-300">Assumptions</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={preferences.highlight_questions ?? true}
-                  onChange={(e) => onChange({ highlight_questions: e.target.checked })}
-                  className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600"
-                />
-                <span className="text-sm text-neutral-700 dark:text-neutral-300">Questions</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={preferences.highlight_evidence ?? true}
-                  onChange={(e) => onChange({ highlight_evidence: e.target.checked })}
-                  className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600"
-                />
-                <span className="text-sm text-neutral-700 dark:text-neutral-300">Evidence</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* Signal Highlighting */}
+      <SettingsGroup title="Signal Highlighting" description="Highlight detected signals directly in chat messages" divider>
+        <SettingsRow label="Assumptions" description="Highlight assumption signals">
+          <Switch
+            checked={preferences.highlight_assumptions ?? true}
+            onCheckedChange={(checked) => onChange({ highlight_assumptions: checked })}
+          />
+        </SettingsRow>
+        <SettingsRow label="Questions" description="Highlight question signals">
+          <Switch
+            checked={preferences.highlight_questions ?? true}
+            onCheckedChange={(checked) => onChange({ highlight_questions: checked })}
+          />
+        </SettingsRow>
+        <SettingsRow label="Evidence" description="Highlight evidence signals">
+          <Switch
+            checked={preferences.highlight_evidence ?? true}
+            onCheckedChange={(checked) => onChange({ highlight_evidence: checked })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
 
       {/* Agent Behavior */}
-      <section className="border-t border-neutral-200 dark:border-neutral-700 pt-6">
-        <Label className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Agent Behavior</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
-          Control how AI agents are suggested and triggered
-        </p>
-
-        <div className="space-y-4">
-          {/* Detection Interval */}
-          <div>
-            <Label className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Detection Frequency</Label>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">
-              How often to check for agent needs
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 5, label: 'Low' },
-                { value: 3, label: 'Medium' },
-                { value: 1, label: 'High' },
-              ].map((option) => (
-                <label
-                  key={option.value}
-                  className={`block p-2 text-center border rounded-md cursor-pointer transition-all text-sm ${
-                    preferences.agent_check_interval === option.value
-                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                      : 'border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="agent_interval"
-                    value={option.value}
-                    checked={preferences.agent_check_interval === option.value}
-                    onChange={(e) => onChange({ agent_check_interval: parseInt(e.target.value) })}
-                    className="sr-only"
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </div>
+      <SettingsGroup title="Agent Behavior" description="Control how AI agents are suggested and triggered" divider>
+        {/* Detection Frequency - segmented control */}
+        <SettingsRow
+          label="Detection frequency"
+          description="How often to check for agent needs"
+        >
+          <div className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+            {FREQUENCY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onChange({ agent_check_interval: option.value })}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium transition-colors',
+                  'first:border-r last:border-l border-neutral-200 dark:border-neutral-700',
+                  preferences.agent_check_interval === option.value
+                    ? 'bg-accent-600 text-white'
+                    : 'bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700'
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
+        </SettingsRow>
 
-          {/* Min Confidence */}
-          <div>
-            <Label htmlFor="min-confidence" className="text-sm font-medium text-neutral-900 dark:text-neutral-100">Minimum Confidence</Label>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">
-              Only suggest agents above this threshold
-            </p>
-            <div className="flex items-center gap-2">
-              <Input
-                id="min-confidence"
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                value={preferences.agent_min_confidence || 0.75}
-                onChange={(e) => onChange({ agent_min_confidence: parseFloat(e.target.value) })}
-                className="w-20"
-              />
-              <span className="text-sm text-neutral-600 dark:text-neutral-400">
-                ({((preferences.agent_min_confidence || 0.75) * 100).toFixed(0)}%)
-              </span>
-            </div>
+        {/* Min Confidence */}
+        <SettingsRow
+          label="Minimum confidence"
+          description="Only suggest agents above this threshold"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={preferences.agent_min_confidence || 0.75}
+              onChange={(e) => onChange({ agent_min_confidence: parseFloat(e.target.value) })}
+              className="w-20"
+            />
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              ({((preferences.agent_min_confidence || 0.75) * 100).toFixed(0)}%)
+            </span>
           </div>
+        </SettingsRow>
 
-          {/* Auto-run */}
-          <div className="p-3 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800 rounded-md">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={preferences.agent_auto_run ?? false}
-                onChange={(e) => onChange({ agent_auto_run: e.target.checked })}
-                className="mt-0.5 w-4 h-4 rounded border-warning-300 dark:border-warning-700"
-              />
-              <div>
-                <span className="text-sm font-medium text-warning-900 dark:text-warning-200">
-                  Auto-run agents (when confidence {'>'} 0.95)
-                </span>
-                <p className="text-xs text-warning-700 dark:text-warning-400 mt-1">
-                  Experimental: Agents will run automatically without confirmation
-                </p>
-              </div>
-            </label>
+        {/* Auto-run */}
+        <div className="mx-4 -mx-4 px-4 py-3 rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-warning-900 dark:text-warning-200">
+                Auto-run agents
+              </p>
+              <p className="text-xs text-warning-700 dark:text-warning-400 mt-0.5">
+                Experimental: Agents run automatically when confidence {'>'} 0.95
+              </p>
+            </div>
+            <Switch
+              checked={preferences.agent_auto_run ?? false}
+              onCheckedChange={(checked) => onChange({ agent_auto_run: checked })}
+            />
           </div>
         </div>
-      </section>
+      </SettingsGroup>
     </div>
   );
 }

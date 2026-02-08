@@ -15,13 +15,11 @@ import { useQuery } from '@tanstack/react-query';
 import { projectsAPI } from '@/lib/api/projects';
 import { casesAPI } from '@/lib/api/cases';
 import { inquiriesAPI } from '@/lib/api/inquiries';
-import { calculateReadinessScore } from '@/lib/utils/intelligence-transforms';
 import type { Project } from '@/lib/types/project';
 import type { Case, Inquiry } from '@/lib/types/case';
 
 export interface CaseWithInquiries extends Case {
   inquiries: Inquiry[];
-  readinessScore: number;
   tensionsCount: number;
   blindSpotsCount: number;
 }
@@ -37,30 +35,16 @@ async function fetchProjectsWithCases(): Promise<ProjectWithCases[]> {
     casesAPI.listCases(),
   ]);
 
-  // For each case, load inquiries and basic readiness data
-  // NOTE: We intentionally skip getBlindSpotPrompts here because it triggers
-  // an expensive OpenAI API call per case. Gap analysis should only run
-  // when explicitly requested (e.g., viewing case details).
+  // For each case, load inquiries
+  // NOTE: Tensions and blind spots are loaded on-demand when viewing case
+  // details, since gap analysis triggers expensive LLM calls.
   const casesWithData = await Promise.all(
     casesResp.map(async (caseItem) => {
-      const [inquiries, landscape] = await Promise.all([
-        inquiriesAPI.getByCase(caseItem.id).catch(() => []),
-        casesAPI.getEvidenceLandscape(caseItem.id).catch(() => null),
-      ]);
-
-      const inquiryStats = landscape?.inquiries || { total: 0, resolved: 0 };
-      // Calculate readiness without tensions/blindspots (they require LLM call)
-      const readinessScore = calculateReadinessScore(
-        inquiryStats,
-        undefined,
-        0, // tensionsCount - will be loaded on-demand
-        0  // blindSpotsCount - will be loaded on-demand
-      );
+      const inquiries = await inquiriesAPI.getByCase(caseItem.id).catch(() => []);
 
       return {
         ...caseItem,
         inquiries,
-        readinessScore,
         tensionsCount: 0,    // Loaded on-demand when viewing case
         blindSpotsCount: 0,  // Loaded on-demand when viewing case
       };

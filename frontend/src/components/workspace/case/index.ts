@@ -1,1 +1,1 @@
-export { CaseHomePage } from './CaseHomePage';
+export { CaseHome } from './CaseHome';

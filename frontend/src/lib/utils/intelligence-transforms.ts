@@ -2,7 +2,7 @@
  * Intelligence Transform Utilities
  *
  * Shared functions for transforming backend data into IntelligenceItem format.
- * Used by useCaseReadiness, useIntelligence, and dashboard pages.
+ * Used by useIntelligence and dashboard pages.
  */
 
 import type { IntelligenceItem } from '@/lib/types/intelligence';
@@ -76,42 +76,6 @@ export function transformContradictionToTension(
     },
     createdAt: new Date().toISOString(),
   };
-}
-
-/**
- * Calculate readiness score based on inquiry completion and blockers
- *
- * Formula:
- * - Inquiry completion: 50% weight (or 25% if no inquiries)
- * - Checklist completion: 30% weight (or 15% if no checklist)
- * - Base score: 20%
- * - Penalties: -10 per tension, -3 per blind spot
- */
-export function calculateReadinessScore(
-  inquiries: { total: number; resolved: number },
-  checklistProgress?: { required: number; required_completed: number },
-  tensionsCount: number = 0,
-  blindSpotsCount: number = 0
-): number {
-  // Inquiry completion: 50% weight
-  const inquiryScore = inquiries.total > 0
-    ? (inquiries.resolved / inquiries.total) * 50
-    : 25; // Partial credit if no inquiries yet
-
-  // Checklist completion: 30% weight
-  const checklistScore = checklistProgress && checklistProgress.required > 0
-    ? (checklistProgress.required_completed / checklistProgress.required) * 30
-    : 15; // Partial credit if no checklist yet
-
-  // Base score of 20
-  const baseScore = 20;
-
-  // Penalties
-  const tensionPenalty = tensionsCount * 10;
-  const blindSpotPenalty = blindSpotsCount * 3;
-
-  const rawScore = inquiryScore + checklistScore + baseScore - tensionPenalty - blindSpotPenalty;
-  return Math.max(0, Math.min(100, Math.round(rawScore)));
 }
 
 /**

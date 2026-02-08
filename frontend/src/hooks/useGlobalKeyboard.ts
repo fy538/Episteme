@@ -1,29 +1,41 @@
 /**
  * Global Keyboard Shortcuts Hook
  * Centralized keyboard shortcut management
+ *
+ * Navigation rail shortcuts:
+ *   Cmd+1 → Chat (conversations)
+ *   Cmd+2 → Cases
+ *   Cmd+B → Toggle sidebar panel
  */
 
 'use client';
 
-import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
 
-export function useGlobalKeyboardShortcuts() {
+interface UseGlobalKeyboardOptions {
+  onTogglePanel?: () => void;
+}
+
+export function useGlobalKeyboardShortcuts(options?: UseGlobalKeyboardOptions) {
   const router = useRouter();
 
-  // Navigation shortcuts
-  useKeyboardShortcut(['Cmd', 'Shift', 'W'], () => {
-    router.push('/');
+  // Rail navigation shortcuts (2 sections)
+  useKeyboardShortcut(['Cmd', '1'], () => {
+    router.push('/chat');
   });
 
-  useKeyboardShortcut(['Cmd', 'Shift', 'I'], () => {
-    router.push('/inquiries');
+  useKeyboardShortcut(['Cmd', '2'], () => {
+    router.push('/cases');
+  });
+
+  // Toggle sidebar panel
+  useKeyboardShortcut(['Cmd', 'B'], () => {
+    options?.onTogglePanel?.();
   });
 
   // Help shortcut
   useKeyboardShortcut(['Cmd', 'Shift', '?'], () => {
-    // Open keyboard shortcuts help modal
     const event = new CustomEvent('show-keyboard-help');
     window.dispatchEvent(event);
   });
@@ -37,19 +49,19 @@ export const GLOBAL_SHORTCUTS = [
     category: 'Navigation',
   },
   {
-    keys: ['⌘', 'P'],
-    description: 'Quick switch case',
+    keys: ['⌘', '1'],
+    description: 'Go to Chat',
     category: 'Navigation',
   },
   {
-    keys: ['⌘', '⇧', 'W'],
-    description: 'Go home',
+    keys: ['⌘', '2'],
+    description: 'Go to Cases',
     category: 'Navigation',
   },
   {
-    keys: ['⌘', '⇧', 'I'],
-    description: 'Go to inquiries',
-    category: 'Navigation',
+    keys: ['⌘', 'B'],
+    description: 'Toggle sidebar panel',
+    category: 'View',
   },
   {
     keys: ['⌘', 'N'],
@@ -62,11 +74,6 @@ export const GLOBAL_SHORTCUTS = [
     category: 'Chat',
   },
   {
-    keys: ['⌘', 'B'],
-    description: 'Toggle sidebar',
-    category: 'View',
-  },
-  {
     keys: ['⌘', '⇧', '?'],
     description: 'Show keyboard shortcuts',
     category: 'Help',
@@ -75,5 +82,15 @@ export const GLOBAL_SHORTCUTS = [
     keys: ['Esc'],
     description: 'Close modal/cancel',
     category: 'General',
+  },
+  {
+    keys: ['⌘', '/'],
+    description: 'Toggle chat panel',
+    category: 'Workspace',
+  },
+  {
+    keys: ['⌘', '\\'],
+    description: 'Toggle focus mode',
+    category: 'Workspace',
   },
 ];

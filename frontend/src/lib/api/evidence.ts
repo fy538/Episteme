@@ -22,17 +22,13 @@ export interface Evidence {
   extraction_confidence: number;
   user_credibility_rating: number | null;
   embedding: number[] | null;
+  source_url: string;
+  source_title: string;
+  source_domain: string;
+  source_published_date: string | null;
+  retrieval_method: string;
   extracted_at: string;
   created_at: string;
-}
-
-export interface RateEvidenceRequest {
-  rating: number;  // 1-5 stars
-}
-
-export interface LinkSignalRequest {
-  signal_id: string;
-  relationship: 'supports' | 'contradicts';
 }
 
 export const evidenceAPI = {
@@ -52,16 +48,9 @@ export const evidenceAPI = {
     if (filters?.project_id) params.append('project_id', filters.project_id);
     if (filters?.type) params.append('type', filters.type);
     if (filters?.min_rating) params.append('min_rating', filters.min_rating.toString());
-    
+
     const query = params.toString();
     return apiClient.get(`/evidence/${query ? `?${query}` : ''}`);
-  },
-
-  /**
-   * Get single evidence item
-   */
-  get: async (id: string): Promise<Evidence> => {
-    return apiClient.get(`/evidence/${id}/`);
   },
 
   /**
@@ -72,33 +61,72 @@ export const evidenceAPI = {
   },
 
   /**
-   * Link evidence to a signal
+   * Create inquiry evidence (user observation from chat)
+   *
+   * Uses the inquiry evidence endpoint which supports full CRUD
+   * and 'user_observation' evidence type for chat-sourced evidence.
    */
-  linkSignal: async (
-    evidenceId: string,
-    signalId: string,
-    relationship: 'supports' | 'contradicts'
-  ): Promise<Evidence> => {
-    return apiClient.post(`/evidence/${evidenceId}/link-signal/`, {
-      signal_id: signalId,
-      relationship,
+  createForInquiry: async (data: {
+    inquiry_id: string;
+    evidence_text: string;
+    direction?: 'supports' | 'contradicts' | 'neutral';
+    strength?: number;
+    credibility?: number;
+  }): Promise<InquiryEvidence> => {
+    return apiClient.post(`/inquiries/${data.inquiry_id}/add-evidence/`, {
+      evidence_type: 'user_observation',
+      evidence_text: data.evidence_text,
+      direction: data.direction || 'neutral',
+      strength: data.strength || 0.5,
+      credibility: data.credibility || 0.5,
     });
   },
 
   /**
-   * Get signals related to this evidence
+   * Ingest external evidence (pasted text, research from other tools, etc.)
+   *
+   * Evidence flows through the universal ingestion pipeline:
+   * create → embed → auto-reason (signal linking) → cascade → grounding
    */
-  relatedSignals: async (id: string): Promise<{
-    supports: any[];
-    contradicts: any[];
-  }> => {
-    return apiClient.get(`/evidence/${id}/related-signals/`);
+  ingestExternal: async (data: {
+    case_id: string;
+    items: Array<{
+      text: string;
+      source_url?: string;
+      source_title?: string;
+      evidence_type?: string;
+      source_published_date?: string;
+    }>;
+    source_label?: string;
+  }): Promise<{ status: string; task_id: string; items_queued: number }> => {
+    return apiClient.post('/evidence/ingest/', data);
   },
 
   /**
-   * Get high-confidence evidence
+   * Fetch a URL, extract content, and ingest as evidence.
+   *
+   * Creates a Document from the fetched content and processes it
+   * through the full document pipeline (chunk → embed → extract → auto-reason).
    */
-  highConfidence: async (): Promise<Evidence[]> => {
-    return apiClient.get('/evidence/high_confidence/');
+  fetchUrl: async (data: {
+    url: string;
+    case_id: string;
+  }): Promise<{ status: string; task_id: string }> => {
+    return apiClient.post('/evidence/fetch-url/', data);
   },
 };
+
+export interface InquiryEvidence {
+  id: string;
+  inquiry: string;
+  evidence_type: 'document_full' | 'document_chunks' | 'experiment' | 'external_data' | 'user_observation';
+  source_document: string | null;
+  evidence_text: string;
+  direction: 'supports' | 'contradicts' | 'neutral';
+  strength: number;
+  credibility: number;
+  verified: boolean;
+  notes: string;
+  created_at: string;
+  created_by: number;
+}

@@ -29,11 +29,27 @@ export interface Case {
   user_confidence?: number; // 0-100
   user_confidence_updated_at?: string;
   what_would_change_mind?: string;
+  what_changed_mind_response?: 'updated_view' | 'proceeding_anyway' | 'not_materialized' | '';
+  what_changed_mind_response_at?: string;
+  // Premortem
+  premortem_text?: string;
+  premortem_at?: string;
   // Decision Frame fields
   decision_question?: string;
   constraints?: Constraint[];
   success_criteria?: SuccessCriterion[];
   stakeholders?: Stakeholder[];
+  // Per-case configuration
+  intelligence_config?: {
+    auto_validate?: boolean;
+    background_research?: boolean;
+    gap_detection?: boolean;
+  };
+  investigation_preferences?: {
+    rigor?: 'light' | 'standard' | 'thorough';
+    evidence_threshold?: 'low' | 'medium' | 'high';
+    disable_locks?: boolean;
+  };
   // Relationships
   main_brief?: string;
   linked_thread?: string;
@@ -41,6 +57,8 @@ export interface Case {
   project?: string;
   created_at: string;
   updated_at: string;
+  // Active skills (from CaseSerializer.active_skills_summary)
+  active_skills_summary?: Array<{ id: string; name: string; domain: string }>;
 }
 
 export interface CaseAnalysisResponse {
@@ -170,7 +188,7 @@ export interface BlindSpotPrompt {
 
 export type SectionType = 'decision_frame' | 'inquiry_brief' | 'synthesis' | 'trade_offs' | 'recommendation' | 'custom';
 export type GroundingStatus = 'empty' | 'weak' | 'moderate' | 'strong' | 'conflicted';
-export type AnnotationType = 'tension' | 'blind_spot' | 'ungrounded' | 'evidence_desert' | 'well_grounded' | 'stale' | 'circular';
+export type AnnotationType = 'tension' | 'blind_spot' | 'ungrounded' | 'evidence_desert' | 'well_grounded' | 'stale' | 'circular' | 'low_credibility';
 export type AnnotationPriority = 'blocking' | 'important' | 'info';
 
 export interface BriefAnnotation {
@@ -208,6 +226,8 @@ export interface BriefSection {
     tensions_count?: number;
     confidence_avg?: number | null;
   };
+  user_confidence?: number;
+  user_confidence_at?: string;
   annotations: BriefAnnotation[];
   is_locked: boolean;
   lock_reason: string;
@@ -300,4 +320,40 @@ export interface ScaffoldResult {
   brief: CaseDocument;
   inquiries: Inquiry[];
   sections: BriefSection[];
+}
+
+// ── Health & Judgment types ─────────────────────────────────────
+
+export interface CaseHealthMetrics {
+  staleness: { stale: boolean; days_since_activity: number | null };
+  imbalance: { imbalanced: boolean; inquiry_events: number; synthesis_events: number };
+  confidence_plateau: { plateau: boolean; evidence_events: number; confidence_events: number };
+  momentum: { trend: 'accelerating' | 'steady' | 'decelerating' | 'stalled'; this_week: number; last_week: number };
+}
+
+export interface SectionJudgmentSection {
+  section_id: string;
+  heading: string;
+  section_type: string;
+  grounding_status: string;
+  grounding_strength: number;
+  user_confidence: number | null;
+  evidence_count: number;
+  tensions_count: number;
+}
+
+export interface SectionJudgmentMismatch {
+  section_id: string;
+  heading: string;
+  type: 'overconfident' | 'underconfident';
+  description: string;
+  user_confidence: number;
+  grounding_status: string;
+}
+
+export interface SectionJudgmentSummary {
+  sections: SectionJudgmentSection[];
+  mismatches: SectionJudgmentMismatch[];
+  rated_count: number;
+  total_count: number;
 }

@@ -1,16 +1,23 @@
 /**
  * InlineActionCardRenderer - Renders the appropriate inline action card based on type
+ *
+ * Wraps all card types in a slide-up entrance animation for polish.
  */
 
 'use client';
 
+import { motion } from 'framer-motion';
 import type { InlineActionCard } from '@/lib/types/chat';
 import { SignalsCollapsedCard } from './SignalsCollapsedCard';
 import { CaseCreationPromptCard } from './CaseCreationPromptCard';
+import { CasePreviewCard } from './CasePreviewCard';
 import { EvidenceSuggestionCard } from './EvidenceSuggestionCard';
 import { InquiryResolutionPromptCard } from './InquiryResolutionPromptCard';
 import { ResearchResultsCard } from './ResearchResultsCard';
 import { InquiryFocusPromptCard } from './InquiryFocusPromptCard';
+import { PlanDiffProposalCard } from './PlanDiffProposalCard';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { easingCurves, transitionDurations } from '@/lib/motion-config';
 
 export interface InlineCardActions {
   // Signals
@@ -19,6 +26,10 @@ export interface InlineCardActions {
 
   // Case creation
   onCreateCase?: (suggestedTitle?: string) => void;
+
+  // Case preview (after analysis)
+  onCreateCaseFromPreview?: (analysis: Record<string, unknown>, title: string) => void;
+  onAdjustCasePreview?: () => void;
 
   // Evidence
   onAddEvidence?: (inquiryId?: string, direction?: string) => void;
@@ -34,6 +45,12 @@ export interface InlineCardActions {
   // Focus
   onFocusInquiry?: (inquiryId: string) => void;
 
+  // Plan diff
+  onAcceptPlanDiff?: (proposedContent: Record<string, unknown>, diffSummary: string, diffData: Record<string, unknown>) => Promise<void> | void;
+
+  // Loading states
+  isCreatingCase?: boolean;
+
   // Common
   onDismissCard?: (cardId: string) => void;
 }
@@ -47,40 +64,60 @@ export function InlineActionCardRenderer({
   card,
   actions,
 }: InlineActionCardRendererProps) {
+  const prefersReducedMotion = useReducedMotion();
+
   const handleDismiss = () => {
     actions.onDismissCard?.(card.id);
   };
 
+  let cardContent: React.ReactNode;
+
   switch (card.type) {
     case 'signals_collapsed':
-      return (
+      cardContent = (
         <SignalsCollapsedCard
           card={card}
           onExpand={actions.onExpandSignals}
           onSignalClick={actions.onSignalClick}
         />
       );
+      break;
 
     case 'case_creation_prompt':
-      return (
+      cardContent = (
         <CaseCreationPromptCard
           card={card}
           onCreateCase={actions.onCreateCase || (() => {})}
           onDismiss={handleDismiss}
+          isCreating={actions.isCreatingCase}
         />
       );
+      break;
+
+    case 'case_preview':
+      cardContent = (
+        <CasePreviewCard
+          card={card}
+          onCreateCase={actions.onCreateCaseFromPreview || (() => {})}
+          onAdjust={actions.onAdjustCasePreview || (() => {})}
+          onDismiss={handleDismiss}
+          isCreating={actions.isCreatingCase}
+        />
+      );
+      break;
 
     case 'evidence_suggestion':
-      return (
+      cardContent = (
         <EvidenceSuggestionCard
           card={card}
           onAddEvidence={actions.onAddEvidence || (() => {})}
           onDismiss={handleDismiss}
         />
       );
+      break;
 
     case 'inquiry_resolution':
-      return (
+      cardContent = (
         <InquiryResolutionPromptCard
           card={card}
           onResolve={actions.onResolveInquiry || (() => {})}
@@ -88,9 +125,10 @@ export function InlineActionCardRenderer({
           onDismiss={handleDismiss}
         />
       );
+      break;
 
     case 'research_results':
-      return (
+      cardContent = (
         <ResearchResultsCard
           card={card}
           onViewResults={actions.onViewResearchResults || (() => {})}
@@ -98,17 +136,46 @@ export function InlineActionCardRenderer({
           onDismiss={handleDismiss}
         />
       );
+      break;
 
     case 'inquiry_focus_prompt':
-      return (
+      cardContent = (
         <InquiryFocusPromptCard
           card={card}
           onFocus={actions.onFocusInquiry || (() => {})}
           onDismiss={handleDismiss}
         />
       );
+      break;
+
+    case 'plan_diff_proposal':
+      cardContent = (
+        <PlanDiffProposalCard
+          card={card}
+          onAccept={actions.onAcceptPlanDiff || (() => {})}
+          onDismiss={handleDismiss}
+        />
+      );
+      break;
 
     default:
       return null;
   }
+
+  if (prefersReducedMotion) {
+    return <>{cardContent}</>;
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: transitionDurations.normal,
+        ease: easingCurves.easeOutExpo,
+      }}
+    >
+      {cardContent}
+    </motion.div>
+  );
 }

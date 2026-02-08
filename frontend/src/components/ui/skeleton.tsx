@@ -112,3 +112,96 @@ export function CaseCardSkeleton() {
     </div>
   );
 }
+
+/** Workspace main content skeleton — mimics CaseHome layout */
+export function WorkspaceContentSkeleton({ variant = 'default' }: { variant?: 'default' | 'brief' | 'dashboard' }) {
+  if (variant === 'brief') {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-4 w-48" />
+        <div className="space-y-3 mt-6">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+        <div className="space-y-3 mt-4">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'dashboard') {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-9 w-28 rounded-md" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 space-y-3">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+              <div className="flex gap-2 pt-1">
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // default: CaseHome-like layout
+  return (
+    <div className="space-y-6">
+      {/* Stage badge + title */}
+      <div>
+        <Skeleton className="h-5 w-24 rounded-full mb-3" />
+        <Skeleton className="h-7 w-72" />
+        <Skeleton className="h-4 w-48 mt-2" />
+      </div>
+
+      {/* Metric cards row */}
+      <div className="grid grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 space-y-2">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-8 w-12" />
+          </div>
+        ))}
+      </div>
+
+      {/* Assumptions list */}
+      <div className="space-y-3">
+        <Skeleton className="h-5 w-32" />
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-4 w-4 rounded-full shrink-0" />
+            <Skeleton className="h-4 flex-1" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+        ))}
+      </div>
+
+      {/* Criteria list */}
+      <div className="space-y-3">
+        <Skeleton className="h-5 w-36" />
+        {[1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-4 w-4 rounded-full shrink-0" />
+            <Skeleton className="h-4 flex-1" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

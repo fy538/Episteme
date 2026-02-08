@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^1.1.4",
     "@floating-ui/react": "^0.27.17",
     "@heroicons/react": "^2.2.0",
     "@sentry/nextjs": "^8.44.0",
@@ -28,7 +27,6 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
-    "reactflow": "^11.11.4",
     "remark-gfm": "^4.0.1",
     "streamdown": "^2.1.0",
     "tailwind-merge": "^2.2.1",

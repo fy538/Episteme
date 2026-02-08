@@ -2,7 +2,10 @@
 Case serializers
 """
 from rest_framework import serializers
-from .models import Case, WorkingView, CaseStatus, StakesLevel, ReadinessChecklistItem
+from .models import (
+    Case, WorkingView, CaseStatus, StakesLevel, ReadinessChecklistItem,
+    InvestigationPlan, PlanVersion, CaseStage,
+)
 
 
 class CaseSerializer(serializers.ModelSerializer):
@@ -17,6 +20,7 @@ class CaseSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True
     )
+    active_skills_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Case
@@ -30,6 +34,12 @@ class CaseSerializer(serializers.ModelSerializer):
             'user_confidence',
             'user_confidence_updated_at',
             'what_would_change_mind',
+            # "What would change your mind" resurface response
+            'what_changed_mind_response',
+            'what_changed_mind_response_at',
+            # Premortem
+            'premortem_text',
+            'premortem_at',
             # Decision Frame fields
             'decision_question',
             'constraints',
@@ -41,6 +51,9 @@ class CaseSerializer(serializers.ModelSerializer):
             'created_from_event_id',
             'created_at',
             'updated_at',
+            # Per-case configuration
+            'intelligence_config',
+            'investigation_preferences',
             # Skill template fields
             'is_skill_template',
             'template_scope',
@@ -48,8 +61,38 @@ class CaseSerializer(serializers.ModelSerializer):
             'based_on_skill_name',
             'became_skill',
             'became_skill_name',
+            # Active skills
+            'active_skills_summary',
         ]
-        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at']
+        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at', 'what_changed_mind_response_at', 'premortem_at']
+
+    def get_active_skills_summary(self, obj):
+        """Return lightweight summary of active skills (up to 5).
+
+        Uses prefetched caseactiveskill_set when available (set on
+        CaseViewSet.get_queryset) to avoid N+1 queries in list views.
+        """
+        from apps.cases.models import CaseActiveSkill
+
+        # Try prefetched data first
+        try:
+            cas_all = obj.caseactiveskill_set.all()
+            active = sorted(cas_all, key=lambda a: a.order)[:5]
+        except AttributeError:
+            active = list(
+                CaseActiveSkill.objects
+                .filter(case=obj)
+                .select_related('skill')
+                .order_by('order')[:5]
+            )
+        return [
+            {
+                'id': str(a.skill_id),
+                'name': a.skill.name,
+                'domain': a.skill.domain,
+            }
+            for a in active
+        ]
 
 
 class WorkingViewSerializer(serializers.ModelSerializer):
@@ -95,6 +138,9 @@ class UpdateCaseSerializer(serializers.Serializer):
     # User-stated confidence
     user_confidence = serializers.IntegerField(min_value=0, max_value=100, required=False, allow_null=True)
     what_would_change_mind = serializers.CharField(required=False, allow_blank=True)
+    # Per-case configuration
+    intelligence_config = serializers.DictField(required=False)
+    investigation_preferences = serializers.DictField(required=False)
 
 
 class CreateCaseFromAnalysisSerializer(serializers.Serializer):
@@ -203,3 +249,75 @@ class UserConfidenceSerializer(serializers.Serializer):
 
     user_confidence = serializers.IntegerField(min_value=0, max_value=100)
     what_would_change_mind = serializers.CharField(required=False, allow_blank=True)
+
+
+# ===== Investigation Plan Serializers =====
+
+class PlanVersionSerializer(serializers.ModelSerializer):
+    """Serializer for plan version snapshots"""
+
+    class Meta:
+        model = PlanVersion
+        fields = [
+            'id', 'version_number', 'content', 'diff_summary', 'diff_data',
+            'created_by', 'created_at',
+        ]
+        read_only_fields = ['id', 'version_number', 'created_at']
+
+
+class InvestigationPlanSerializer(serializers.ModelSerializer):
+    """Serializer for the investigation plan with inline current content"""
+
+    current_content = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InvestigationPlan
+        fields = [
+            'id', 'case', 'stage', 'current_version', 'position_statement',
+            'current_content', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'case', 'current_version', 'created_at', 'updated_at']
+
+    def get_current_content(self, obj):
+        """Inline the current version's content for convenience."""
+        try:
+            version = obj.versions.get(version_number=obj.current_version)
+            return version.content
+        except PlanVersion.DoesNotExist:
+            return None
+
+
+class PlanStageUpdateSerializer(serializers.Serializer):
+    """Serializer for updating the investigation stage"""
+
+    stage = serializers.ChoiceField(choices=CaseStage.choices)
+    rationale = serializers.CharField(required=False, default='')
+
+
+class PlanRestoreSerializer(serializers.Serializer):
+    """Serializer for restoring a previous plan version"""
+
+    version_number = serializers.IntegerField(min_value=1)
+
+
+class PlanDiffProposalSerializer(serializers.Serializer):
+    """Serializer for accepting a proposed plan diff"""
+
+    content = serializers.DictField()
+    diff_summary = serializers.CharField()
+    diff_data = serializers.DictField(required=False, allow_null=True)
+
+
+class AssumptionStatusSerializer(serializers.Serializer):
+    """Serializer for updating an assumption's status"""
+
+    status = serializers.ChoiceField(
+        choices=['untested', 'confirmed', 'challenged', 'refuted']
+    )
+    evidence_summary = serializers.CharField(required=False, default='')
+
+
+class CriterionStatusSerializer(serializers.Serializer):
+    """Serializer for updating a decision criterion"""
+
+    is_met = serializers.BooleanField()

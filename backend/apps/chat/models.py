@@ -16,6 +16,10 @@ class ChatThread(UUIDModel, TimestampedModel):
     (general discussion, research, inquiry-specific, document analysis).
     """
     title = models.CharField(max_length=500, blank=True, default='New Chat')
+    title_manually_edited = models.BooleanField(
+        default=False,
+        help_text="True if user manually renamed this thread; suppresses auto-title updates"
+    )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_threads')
     
     # Thread type for categorization

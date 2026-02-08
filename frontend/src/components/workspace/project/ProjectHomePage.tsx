@@ -16,7 +16,6 @@ import { useRouter } from 'next/navigation';
 import { useIntelligence } from '@/hooks/useIntelligence';
 import { RecommendedAction } from '@/components/workspace/dashboard/RecommendedAction';
 import { NewActivityFeed } from '@/components/workspace/dashboard/NewActivityFeed';
-import { ReadinessMeter } from '@/components/ui/readiness-meter';
 import { TensionSlideOver } from '@/components/workspace/actions/TensionSlideOver';
 import { BlindSpotModal } from '@/components/workspace/actions/BlindSpotModal';
 import { NoCasesEmpty } from '@/components/ui/empty-state';
@@ -62,7 +61,7 @@ export function ProjectHomePage({
   });
 
   // Calculate project stats
-  const readyCases = cases.filter(c => c.readinessScore >= 90 && c.tensionsCount === 0).length;
+  const readyCases = cases.filter(c => c.tensionsCount === 0 && c.inquiries.every(i => i.status === 'resolved')).length;
   const newActivityCount = activity.filter(a => a.isNew).length;
 
   // Handle action click from RecommendedAction
@@ -376,7 +375,7 @@ function ExplorationCard({
 function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
   const [expanded, setExpanded] = useState(false);
 
-  const isReady = caseItem.readinessScore >= 90 && caseItem.tensionsCount === 0;
+  const isReady = caseItem.tensionsCount === 0 && caseItem.inquiries.length > 0 && caseItem.inquiries.every(i => i.status === 'resolved');
   const resolvedInquiries = caseItem.inquiries.filter(i => i.status === 'resolved').length;
 
   return (
@@ -428,14 +427,9 @@ function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
             </div>
           </div>
 
-          <ReadinessMeter
-            score={caseItem.readinessScore}
-            inquiries={{
-              total: caseItem.inquiries.length,
-              resolved: resolvedInquiries,
-            }}
-            variant="minimal"
-          />
+          <span className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+            {resolvedInquiries}/{caseItem.inquiries.length} inquiries
+          </span>
         </Link>
       </div>
 

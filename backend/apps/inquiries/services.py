@@ -15,6 +15,40 @@ from apps.events.services import EventService
 from apps.events.models import EventType, ActorType
 
 
+MAX_INQUIRY_TITLE_LEN = 100
+
+
+def _build_inquiry_title_from_signal(signal) -> str:
+    """
+    Build a clean inquiry title from a signal.
+
+    Uses type-based prefixes and truncates long text at a word boundary.
+    """
+    text = signal.text.strip()
+
+    if signal.type == SignalType.QUESTION:
+        title = text
+    elif signal.type == SignalType.CLAIM:
+        title = f"Validate: {text}"
+    elif signal.type == SignalType.ASSUMPTION:
+        title = f"Test assumption: {text}"
+    elif signal.type == SignalType.DECISION_INTENT:
+        title = text
+    else:
+        title = f"Examine: {text}"
+
+    # Truncate at word boundary if too long
+    if len(title) > MAX_INQUIRY_TITLE_LEN:
+        truncated = title[:MAX_INQUIRY_TITLE_LEN]
+        # Find last space to avoid cutting mid-word
+        last_space = truncated.rfind(' ')
+        if last_space > MAX_INQUIRY_TITLE_LEN // 2:
+            truncated = truncated[:last_space]
+        title = truncated.rstrip('.,;:') + '...'
+
+    return title
+
+
 class InquiryService:
     """Service for managing inquiries and auto-promotion logic"""
     
@@ -81,7 +115,7 @@ class InquiryService:
             actor_type=ActorType.USER if user else ActorType.SYSTEM,
             actor_id=user.id if user else None,
             case_id=case.id,
-            thread_id=case.linked_thread_id if hasattr(case, 'linked_thread') else None
+            thread_id=None  # Case no longer has linked_thread
         )
         
         # Link event to inquiry if field exists (graceful handling for pre-migration)
@@ -158,37 +192,28 @@ class InquiryService:
         return False, None, None
     
     @staticmethod
+    @transaction.atomic
     def create_inquiry_from_signal(signal, case, elevation_reason=None, title=None):
         """
         Create an inquiry from a signal.
-        
+
         Args:
             signal: The signal to promote
             case: The case this inquiry belongs to
             elevation_reason: Why this signal is being elevated
             title: Optional custom title (defaults to signal text)
-        
+
         Returns:
             Inquiry: The created inquiry
         """
         # Get next sequence index
         last_inquiry = Inquiry.objects.filter(case=case).order_by('-sequence_index').first()
         sequence_index = (last_inquiry.sequence_index + 1) if last_inquiry else 0
-        
+
         # Determine title
         if not title:
-            # Auto-generate title based on signal type
-            if signal.type == SignalType.QUESTION:
-                title = signal.text
-            elif signal.type == SignalType.CLAIM:
-                title = f"Validate: {signal.text}"
-            elif signal.type == SignalType.ASSUMPTION:
-                title = f"Test assumption: {signal.text}"
-            elif signal.type == SignalType.DECISION_INTENT:
-                title = signal.text
-            else:
-                title = f"Examine: {signal.text}"
-        
+            title = _build_inquiry_title_from_signal(signal)
+
         # Create inquiry
         inquiry = Inquiry.objects.create(
             case=case,
@@ -198,23 +223,19 @@ class InquiryService:
             sequence_index=sequence_index,
             status=InquiryStatus.OPEN,
         )
-        
+
         # Link signal to inquiry
         signal.inquiry = inquiry
-        signal.save()
-        
-        # Find and link similar signals
-        similar_signals = Signal.objects.filter(
+        signal.save(update_fields=['inquiry'])
+
+        # Find and link similar signals (bulk update instead of per-object save)
+        Signal.objects.filter(
             case=case,
             dedupe_key=signal.dedupe_key,
             dismissed_at__isnull=True,
-            inquiry__isnull=True
-        ).exclude(id=signal.id)
-        
-        for similar_signal in similar_signals:
-            similar_signal.inquiry = inquiry
-            similar_signal.save()
-        
+            inquiry__isnull=True,
+        ).exclude(id=signal.id).update(inquiry=inquiry)
+
         return inquiry
     
     @staticmethod
@@ -299,7 +320,10 @@ class InquiryService:
         inquiry.conclusion_confidence = conclusion_confidence
         inquiry.status = InquiryStatus.RESOLVED
         inquiry.resolved_at = timezone.now()
-        inquiry.save()
+        inquiry.save(update_fields=[
+            'conclusion', 'conclusion_confidence', 'status',
+            'resolved_at', 'updated_at',
+        ])
         
         # Emit event
         EventService.append(

@@ -1,6 +1,8 @@
 /**
  * Multi-Select Component
  * Select multiple items from a list
+ *
+ * Badges pop in with spring animation and smoothly reflow on removal.
  */
 
 'use client';
@@ -10,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { Badge } from './badge';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { springConfig } from '@/lib/motion-config';
 
 interface MultiSelectProps {
   options: Array<{ value: string; label: string }>;
@@ -61,24 +64,56 @@ export function MultiSelect({
             {placeholder}
           </span>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {selectedLabels.map((label, index) => (
-              <Badge
-                key={value[index]}
-                variant="neutral"
-                className="cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeValue(value[index]);
-                }}
-              >
-                {label}
-                <span className="ml-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">
-                  ×
-                </span>
-              </Badge>
-            ))}
-          </div>
+          <AnimatePresence mode="popLayout">
+            <div className="flex flex-wrap gap-1.5">
+              {selectedLabels.map((label, index) =>
+                prefersReducedMotion ? (
+                  <Badge
+                    key={value[index]}
+                    variant="neutral"
+                    className="cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeValue(value[index]);
+                    }}
+                  >
+                    {label}
+                    <span className="ml-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">
+                      ×
+                    </span>
+                  </Badge>
+                ) : (
+                  <motion.div
+                    key={value[index]}
+                    layout
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0, opacity: 0 }}
+                    transition={{
+                      layout: springConfig.bouncy,
+                      scale: springConfig.bouncy,
+                      opacity: { duration: 0.15 },
+                    }}
+                    style={{ display: 'inline-flex' }}
+                  >
+                    <Badge
+                      variant="neutral"
+                      className="cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeValue(value[index]);
+                      }}
+                    >
+                      {label}
+                      <span className="ml-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">
+                        ×
+                      </span>
+                    </Badge>
+                  </motion.div>
+                )
+              )}
+            </div>
+          </AnimatePresence>
         )}
       </div>
 

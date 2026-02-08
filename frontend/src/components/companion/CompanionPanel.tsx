@@ -164,7 +164,13 @@ export function CompanionPanel({
       >
         {visibleSections.length === 0 && (
           <div className={cn('px-3 py-4 text-xs text-center', theme.thinking.textSubtle)}>
-            [ awaiting context... ]
+            {mode === 'case' ? (
+              caseState
+                ? `${caseState.caseName} · ${caseState.inquiries.open} open inquiries, ${caseState.assumptions.unvalidated} untested assumptions`
+                : 'Chat about your decision to surface signals'
+            ) : mode === 'inquiry_focus'
+              ? 'Chat about this inquiry to surface insights'
+              : 'Send a message to see your reasoning structure'}
           </div>
         )}
 

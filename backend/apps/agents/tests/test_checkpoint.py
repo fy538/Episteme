@@ -107,7 +107,7 @@ class CheckpointSerializationTest(TestCase):
 class CheckpointPersistenceTest(TestCase):
     """Test save/load through the event store."""
 
-    @patch("apps.agents.checkpoint.EventService")
+    @patch("apps.events.services.EventService")
     def test_save_checkpoint_calls_event_service(self, mock_event_service):
         checkpoint = ResearchCheckpoint(
             correlation_id="save-test",
@@ -126,7 +126,7 @@ class CheckpointPersistenceTest(TestCase):
         all_args = str(call_kwargs)
         self.assertIn("AGENT_CHECKPOINT", all_args)
 
-    @patch("apps.agents.checkpoint.EventService")
+    @patch("apps.events.services.EventService")
     def test_save_checkpoint_handles_failure(self, mock_event_service):
         """save_checkpoint is best-effort — should not raise."""
         mock_event_service.append.side_effect = RuntimeError("DB down")
@@ -143,13 +143,13 @@ class CheckpointPersistenceTest(TestCase):
         # Should not raise
         save_checkpoint(checkpoint)
 
-    @patch("apps.agents.checkpoint.Event")
+    @patch("apps.events.models.Event")
     def test_load_latest_returns_none_when_empty(self, mock_event):
         mock_event.objects.filter.return_value.order_by.return_value.first.return_value = None
         result = load_latest_checkpoint("nonexistent")
         self.assertIsNone(result)
 
-    @patch("apps.agents.checkpoint.Event")
+    @patch("apps.events.models.Event")
     def test_load_latest_returns_checkpoint(self, mock_event):
         mock_event_obj = MagicMock()
         mock_event_obj.payload = {
@@ -322,8 +322,7 @@ class ResumeFromCheckpointTest(TestCase):
             json.dumps({"complete": True}),
             "# Resumed Summary\n\nResult after resume.",
         ]
-        provider = MagicMock()
-        provider.generate = AsyncMock(side_effect=responses)
+        provider = make_test_provider(responses)
 
         tool = MagicMock()
         tool.name = "web_search"
@@ -379,8 +378,7 @@ class ResumeFromCheckpointTest(TestCase):
         )
 
         # Only need synthesize response
-        provider = MagicMock()
-        provider.generate = AsyncMock(return_value="# Summary\n\nDone.")
+        provider = make_test_provider(["# Summary\n\nDone."])
 
         tool = MagicMock()
         tool.name = "web_search"

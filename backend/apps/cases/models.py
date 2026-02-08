@@ -39,6 +39,14 @@ class EditFriction(models.TextChoices):
     READONLY = 'readonly', 'Read-only'
 
 
+class CaseStage(models.TextChoices):
+    """Investigation stage for a case's plan"""
+    EXPLORING = 'exploring', 'Exploring'
+    INVESTIGATING = 'investigating', 'Investigating'
+    SYNTHESIZING = 'synthesizing', 'Synthesizing'
+    READY = 'ready', 'Ready'
+
+
 class Case(UUIDModel, TimestampedModel):
     """
     A Case is the centered workspace for getting something right.
@@ -99,7 +107,36 @@ class Case(UUIDModel, TimestampedModel):
         blank=True,
         help_text="User's answer to 'What would change your mind?'"
     )
-    
+
+    # "What would change your mind" resurface response
+    what_changed_mind_response = models.CharField(
+        max_length=50,
+        blank=True,
+        choices=[
+            ('updated_view', 'Yes, and I updated my view'),
+            ('proceeding_anyway', 'Yes, but I\'m proceeding anyway'),
+            ('not_materialized', 'No, none of this materialized'),
+        ],
+        help_text="User's response when their earlier 'what would change your mind' is resurfaced"
+    )
+    what_changed_mind_response_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the user responded to the resurface prompt"
+    )
+
+    # Premortem — "Imagine this decision failed. What's the most likely reason?"
+    # Prompted when case enters synthesizing stage
+    premortem_text = models.TextField(
+        blank=True,
+        help_text="User's premortem: imagined reason for future failure"
+    )
+    premortem_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the premortem was written"
+    )
+
     # Relationships
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cases')
     
@@ -127,12 +164,13 @@ class Case(UUIDModel, TimestampedModel):
         help_text="Event that triggered case creation"
     )
     
-    # Active skills for this case
+    # Active skills for this case (ordered via through model)
     active_skills = models.ManyToManyField(
         'skills.Skill',
+        through='CaseActiveSkill',
         blank=True,
         related_name='active_in_cases',
-        help_text="Skills activated for this case"
+        help_text="Skills activated for this case (ordered)"
     )
     
     # Skill template functionality
@@ -170,6 +208,20 @@ class Case(UUIDModel, TimestampedModel):
         blank=True,
         related_name='originating_case',  # Changed to avoid clash
         help_text="Skill created from this case"
+    )
+
+    # Per-case intelligence configuration (Items 2)
+    intelligence_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Per-case AI behavior config: {auto_validate, background_research, gap_detection}"
+    )
+
+    # Per-case investigation preferences (Item 3)
+    investigation_preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Per-case investigation prefs: {rigor, evidence_threshold, disable_locks}"
     )
 
     # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
@@ -391,6 +443,159 @@ class CaseDocumentVersion(UUIDModel):
         )
 
 
+class InvestigationPlan(UUIDModel, TimestampedModel):
+    """
+    Living investigation roadmap for a case. One-to-one with Case.
+
+    The plan holds the investigation stage and current version pointer.
+    Actual plan content (phases, assumptions, criteria) lives in PlanVersion
+    snapshots — every change creates a new immutable version.
+    """
+    case = models.OneToOneField(
+        'Case',
+        on_delete=models.CASCADE,
+        related_name='plan'
+    )
+
+    stage = models.CharField(
+        max_length=20,
+        choices=CaseStage.choices,
+        default=CaseStage.EXPLORING,
+        help_text="Current investigation stage"
+    )
+
+    current_version = models.IntegerField(
+        default=1,
+        help_text="Latest accepted version number"
+    )
+
+    position_statement = models.TextField(
+        blank=True,
+        help_text="Current working thesis — evolves with evidence"
+    )
+
+    # Provenance
+    created_from_event_id = models.UUIDField(
+        null=True, blank=True,
+        help_text="Event that triggered plan creation"
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['case']),
+        ]
+
+    def __str__(self):
+        return f"Plan for: {self.case.title} (v{self.current_version}, {self.stage})"
+
+
+class PlanVersion(UUIDModel):
+    """
+    Immutable snapshot of a plan at a point in time.
+
+    Content is a structured JSONField holding the full plan state:
+    phases, assumptions, decision criteria. Each AI-proposed or
+    user-confirmed change creates a new version.
+
+    Follows the CaseDocumentVersion pattern (create_snapshot classmethod).
+    """
+    plan = models.ForeignKey(
+        InvestigationPlan,
+        on_delete=models.CASCADE,
+        related_name='versions'
+    )
+
+    version_number = models.IntegerField(
+        help_text="Sequential version number"
+    )
+
+    # Full plan content as structured JSON
+    content = models.JSONField(
+        help_text="Full plan snapshot — phases, assumptions, decision_criteria"
+    )
+    # content schema:
+    # {
+    #   "phases": [{
+    #     "id": "uuid-str", "title": str, "description": str,
+    #     "order": int, "inquiry_ids": [str]
+    #   }],
+    #   "assumptions": [{
+    #     "id": "uuid-str",           # Can be Signal ID (linked) or standalone UUID
+    #     "signal_id": "uuid|null",   # Reference to Signal record (single source of truth)
+    #     "text": str,
+    #     "status": "untested|confirmed|challenged|refuted",
+    #     "test_strategy": str, "evidence_summary": str,
+    #     "risk_level": "low|medium|high"
+    #   }],
+    #   "decision_criteria": [{
+    #     "id": "uuid-str", "text": str,
+    #     "is_met": bool, "linked_inquiry_id": "uuid|null"
+    #   }],
+    #   "stage_rationale": str
+    # }
+
+    diff_summary = models.TextField(
+        blank=True,
+        help_text="Human-readable summary of what changed"
+    )
+
+    diff_data = models.JSONField(
+        null=True, blank=True,
+        help_text="Structured diff for UI rendering (added/removed/changed items)"
+    )
+
+    created_by = models.CharField(
+        max_length=30,
+        choices=[
+            ('system', 'System (initial generation)'),
+            ('ai_proposal', 'AI Proposal (accepted by user)'),
+            ('user_request', 'User Request (via chat)'),
+            ('critique', 'Critique Agent'),
+            ('restore', 'Restored from previous version'),
+        ],
+        help_text="Who/what created this version"
+    )
+
+    created_from_event_id = models.UUIDField(
+        null=True, blank=True,
+        help_text="Event that triggered this version"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-version_number']
+        unique_together = [['plan', 'version_number']]
+        indexes = [
+            models.Index(fields=['plan', '-version_number']),
+            models.Index(fields=['plan', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"v{self.version_number} of plan for {self.plan.case.title} ({self.created_by})"
+
+    @classmethod
+    def create_snapshot(cls, plan, content, created_by, diff_summary='', diff_data=None):
+        """Create a new version snapshot. Mirrors CaseDocumentVersion.create_snapshot."""
+        latest = cls.objects.filter(plan=plan).order_by('-version_number').first()
+        next_version = (latest.version_number + 1) if latest else 1
+
+        version = cls.objects.create(
+            plan=plan,
+            version_number=next_version,
+            content=content,
+            created_by=created_by,
+            diff_summary=diff_summary,
+            diff_data=diff_data,
+        )
+
+        # Update the plan's current version pointer
+        plan.current_version = next_version
+        plan.save(update_fields=['current_version', 'updated_at'])
+
+        return version
+
+
 class DocumentCitation(UUIDModel, TimestampedModel):
     """
     Citation from one document to another.
@@ -567,6 +772,39 @@ class ReadinessChecklistItem(UUIDModel, TimestampedModel):
     def __str__(self):
         status = '✓' if self.is_complete else '○'
         return f"{status} {self.description[:50]}"
+
+
+class CaseActiveSkill(models.Model):
+    """
+    Through model for Case.active_skills with ordering and provenance.
+
+    Enables:
+    - Explicit skill ordering (lower order = higher priority)
+    - Tracking which pack activated a skill
+    - Activation timestamps
+    """
+    case = models.ForeignKey(Case, on_delete=models.CASCADE)
+    skill = models.ForeignKey('skills.Skill', on_delete=models.CASCADE)
+    order = models.IntegerField(
+        default=0,
+        help_text="Priority order (lower = higher priority)"
+    )
+    activated_at = models.DateTimeField(auto_now_add=True)
+    activated_from_pack = models.ForeignKey(
+        'skills.SkillPack',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Pack that caused this activation (for provenance)"
+    )
+
+    class Meta:
+        db_table = 'case_active_skills'
+        unique_together = [['case', 'skill']]
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.case.title[:30]} <- {self.skill.name} (order={self.order})"
 
 
 # Default checklist items for new cases

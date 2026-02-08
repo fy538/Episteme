@@ -146,7 +146,11 @@ export function ThinkingSection({
                 modeTheme.textSubtle,
                 isTerminalTheme && 'font-mono'
               )}>
-                [ awaiting context... ]
+                {mode === 'case'
+                  ? 'Chat about your decision to begin analysis'
+                  : mode === 'inquiry_focus'
+                    ? 'Chat about this inquiry to surface insights'
+                    : 'Send a message to see reasoning'}
               </p>
             )}
           </div>

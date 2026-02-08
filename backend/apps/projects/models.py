@@ -198,14 +198,24 @@ class EvidenceType(models.TextChoices):
     BENCHMARK = 'benchmark', 'Benchmark Result'
 
 
+class RetrievalMethod(models.TextChoices):
+    """How evidence entered the system"""
+    DOCUMENT_UPLOAD = 'document_upload', 'Document Upload'
+    RESEARCH_LOOP = 'research_loop', 'Research Loop'
+    EXTERNAL_PASTE = 'external_paste', 'External Paste'
+    URL_FETCH = 'url_fetch', 'URL Fetch'
+    USER_OBSERVATION = 'user_observation', 'User Observation'
+    CHAT_BRIDGED = 'chat_bridged', 'Bridged from Chat Evidence'
+
+
 class Evidence(UUIDModel, TimestampedModel):
     """
     Extracted fact from a document chunk.
-    
+
     Key distinction from Signal:
     - Signal = User's thought ("I assume writes are append-only")
     - Evidence = External fact ("Benchmark shows 50k writes/sec")
-    
+
     Evidence provides "receipts" that can support or contradict user signals.
     This prevents circular extraction (AI docs don't create new signals).
     """
@@ -216,7 +226,7 @@ class Evidence(UUIDModel, TimestampedModel):
         choices=EvidenceType.choices,
         help_text="Type of evidence"
     )
-    
+
     # Source (pointer to exact location in document)
     chunk = models.ForeignKey(
         'DocumentChunk',
@@ -224,54 +234,88 @@ class Evidence(UUIDModel, TimestampedModel):
         related_name='evidence',
         help_text="Chunk this evidence was extracted from"
     )
-    
+
     document = models.ForeignKey(
         Document,
         on_delete=models.CASCADE,
         related_name='evidence',
         help_text="Document this evidence came from"
     )
-    
+
     # Credibility
     extraction_confidence = models.FloatField(
         help_text="How confident the LLM was in this extraction (0.0-1.0)"
     )
-    
+
     user_credibility_rating = models.IntegerField(
         null=True,
         blank=True,
         help_text="User's rating of this evidence (1-5 stars)"
     )
-    
+
     # Embedding (for similarity search)
     embedding = models.JSONField(
         null=True,
         blank=True,
         help_text="Semantic embedding (384-dim)"
     )
-    
-    # Knowledge graph relationships (Phase 2.3)
-    # These will be added as ManyToMany fields or via separate Relationship model
-    # For now, prepare the structure
-    
+
+    # Provenance — how and where this evidence was found
+    source_url = models.URLField(
+        max_length=2000,
+        blank=True,
+        help_text="URL where this evidence was found"
+    )
+    source_title = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Title of the source (article, paper, page)"
+    )
+    source_domain = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Domain of the source URL"
+    )
+    source_published_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Publication date of the source"
+    )
+    retrieval_method = models.CharField(
+        max_length=30,
+        choices=RetrievalMethod.choices,
+        default=RetrievalMethod.DOCUMENT_UPLOAD,
+        help_text="How this evidence entered the system"
+    )
+
+    # Cross-link to inquiry evidence (for bridged evidence)
+    inquiry_evidence = models.ForeignKey(
+        'inquiries.Evidence',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='project_evidence',
+        help_text="If bridged from inquiry evidence"
+    )
+
     # Metadata
     extracted_at = models.DateTimeField(auto_now_add=True)
-    
-    # Knowledge graph edges (Phase 2.3) - Link to Signals
+
+    # Knowledge graph edges — Link to Signals
     supports_signals = models.ManyToManyField(
         'signals.Signal',
         related_name='supported_by_evidence',
         blank=True,
         help_text="Signals this evidence supports (provides receipts for)"
     )
-    
+
     contradicts_signals = models.ManyToManyField(
         'signals.Signal',
         related_name='contradicted_by_evidence',
         blank=True,
         help_text="Signals this evidence contradicts"
     )
-    
+
     class Meta:
         ordering = ['-extracted_at']
         indexes = [
@@ -279,8 +323,10 @@ class Evidence(UUIDModel, TimestampedModel):
             models.Index(fields=['chunk', '-extracted_at']),
             models.Index(fields=['type', '-extracted_at']),
             models.Index(fields=['document', 'user_credibility_rating']),
+            models.Index(fields=['source_domain', '-extracted_at']),
+            models.Index(fields=['retrieval_method', '-extracted_at']),
         ]
-    
+
     def __str__(self):
         return f"{self.type}: {self.text[:50]}..."
 

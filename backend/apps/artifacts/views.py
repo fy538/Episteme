@@ -1,6 +1,8 @@
 """
 Artifact views
 """
+import copy
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -30,7 +32,9 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        queryset = Artifact.objects.select_related('current_version', 'case')
+        queryset = Artifact.objects.select_related(
+            'current_version', 'case',
+        ).prefetch_related('input_signals', 'input_evidence')
         
         # Filter by case
         case_id = self.request.query_params.get('case_id')
@@ -89,7 +93,7 @@ class ArtifactViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        blocks = current_version.blocks.copy()
+        blocks = copy.deepcopy(current_version.blocks)
         
         # Find and update block
         block_found = False
@@ -127,7 +131,7 @@ class ArtifactViewSet(viewsets.ModelViewSet):
             
             artifact.current_version = new_version
             artifact.version_count += 1
-            artifact.save()
+            artifact.save(update_fields=['current_version', 'version_count', 'updated_at'])
         
         return Response(self.get_serializer(artifact).data)
     
@@ -143,7 +147,7 @@ class ArtifactViewSet(viewsets.ModelViewSet):
         artifact = self.get_object()
         artifact.is_published = True
         artifact.published_at = timezone.now()
-        artifact.save()
+        artifact.save(update_fields=['is_published', 'published_at', 'updated_at'])
         
         return Response(self.get_serializer(artifact).data)
     

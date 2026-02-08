@@ -143,6 +143,11 @@ def validate_skill_md(content: str) -> Tuple[bool, List[str]]:
                 rc_errors = _validate_research_config(episteme['research_config'])
                 errors.extend(rc_errors)
 
+            # Validate artifact_template if present
+            if 'artifact_template' in episteme:
+                at_errors = _validate_artifact_template(episteme['artifact_template'])
+                errors.extend(at_errors)
+
     return len(errors) == 0, errors
 
 
@@ -164,6 +169,46 @@ def _validate_research_config(raw_config) -> List[str]:
         return [f"research_config: {e}" for e in config_errors]
     except Exception as e:
         return [f"research_config: Failed to parse — {e}"]
+
+
+def _validate_artifact_template(raw_template) -> List[str]:
+    """
+    Validate artifact_template section of episteme config.
+
+    Supports two section formats:
+    - String list: ["Legal Summary", "Risk Assessment"]
+    - Dict list: [{"heading": "Legal Summary", "type": "custom"}]
+
+    Returns list of error strings (empty if valid).
+    """
+    if not isinstance(raw_template, dict):
+        return ["Field 'episteme.artifact_template' must be an object"]
+
+    errors = []
+    brief = raw_template.get('brief', {})
+    if not isinstance(brief, dict):
+        errors.append("Field 'episteme.artifact_template.brief' must be an object")
+    else:
+        sections = brief.get('sections', [])
+        if not isinstance(sections, list):
+            errors.append("Field 'episteme.artifact_template.brief.sections' must be a list")
+        elif len(sections) > 20:
+            errors.append("artifact_template.brief.sections: maximum 20 sections allowed")
+        else:
+            for i, s in enumerate(sections):
+                if not isinstance(s, (str, dict)):
+                    errors.append(
+                        f"artifact_template.brief.sections[{i}]: must be a string or object"
+                    )
+                elif isinstance(s, str) and len(s.strip()) == 0:
+                    errors.append(
+                        f"artifact_template.brief.sections[{i}]: string cannot be empty"
+                    )
+                elif isinstance(s, dict) and not s.get('heading') and not s.get('name'):
+                    errors.append(
+                        f"artifact_template.brief.sections[{i}]: must have 'heading' or 'name'"
+                    )
+    return errors
 
 
 def extract_metadata_from_yaml(content: str) -> Dict:

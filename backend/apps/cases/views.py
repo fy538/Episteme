@@ -3,7 +3,7 @@ Case views
 """
 import logging
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Case, CaseStatus, WorkingView, CaseDocument, CaseDocumentVersion, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST
+from .models import Case, CaseStatus, WorkingView, CaseDocument, CaseDocumentVersion, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST, InvestigationPlan, PlanVersion
 from .brief_models import BriefSection, BriefAnnotation
 from .serializers import (
     CaseSerializer,
@@ -23,7 +23,15 @@ from .serializers import (
     CreateChecklistItemSerializer,
     UpdateChecklistItemSerializer,
     UserConfidenceSerializer,
+    InvestigationPlanSerializer,
+    PlanVersionSerializer,
+    PlanStageUpdateSerializer,
+    PlanRestoreSerializer,
+    PlanDiffProposalSerializer,
+    AssumptionStatusSerializer,
+    CriterionStatusSerializer,
 )
+from .plan_service import PlanService
 from .brief_serializers import (
     BriefSectionSerializer,
     BriefSectionCreateSerializer,
@@ -50,7 +58,13 @@ class CaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Case.objects.filter(user=self.request.user).exclude(status=CaseStatus.ARCHIVED)
+        return (
+            Case.objects
+            .filter(user=self.request.user)
+            .exclude(status=CaseStatus.ARCHIVED)
+            .select_related('based_on_skill', 'became_skill')
+            .prefetch_related('caseactiveskill_set__skill')
+        )
 
     def destroy(self, request, *args, **kwargs):
         """Soft delete — sets status to ARCHIVED instead of removing the row."""
@@ -253,37 +267,118 @@ _What actions follow from this decision?_
     def activate_skills(self, request, pk=None):
         """
         Activate skills for this case
-        
+
         POST /api/cases/{id}/activate_skills/
-        
+
         Request body:
         {
             "skill_ids": ["uuid1", "uuid2", ...]
         }
-        
+
         Returns: Updated case with active skills
         """
         from apps.skills.models import Skill
         from apps.skills.serializers import SkillListSerializer
-        
+        from apps.cases.models import CaseActiveSkill
+
         case = self.get_object()
         skill_ids = request.data.get('skill_ids', [])
-        
-        # TODO: Filter by organization when org relationship exists
-        # For now, just validate that skills exist and are active
-        skills = Skill.objects.filter(
-            id__in=skill_ids,
-            status='active'
-        )
-        
-        # Set active skills for this case
-        case.active_skills.set(skills)
-        
+
+        # Validate that skills exist and are active
+        skills_by_id = {
+            str(s.id): s
+            for s in Skill.objects.filter(id__in=skill_ids, status='active')
+        }
+
+        # Preserve client-supplied ordering
+        ordered_skills = [
+            skills_by_id[sid] for sid in skill_ids if sid in skills_by_id
+        ]
+
+        # Clear existing and re-add with ordering (through model) — atomic
+        with transaction.atomic():
+            CaseActiveSkill.objects.filter(case=case).delete()
+            CaseActiveSkill.objects.bulk_create([
+                CaseActiveSkill(case=case, skill=skill, order=i)
+                for i, skill in enumerate(ordered_skills)
+            ])
+
         return Response({
             'case_id': str(case.id),
-            'active_skills': SkillListSerializer(skills, many=True).data
+            'active_skills': SkillListSerializer(ordered_skills, many=True).data
         })
-    
+
+    @action(detail=True, methods=['post'], url_path='activate-pack')
+    def activate_pack(self, request, pk=None):
+        """
+        Activate all skills from a skill pack for this case.
+
+        POST /api/cases/{id}/activate-pack/
+
+        Request body:
+        {
+            "pack_slug": "consulting-starter"
+        }
+
+        Replaces existing active skills with the pack's skills (in order).
+        Records provenance (which pack activated each skill).
+        """
+        from apps.skills.models import SkillPack, SkillPackMembership
+        from apps.skills.serializers import SkillListSerializer
+        from apps.cases.models import CaseActiveSkill
+
+        case = self.get_object()
+        pack_slug = request.data.get('pack_slug')
+
+        if not pack_slug:
+            return Response(
+                {'error': 'pack_slug is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Filter by scope: public packs or org packs the user belongs to
+        user = request.user
+        try:
+            pack = SkillPack.objects.filter(
+                slug=pack_slug,
+                status='active',
+            ).filter(
+                models.Q(scope='public') |
+                models.Q(scope='organization', organization__members=user)
+            ).get()
+        except SkillPack.DoesNotExist:
+            return Response(
+                {'error': f'Skill pack not found: {pack_slug}'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        memberships = list(
+            SkillPackMembership.objects.filter(pack=pack)
+            .select_related('skill')
+            .order_by('order')
+        )
+
+        # Replace existing active skills with pack skills — atomic
+        with transaction.atomic():
+            CaseActiveSkill.objects.filter(case=case).delete()
+            CaseActiveSkill.objects.bulk_create([
+                CaseActiveSkill(
+                    case=case,
+                    skill=m.skill,
+                    order=m.order,
+                    activated_from_pack=pack,
+                )
+                for m in memberships
+            ])
+
+        activated = [m.skill for m in memberships]
+        return Response({
+            'case_id': str(case.id),
+            'pack_slug': pack.slug,
+            'pack_name': pack.name,
+            'active_skills': SkillListSerializer(activated, many=True).data,
+        })
+
     @action(detail=True, methods=['get'])
     def onboarding(self, request, pk=None):
         """
@@ -405,7 +500,7 @@ _What actions follow from this decision?_
             case.template_scope = scope
         else:
             case.template_scope = None
-        case.save()
+        case.save(update_fields=['is_skill_template', 'template_scope', 'updated_at'])
         
         # Generate preview
         preview = None
@@ -497,23 +592,44 @@ _What actions follow from this decision?_
             unlinked_claims: [{text, location}]
         }
         """
-        from apps.signals.models import Signal
-        from apps.inquiries.models import Inquiry, InquiryStatus
+        from apps.signals.models import Signal, SignalType
+        from apps.inquiries.models import Inquiry, InquiryStatus, Evidence
 
         case = self.get_object()
 
-        # Count evidence mentions (no direction metadata available on Signal model)
-        evidence_signals = Signal.objects.filter(case=case, type='EvidenceMention')
-        total_evidence = evidence_signals.count()
+        # 1) Count inquiry Evidence items (which have direction)
+        inquiry_evidence = Evidence.objects.filter(inquiry__case=case)
+        direction_counts = (
+            inquiry_evidence
+            .values('direction')
+            .annotate(count=models.Count('id'))
+        )
+        direction_map = {row['direction']: row['count'] for row in direction_counts}
+        inquiry_supporting = direction_map.get('supports', 0)
+        inquiry_contradicting = direction_map.get('contradicts', 0)
+        inquiry_neutral = direction_map.get('neutral', 0)
+
+        # 2) Count EvidenceMention signals (no direction — counted as neutral)
+        signal_neutral = Signal.objects.filter(case=case, type=SignalType.EVIDENCE_MENTION).count()
+
+        # 3) Combine both sources
+        total_supporting = inquiry_supporting
+        total_contradicting = inquiry_contradicting
+        total_neutral = inquiry_neutral + signal_neutral
+
         evidence = {
-            'total': total_evidence,
-            'supporting': 0,  # Direction not tracked on Signal model
-            'contradicting': 0,
-            'neutral': total_evidence,
+            'total': total_supporting + total_contradicting + total_neutral,
+            'supporting': total_supporting,
+            'contradicting': total_contradicting,
+            'neutral': total_neutral,
         }
 
         # Count assumptions and their validation status
-        assumption_signals = Signal.objects.filter(case=case, type='Assumption')
+        # Prefetch inquiry relationship to avoid N+1
+        assumption_signals = (
+            Signal.objects.filter(case=case, type=SignalType.ASSUMPTION)
+            .select_related('inquiry')
+        )
         total_assumptions = assumption_signals.count()
 
         # An assumption is validated if it has a linked inquiry that is resolved
@@ -521,12 +637,7 @@ _What actions follow from this decision?_
         untested_list = []
 
         for assumption in assumption_signals:
-            # Check if there's an inquiry investigating this assumption
-            linked_inquiry = Inquiry.objects.filter(
-                case=case,
-                signals=assumption
-            ).first()
-
+            linked_inquiry = assumption.inquiry
             if linked_inquiry and linked_inquiry.status == InquiryStatus.RESOLVED:
                 validated_assumptions += 1
             else:
@@ -543,21 +654,22 @@ _What actions follow from this decision?_
             'untested_list': untested_list[:10],  # Limit to 10
         }
 
-        # Count inquiries by status
-        inquiries = case.inquiries.exclude(status=InquiryStatus.ARCHIVED)
-        inquiry_counts = {
-            'total': inquiries.count(),
-            'open': inquiries.filter(status=InquiryStatus.OPEN).count(),
-            'investigating': inquiries.filter(status=InquiryStatus.INVESTIGATING).count(),
-            'resolved': inquiries.filter(status=InquiryStatus.RESOLVED).count(),
-        }
+        # Count inquiries by status — single aggregate query
+        from django.db.models import Count, Q
+        inquiries_qs = case.inquiries.exclude(status=InquiryStatus.ARCHIVED)
+        inquiry_counts = inquiries_qs.aggregate(
+            total=Count('id'),
+            open=Count('id', filter=Q(status=InquiryStatus.OPEN)),
+            investigating=Count('id', filter=Q(status=InquiryStatus.INVESTIGATING)),
+            resolved=Count('id', filter=Q(status=InquiryStatus.RESOLVED)),
+        )
 
         # Find claims from the brief (metadata not available on Signal model)
         unlinked_claims = []
         if case.main_brief:
             claim_signals = Signal.objects.filter(
                 case=case,
-                type='Claim',
+                type=SignalType.CLAIM,
             )[:5]
             for claim in claim_signals:
                 unlinked_claims.append({
@@ -607,6 +719,58 @@ _What actions follow from this decision?_
             'user_confidence': case.user_confidence,
             'user_confidence_updated_at': case.user_confidence_updated_at,
             'what_would_change_mind': case.what_would_change_mind,
+        })
+
+    @action(detail=True, methods=['patch'], url_path='premortem')
+    def premortem(self, request, pk=None):
+        """
+        Save user's premortem text.
+
+        PATCH /api/cases/{id}/premortem/
+        Body: { "premortem_text": "..." }
+        """
+        case = self.get_object()
+        premortem_text = request.data.get('premortem_text', '')
+
+        case.premortem_text = premortem_text
+        if premortem_text and not case.premortem_at:
+            case.premortem_at = timezone.now()
+        case.save(update_fields=['premortem_text', 'premortem_at', 'updated_at'])
+
+        return Response({
+            'premortem_text': case.premortem_text,
+            'premortem_at': case.premortem_at,
+        })
+
+    @action(detail=True, methods=['patch'], url_path='what-changed-mind-response')
+    def what_changed_mind_response(self, request, pk=None):
+        """
+        Record user's response to "what would change your mind" resurface.
+
+        PATCH /api/cases/{id}/what-changed-mind-response/
+        Body: { "response": "updated_view" | "proceeding_anyway" | "not_materialized" }
+        """
+        case = self.get_object()
+        response_value = request.data.get('response', '')
+
+        valid_responses = ['updated_view', 'proceeding_anyway', 'not_materialized']
+        if response_value not in valid_responses:
+            return Response(
+                {'error': f'Invalid response. Must be one of: {valid_responses}'},
+                status=400
+            )
+
+        case.what_changed_mind_response = response_value
+        case.what_changed_mind_response_at = timezone.now()
+        case.save(update_fields=[
+            'what_changed_mind_response',
+            'what_changed_mind_response_at',
+            'updated_at'
+        ])
+
+        return Response({
+            'what_changed_mind_response': case.what_changed_mind_response,
+            'what_changed_mind_response_at': case.what_changed_mind_response_at,
         })
 
     @action(detail=True, methods=['get', 'post'], url_path='readiness-checklist')
@@ -692,24 +856,32 @@ _What actions follow from this decision?_
         serializer = UpdateChecklistItemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        changed_fields = []
         if 'description' in serializer.validated_data:
             item.description = serializer.validated_data['description']
+            changed_fields.append('description')
         if 'is_required' in serializer.validated_data:
             item.is_required = serializer.validated_data['is_required']
+            changed_fields.append('is_required')
         if 'order' in serializer.validated_data:
             item.order = serializer.validated_data['order']
+            changed_fields.append('order')
 
         # Handle completion toggle
         if 'is_complete' in serializer.validated_data:
             was_complete = item.is_complete
             item.is_complete = serializer.validated_data['is_complete']
+            changed_fields.append('is_complete')
 
             if item.is_complete and not was_complete:
                 item.completed_at = timezone.now()
+                changed_fields.append('completed_at')
             elif not item.is_complete:
                 item.completed_at = None
+                changed_fields.append('completed_at')
 
-        item.save()
+        if changed_fields:
+            item.save(update_fields=changed_fields + ['updated_at'])
 
         return Response(ReadinessChecklistItemSerializer(item).data)
 
@@ -748,7 +920,7 @@ _What actions follow from this decision?_
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='readiness-checklist/generate')
-    def generate_checklist(self, request, pk=None):
+    async def generate_checklist(self, request, pk=None):
         """
         Generate AI-powered checklist items for this case.
 
@@ -758,68 +930,77 @@ _What actions follow from this decision?_
         and creates smart checklist items. Does not replace existing items.
         """
         from apps.cases.checklist_service import generate_smart_checklist
-        import asyncio
+        from asgiref.sync import sync_to_async
 
-        case = self.get_object()
+        case = await sync_to_async(self.get_object)()
 
         # Generate items based on case context
-        items_data = asyncio.run(generate_smart_checklist(case))
+        items_data = await generate_smart_checklist(case)
 
         # Create checklist items in two passes: parents first, then children
+        @sync_to_async
+        def _create_items(case, items_data):
+            created_items = []
+            parent_map = {}  # description -> created parent item
+            max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or -1
 
-        created_items = []
-        parent_map = {}  # description -> created parent item
-        max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or -1
+            # Debug: Log what we're receiving
+            logger.info(f"View received {len(items_data)} items")
+            for item in items_data:
+                logger.debug(f"  - {item['description'][:40]}: parent_matched={item.get('parent_description_matched')}")
 
-        # Debug: Log what we're receiving
-        logger.info(f"View received {len(items_data)} items")
-        for item in items_data:
-            logger.debug(f"  - {item['description'][:40]}: parent_matched={item.get('parent_description_matched')}")
+            # Pass 1: Create parent items (items with no parent_description_matched)
+            for idx, item_data in enumerate(items_data):
+                if not item_data.get('parent_description_matched'):
+                    item = ReadinessChecklistItem.objects.create(
+                        case=case,
+                        description=item_data['description'],
+                        is_required=item_data.get('is_required', True),
+                        why_important=item_data.get('why_important', ''),
+                        linked_inquiry_id=item_data.get('linked_inquiry_id'),
+                        item_type=item_data.get('item_type', 'custom'),
+                        order=max_order + idx + 1,
+                        created_by_ai=True,
+                        parent=None,  # Explicitly no parent
+                    )
+                    created_items.append(item)
+                    parent_map[item_data['description']] = item
 
-        # Pass 1: Create parent items (items with no parent_description_matched)
-        for idx, item_data in enumerate(items_data):
-            if not item_data.get('parent_description_matched'):
-                item = ReadinessChecklistItem.objects.create(
-                    case=case,
-                    description=item_data['description'],
-                    is_required=item_data.get('is_required', True),
-                    why_important=item_data.get('why_important', ''),
-                    linked_inquiry_id=item_data.get('linked_inquiry_id'),
-                    item_type=item_data.get('item_type', 'custom'),
-                    order=max_order + idx + 1,
-                    created_by_ai=True,
-                    parent=None,  # Explicitly no parent
-                )
-                created_items.append(item)
-                parent_map[item_data['description']] = item
+            # Pass 2: Create child items (items with parent_description_matched)
+            child_order = len(created_items)
+            for item_data in items_data:
+                parent_desc = item_data.get('parent_description_matched')
+                if parent_desc and parent_desc in parent_map:
+                    parent_item = parent_map[parent_desc]
+                    item = ReadinessChecklistItem.objects.create(
+                        case=case,
+                        description=item_data['description'],
+                        is_required=item_data.get('is_required', True),
+                        why_important=item_data.get('why_important', ''),
+                        linked_inquiry_id=item_data.get('linked_inquiry_id'),
+                        item_type=item_data.get('item_type', 'custom'),
+                        order=max_order + child_order + 1,
+                        created_by_ai=True,
+                        parent=parent_item,
+                    )
+                    created_items.append(item)
+                    child_order += 1
 
-        # Pass 2: Create child items (items with parent_description_matched)
-        child_order = len(created_items)
-        for item_data in items_data:
-            parent_desc = item_data.get('parent_description_matched')
-            if parent_desc and parent_desc in parent_map:
-                parent_item = parent_map[parent_desc]
-                item = ReadinessChecklistItem.objects.create(
-                    case=case,
-                    description=item_data['description'],
-                    is_required=item_data.get('is_required', True),
-                    why_important=item_data.get('why_important', ''),
-                    linked_inquiry_id=item_data.get('linked_inquiry_id'),
-                    item_type=item_data.get('item_type', 'custom'),
-                    order=max_order + child_order + 1,
-                    created_by_ai=True,
-                    parent=parent_item,
-                )
-                created_items.append(item)
-                child_order += 1
+            return created_items, parent_map
+
+        created_items, parent_map = await _create_items(case, items_data)
+
+        serializer_data = await sync_to_async(
+            lambda: ReadinessChecklistItemSerializer(created_items, many=True, context={'include_children': True}).data
+        )()
 
         return Response({
             'message': f'Generated {len(created_items)} checklist items ({len(parent_map)} parents, {len(created_items) - len(parent_map)} children)',
-            'items': ReadinessChecklistItemSerializer(created_items, many=True, context={'include_children': True}).data
+            'items': serializer_data
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='suggest-inquiries')
-    def suggest_inquiries(self, request, pk=None):
+    async def suggest_inquiries(self, request, pk=None):
         """
         Get AI-suggested inquiries based on case context.
 
@@ -827,41 +1008,25 @@ _What actions follow from this decision?_
 
         Returns: [{title, description, reason, priority}]
         """
-        from apps.common.llm_providers import get_llm_provider
+        from apps.common.llm_providers import get_llm_provider, stream_json
         from apps.intelligence.case_prompts import build_inquiry_suggestion_prompt
-        import asyncio
-        import json
+        from asgiref.sync import sync_to_async
 
-        case = self.get_object()
-        prompt = build_inquiry_suggestion_prompt(case)
+        case = await sync_to_async(self.get_object)()
+        prompt = await sync_to_async(build_inquiry_suggestion_prompt)(case)
 
         provider = get_llm_provider('fast')
-
-        async def generate():
-            full_response = ""
-            async for chunk in provider.stream_chat(
-                messages=[{"role": "user", "content": prompt}],
-                system_prompt="You suggest inquiries to help make better decisions."
-            ):
-                full_response += chunk.content
-
-            # Parse JSON response
-            try:
-                response_text = full_response.strip()
-                if response_text.startswith("```"):
-                    response_text = response_text.split("```")[1]
-                    if response_text.startswith("json"):
-                        response_text = response_text[4:]
-                    response_text = response_text.strip()
-                return json.loads(response_text)
-            except Exception:
-                return []
-
-        suggestions = asyncio.run(generate())
+        suggestions = await stream_json(
+            provider,
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="You suggest inquiries to help make better decisions.",
+            fallback=[],
+            description="inquiry suggestions",
+        )
         return Response(suggestions)
 
     @action(detail=True, methods=['post'], url_path='analyze-gaps')
-    def analyze_gaps(self, request, pk=None):
+    async def analyze_gaps(self, request, pk=None):
         """
         Analyze gaps and return as prompts for reflection.
 
@@ -880,43 +1045,27 @@ _What actions follow from this decision?_
             recommendations: [str]
         }
         """
-        from apps.common.llm_providers import get_llm_provider
+        from apps.common.llm_providers import get_llm_provider, stream_json
         from apps.intelligence.case_prompts import build_gap_analysis_prompt
-        import asyncio
-        import json
+        from asgiref.sync import sync_to_async
 
-        case = self.get_object()
-        prompt = build_gap_analysis_prompt(case)
+        case = await sync_to_async(self.get_object)()
+        prompt = await sync_to_async(build_gap_analysis_prompt)(case)
 
         provider = get_llm_provider('fast')
-
-        async def generate():
-            full_response = ""
-            async for chunk in provider.stream_chat(
-                messages=[{"role": "user", "content": prompt}],
-                system_prompt="You analyze decision cases to find gaps and blind spots."
-            ):
-                full_response += chunk.content
-
-            # Parse JSON response
-            try:
-                response_text = full_response.strip()
-                if response_text.startswith("```"):
-                    response_text = response_text.split("```")[1]
-                    if response_text.startswith("json"):
-                        response_text = response_text[4:]
-                    response_text = response_text.strip()
-                return json.loads(response_text)
-            except Exception:
-                return {
-                    'missing_perspectives': [],
-                    'unvalidated_assumptions': [],
-                    'contradictions': [],
-                    'evidence_gaps': [],
-                    'recommendations': []
-                }
-
-        analysis = asyncio.run(generate())
+        analysis = await stream_json(
+            provider,
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="You analyze decision cases to find gaps and blind spots.",
+            fallback={
+                'missing_perspectives': [],
+                'unvalidated_assumptions': [],
+                'contradictions': [],
+                'evidence_gaps': [],
+                'recommendations': []
+            },
+            description="gap analysis",
+        )
 
         # Convert to prompts format (new approach)
         prompts = []
@@ -951,7 +1100,7 @@ _What actions follow from this decision?_
         return Response(analysis)
 
     @action(detail=True, methods=['post'], url_path='suggest-evidence-sources')
-    def suggest_evidence_sources(self, request, pk=None):
+    async def suggest_evidence_sources(self, request, pk=None):
         """
         Get AI-suggested evidence sources for an inquiry.
 
@@ -960,13 +1109,12 @@ _What actions follow from this decision?_
 
         Returns: [{suggestion, source_type, why_helpful, how_to_find}]
         """
-        from apps.common.llm_providers import get_llm_provider
+        from apps.common.llm_providers import get_llm_provider, stream_json
         from apps.intelligence.case_prompts import build_evidence_suggestion_prompt
         from apps.inquiries.models import Inquiry
-        import asyncio
-        import json
+        from asgiref.sync import sync_to_async
 
-        case = self.get_object()
+        case = await sync_to_async(self.get_object)()
         inquiry_id = request.data.get('inquiry_id')
 
         if not inquiry_id:
@@ -976,37 +1124,23 @@ _What actions follow from this decision?_
             )
 
         try:
-            inquiry = Inquiry.objects.get(id=inquiry_id, case=case)
+            inquiry = await sync_to_async(Inquiry.objects.get)(id=inquiry_id, case=case)
         except Inquiry.DoesNotExist:
             return Response(
                 {'error': 'Inquiry not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        prompt = build_evidence_suggestion_prompt(case, inquiry)
+        prompt = await sync_to_async(build_evidence_suggestion_prompt)(case, inquiry)
         provider = get_llm_provider('fast')
 
-        async def generate():
-            full_response = ""
-            async for chunk in provider.stream_chat(
-                messages=[{"role": "user", "content": prompt}],
-                system_prompt="You suggest evidence sources to help validate inquiries."
-            ):
-                full_response += chunk.content
-
-            # Parse JSON response
-            try:
-                response_text = full_response.strip()
-                if response_text.startswith("```"):
-                    response_text = response_text.split("```")[1]
-                    if response_text.startswith("json"):
-                        response_text = response_text[4:]
-                    response_text = response_text.strip()
-                return json.loads(response_text)
-            except Exception:
-                return []
-
-        suggestions = asyncio.run(generate())
+        suggestions = await stream_json(
+            provider,
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="You suggest evidence sources to help validate inquiries.",
+            fallback=[],
+            description="evidence source suggestions",
+        )
         return Response(suggestions)
 
     # ── Brief Section Endpoints ──────────────────────────────────────
@@ -1060,26 +1194,27 @@ _What actions follow from this decision?_
             serializer.is_valid(raise_exception=True)
             data = serializer.validated_data
 
-            # Determine order
-            if 'after_section_id' in data and data['after_section_id']:
-                try:
-                    after_section = BriefSection.objects.get(
-                        brief=brief, section_id=data['after_section_id']
-                    )
-                    order = after_section.order + 1
-                    # Shift subsequent sections
-                    BriefSection.objects.filter(
-                        brief=brief, order__gte=order
-                    ).update(order=models.F('order') + 1)
-                except BriefSection.DoesNotExist:
-                    order = data.get('order', 0)
-            elif 'order' in data:
-                order = data['order']
-            else:
-                max_order = BriefSection.objects.filter(
-                    brief=brief
-                ).order_by('-order').values_list('order', flat=True).first() or 0
-                order = max_order + 1
+            # Determine order (inside transaction to prevent duplicate ordering)
+            with transaction.atomic():
+                if 'after_section_id' in data and data['after_section_id']:
+                    try:
+                        after_section = BriefSection.objects.select_for_update().get(
+                            brief=brief, section_id=data['after_section_id']
+                        )
+                        order = after_section.order + 1
+                        # Shift subsequent sections
+                        BriefSection.objects.filter(
+                            brief=brief, order__gte=order
+                        ).update(order=models.F('order') + 1)
+                    except BriefSection.DoesNotExist:
+                        order = data.get('order', 0)
+                elif 'order' in data:
+                    order = data['order']
+                else:
+                    max_order = BriefSection.objects.filter(
+                        brief=brief
+                    ).order_by('-order').values_list('order', flat=True).first() or 0
+                    order = max_order + 1
 
             # Resolve parent section
             parent_section = None
@@ -1089,7 +1224,7 @@ _What actions follow from this decision?_
                         id=data['parent_section'], brief=brief
                     )
                 except BriefSection.DoesNotExist:
-                    pass
+                    logger.debug("Parent section %s not found, skipping", data.get('parent_section'))
 
             # Resolve inquiry
             inquiry = None
@@ -1124,6 +1259,22 @@ _What actions follow from this decision?_
             else:
                 brief.content_markdown = marker
             brief.save(update_fields=['content_markdown', 'updated_at'])
+
+            # Emit provenance event
+            from apps.events.services import EventService
+            from apps.events.models import EventType, ActorType
+            EventService.append(
+                event_type=EventType.BRIEF_SECTION_WRITTEN,
+                payload={
+                    'section_id': str(section.id),
+                    'section_title': section.heading,
+                    'section_type': section.section_type,
+                    'authored_by': 'user',
+                },
+                actor_type=ActorType.USER,
+                actor_id=request.user.id,
+                case_id=case.id,
+            )
 
             return Response(
                 BriefSectionSerializer(section).data,
@@ -1197,7 +1348,7 @@ _What actions follow from this decision?_
                     )
                     section.parent_section = parent
                 except BriefSection.DoesNotExist:
-                    pass
+                    logger.debug("Parent section %s not found, skipping", data.get('parent_section'))
             else:
                 section.parent_section = None
 
@@ -1217,7 +1368,30 @@ _What actions follow from this decision?_
                 section.inquiry = None
                 section.is_linked = section.tagged_signals.exists()
 
-        section.save()
+        # Track if content-related fields changed for provenance
+        content_changed = 'heading' in data or 'section_type' in data or 'inquiry' in data
+        _section_update_fields = ['updated_at']
+        for _f in ('heading', 'order', 'section_type', 'is_collapsed',
+                    'parent_section', 'inquiry', 'is_linked'):
+            if _f in data or _f == 'is_linked':
+                _section_update_fields.append(_f)
+        section.save(update_fields=_section_update_fields)
+
+        if content_changed:
+            from apps.events.services import EventService
+            from apps.events.models import EventType, ActorType
+            EventService.append(
+                event_type=EventType.BRIEF_SECTION_REVISED,
+                payload={
+                    'section_id': str(section.id),
+                    'section_title': section.heading,
+                    'revised_by': 'user',
+                },
+                actor_type=ActorType.USER,
+                actor_id=request.user.id,
+                case_id=case.id,
+            )
+
         return Response(BriefSectionSerializer(section).data)
 
     @action(detail=True, methods=['post'], url_path='brief-sections/reorder')
@@ -1287,7 +1461,7 @@ _What actions follow from this decision?_
         section.inquiry = inquiry
         section.is_linked = True
         section.section_type = 'inquiry_brief'
-        section.save()
+        section.save(update_fields=['inquiry', 'is_linked', 'section_type', 'updated_at'])
 
         return Response(BriefSectionSerializer(section).data)
 
@@ -1313,14 +1487,18 @@ _What actions follow from this decision?_
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        section.inquiry = None
-        section.is_linked = section.tagged_signals.exists()
-        section.grounding_status = 'empty'
-        section.grounding_data = {}
-        section.save()
+        with transaction.atomic():
+            section.inquiry = None
+            section.is_linked = section.tagged_signals.exists()
+            section.grounding_status = 'empty'
+            section.grounding_data = {}
+            section.save(update_fields=[
+                'inquiry', 'is_linked', 'grounding_status',
+                'grounding_data', 'updated_at',
+            ])
 
-        # Clear annotations that came from the inquiry link
-        section.annotations.filter(source_inquiry__isnull=False).delete()
+            # Clear annotations that came from the inquiry link
+            section.annotations.filter(source_inquiry__isnull=False).delete()
 
         return Response(BriefSectionSerializer(section).data)
 
@@ -1511,6 +1689,18 @@ _What actions follow from this decision?_
                     for m in messages
                 ]
 
+                # Load skill context from thread's case (if any)
+                scaffold_skill_context = None
+                try:
+                    from apps.skills.injection import build_skill_context
+                    _case = thread.primary_case
+                    if _case:
+                        _skills = list(_case.active_skills.filter(status='active'))
+                        if _skills:
+                            scaffold_skill_context = build_skill_context(_skills, 'brief')
+                except Exception as e:
+                    logger.warning(f"Could not load skills for chat scaffold: {e}")
+
                 # Run async scaffold
                 import asyncio
                 loop = asyncio.new_event_loop()
@@ -1521,6 +1711,7 @@ _What actions follow from this decision?_
                             user=request.user,
                             project_id=project_id,
                             thread_id=thread_id,
+                            skill_context=scaffold_skill_context,
                         )
                     )
                 finally:
@@ -1531,12 +1722,70 @@ _What actions follow from this decision?_
                 title = request.data.get('title', 'New Case')
                 decision_question = request.data.get('decision_question')
 
+                # Optionally load skill sections for minimal scaffold
+                skill_sections = None
+                pack_skills_to_activate = []  # (skill, order, pack) tuples
+                skill_id = request.data.get('skill_id')
+                pack_slug = request.data.get('pack_slug')
+
+                if pack_slug:
+                    # Load pack → extract domain skill sections + collect skills to activate
+                    try:
+                        from apps.skills.models import SkillPack, SkillPackMembership
+                        from apps.skills.injection import extract_brief_sections_from_skill
+
+                        pack = SkillPack.objects.filter(
+                            slug=pack_slug, status='active',
+                        ).filter(
+                            models.Q(scope='public') |
+                            models.Q(scope='organization', organization__members=request.user)
+                        ).first()
+                        if pack:
+                            memberships = SkillPackMembership.objects.filter(
+                                pack=pack,
+                            ).select_related('skill').order_by('order')
+
+                            for m in memberships:
+                                pack_skills_to_activate.append((m.skill, m.order, pack))
+                                # Use domain-role skill for brief sections
+                                if m.role == 'domain' and skill_sections is None:
+                                    skill_sections = extract_brief_sections_from_skill(m.skill)
+                        else:
+                            logger.warning(f"Pack not found or not accessible: {pack_slug}")
+                    except (SkillPack.DoesNotExist, ValueError) as e:
+                        logger.warning(f"Could not load pack for minimal scaffold: {e}")
+
+                elif skill_id:
+                    try:
+                        from apps.skills.models import Skill
+                        from apps.skills.injection import extract_brief_sections_from_skill
+                        skill = Skill.objects.get(id=skill_id)
+                        skill_sections = extract_brief_sections_from_skill(skill)
+                    except (Skill.DoesNotExist, ValueError) as e:
+                        logger.warning(f"Could not load skill for minimal scaffold: {e}")
+
                 result = CaseScaffoldService.scaffold_minimal(
                     title=title,
                     user=request.user,
                     project_id=project_id,
                     decision_question=decision_question,
+                    skill_sections=skill_sections,
                 )
+
+                # Activate pack skills on the newly created case — atomic
+                if pack_skills_to_activate:
+                    from apps.cases.models import CaseActiveSkill
+                    case = result['case']
+                    with transaction.atomic():
+                        CaseActiveSkill.objects.bulk_create([
+                            CaseActiveSkill(
+                                case=case,
+                                skill=skill_obj,
+                                order=order,
+                                activated_from_pack=pack_ref,
+                            )
+                            for skill_obj, order, pack_ref in pack_skills_to_activate
+                        ], ignore_conflicts=True)
 
             # Serialize response
             case_data = CaseSerializer(result['case']).data
@@ -1560,6 +1809,474 @@ _What actions follow from this decision?_
                 {'error': 'Scaffolding failed', 'detail': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    # ═══ Export Endpoints ═════════════════════════════════════════════
+
+    @action(detail=True, methods=['get'], url_path='export')
+    def export_brief(self, request, pk=None):
+        """
+        Export the full brief reasoning graph as structured JSON.
+
+        GET /api/cases/{id}/export/?type=full
+        GET /api/cases/{id}/export/?type=executive_summary
+        GET /api/cases/{id}/export/?type=per_section&sections=sf-abc123,sf-def456
+
+        Returns the BriefExportGraph IR — a structured representation of the
+        case's reasoning chain (claims → evidence → assumptions → confidence)
+        suitable for rendering into slides, memos, or reports.
+        """
+        case = self.get_object()
+        export_type = request.query_params.get('type', 'full')
+        section_ids_param = request.query_params.get('sections', '')
+        section_ids = [s.strip() for s in section_ids_param.split(',') if s.strip()] or None
+
+        valid_types = ('full', 'executive_summary', 'per_section')
+        if export_type not in valid_types:
+            return Response(
+                {'error': f"Invalid export type: {export_type}. Must be one of: {', '.join(valid_types)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if export_type == 'per_section' and not section_ids:
+            return Response(
+                {'error': 'sections parameter required for per_section export type'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.cases.export_service import BriefExportService
+            export_data = BriefExportService.export(
+                case_id=case.id,
+                export_type=export_type,
+                section_ids=section_ids,
+                user=request.user,
+            )
+            return Response(export_data)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Export failed for case {case.id}: {e}", exc_info=True)
+            return Response(
+                {'error': 'Export failed', 'detail': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    # ═══ Investigation Plan Endpoints ════════════════════════════════
+
+    @action(detail=True, methods=['get'])
+    def plan(self, request, pk=None):
+        """
+        Get current investigation plan with latest version content.
+
+        GET /api/cases/{id}/plan/
+        """
+        case = self.get_object()
+        try:
+            plan_obj = case.plan
+        except InvestigationPlan.DoesNotExist:
+            return Response(
+                {'detail': 'No plan exists for this case'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(InvestigationPlanSerializer(plan_obj).data)
+
+    @action(detail=True, methods=['get'], url_path='plan/versions')
+    def plan_versions(self, request, pk=None):
+        """
+        List all plan versions for history/undo UI.
+
+        GET /api/cases/{id}/plan/versions/
+        """
+        case = self.get_object()
+        versions = PlanVersion.objects.filter(
+            plan__case=case
+        ).order_by('-version_number')
+        return Response(PlanVersionSerializer(versions, many=True).data)
+
+    @action(
+        detail=True, methods=['get'],
+        url_path=r'plan/versions/(?P<version_num>[0-9]+)'
+    )
+    def plan_version_detail(self, request, pk=None, version_num=None):
+        """
+        Get a specific plan version.
+
+        GET /api/cases/{id}/plan/versions/{num}/
+        """
+        case = self.get_object()
+        try:
+            version = PlanVersion.objects.get(
+                plan__case=case,
+                version_number=int(version_num)
+            )
+        except PlanVersion.DoesNotExist:
+            return Response(
+                {'detail': 'Version not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(PlanVersionSerializer(version).data)
+
+    @action(detail=True, methods=['post'], url_path='plan/stage')
+    def plan_stage(self, request, pk=None):
+        """
+        Update investigation stage.
+
+        POST /api/cases/{id}/plan/stage/
+        Body: {"stage": "investigating", "rationale": "..."}
+        """
+        case = self.get_object()
+        serializer = PlanStageUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        PlanService.update_stage(
+            case_id=case.id,
+            new_stage=serializer.validated_data['stage'],
+            rationale=serializer.validated_data.get('rationale', ''),
+            actor_id=request.user.id,
+        )
+        # Return the updated plan
+        plan_obj = case.plan
+        return Response(InvestigationPlanSerializer(plan_obj).data)
+
+    @action(detail=True, methods=['post'], url_path='plan/restore')
+    def plan_restore(self, request, pk=None):
+        """
+        Restore plan to a previous version.
+
+        POST /api/cases/{id}/plan/restore/
+        Body: {"version_number": 1}
+        """
+        case = self.get_object()
+        serializer = PlanRestoreSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        version = PlanService.restore_version(
+            case_id=case.id,
+            target_version_number=serializer.validated_data['version_number'],
+            actor_id=request.user.id,
+        )
+        return Response(PlanVersionSerializer(version).data)
+
+    @action(detail=True, methods=['post'], url_path='plan/accept-diff')
+    def plan_accept_diff(self, request, pk=None):
+        """
+        Accept a proposed plan diff (creates new version).
+
+        POST /api/cases/{id}/plan/accept-diff/
+        Body: {"content": {...}, "diff_summary": "...", "diff_data": {...}}
+        """
+        from apps.events.models import ActorType
+        case = self.get_object()
+        serializer = PlanDiffProposalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        version = PlanService.create_new_version(
+            case_id=case.id,
+            content=serializer.validated_data['content'],
+            created_by='ai_proposal',
+            diff_summary=serializer.validated_data['diff_summary'],
+            diff_data=serializer.validated_data.get('diff_data'),
+            actor_type=ActorType.USER,
+            actor_id=request.user.id,
+        )
+        return Response(PlanVersionSerializer(version).data)
+
+    @action(
+        detail=True, methods=['patch'],
+        url_path=r'plan/assumptions/(?P<assumption_id>[^/.]+)'
+    )
+    def plan_assumption_update(self, request, pk=None, assumption_id=None):
+        """
+        Update an assumption's status.
+
+        PATCH /api/cases/{id}/plan/assumptions/{assumption_id}/
+        Body: {"status": "confirmed", "evidence_summary": "..."}
+        """
+        case = self.get_object()
+        serializer = AssumptionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            version = PlanService.update_assumption_status(
+                case_id=case.id,
+                assumption_id=assumption_id,
+                new_status=serializer.validated_data['status'],
+                evidence_summary=serializer.validated_data.get('evidence_summary', ''),
+                actor_id=request.user.id,
+            )
+        except ValueError as e:
+            return Response(
+                {'detail': str(e)},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(PlanVersionSerializer(version).data)
+
+    @action(
+        detail=True, methods=['patch'],
+        url_path=r'plan/criteria/(?P<criterion_id>[^/.]+)'
+    )
+    def plan_criterion_update(self, request, pk=None, criterion_id=None):
+        """
+        Update a decision criterion's met status.
+
+        PATCH /api/cases/{id}/plan/criteria/{criterion_id}/
+        Body: {"is_met": true}
+        """
+        case = self.get_object()
+        serializer = CriterionStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            version = PlanService.update_criterion_status(
+                case_id=case.id,
+                criterion_id=criterion_id,
+                is_met=serializer.validated_data['is_met'],
+                actor_id=request.user.id,
+            )
+        except ValueError as e:
+            return Response(
+                {'detail': str(e)},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(PlanVersionSerializer(version).data)
+
+    # ═══ Case Home (Aggregated) ══════════════════════════════════════
+
+    @action(detail=True, methods=['get'])
+    def home(self, request, pk=None):
+        """
+        Aggregated endpoint for the case home workspace.
+
+        GET /api/cases/{id}/home/
+
+        Returns everything needed to render the case home in one call:
+        plan, inquiries with evidence counts, recent signals, activity, health.
+        """
+        case = self.get_object()
+
+        # Plan + current version
+        plan_data = None
+        try:
+            plan_obj = case.plan
+            plan_data = InvestigationPlanSerializer(plan_obj).data
+        except InvestigationPlan.DoesNotExist:
+            logger.debug("No plan for case %s", case.id)
+
+        # Inquiries with evidence counts — single query via annotations
+        from apps.inquiries.models import Inquiry, Evidence
+        from django.db.models import Count, Max, Subquery, OuterRef
+
+        latest_text_subquery = Evidence.objects.filter(
+            inquiry=OuterRef('pk')
+        ).order_by('-created_at').values('evidence_text')[:1]
+
+        inquiries = (
+            Inquiry.objects.filter(case=case)
+            .annotate(
+                evidence_count_ann=Count('evidence_items'),
+                latest_evidence_at_ann=Max('evidence_items__created_at'),
+                latest_evidence_text_ann=Subquery(latest_text_subquery),
+            )
+            .order_by('sequence_index')
+        )
+        inquiry_data = []
+        for inq in inquiries:
+            latest_text = inq.latest_evidence_text_ann
+            inquiry_data.append({
+                'id': str(inq.id),
+                'title': inq.title,
+                'status': inq.status,
+                'priority': inq.priority,
+                'sequence_index': inq.sequence_index,
+                'evidence_count': inq.evidence_count_ann,
+                'latest_evidence_text': (
+                    latest_text[:100] if latest_text else None
+                ),
+                'latest_evidence_at': (
+                    inq.latest_evidence_at_ann.isoformat()
+                    if inq.latest_evidence_at_ann else None
+                ),
+                'conclusion': inq.conclusion,
+            })
+
+        # Recent signals (last 5, not dismissed)
+        from apps.signals.models import Signal
+        recent_signals = Signal.objects.filter(
+            case=case
+        ).exclude(
+            dismissed_at__isnull=False
+        ).order_by('-created_at')[:5]
+        signal_data = [{
+            'id': str(s.id),
+            'type': s.type,
+            'text': s.text,
+            'confidence': s.confidence,
+            'temperature': s.temperature,
+            'assumption_status': s.assumption_status,
+            'created_at': s.created_at.isoformat(),
+        } for s in recent_signals]
+        signal_total = Signal.objects.filter(
+            case=case, dismissed_at__isnull=True
+        ).count()
+
+        # Recent provenance events (last 5)
+        from apps.events.models import Event, EventCategory
+        recent_events = Event.objects.filter(
+            case_id=case.id,
+            category=EventCategory.PROVENANCE,
+        ).order_by('-timestamp')[:5]
+        event_data = [{
+            'id': str(e.id),
+            'type': e.type,
+            'payload': e.payload,
+            'timestamp': e.timestamp.isoformat(),
+            'actor_type': e.actor_type,
+        } for e in recent_events]
+
+        return Response({
+            'case': CaseSerializer(case).data,
+            'plan': plan_data,
+            'inquiries': inquiry_data,
+            'signals': {
+                'recent': signal_data,
+                'total_count': signal_total,
+            },
+            'activity': {
+                'recent_events': event_data,
+            },
+        })
+
+    # ═══ Plan Generation ══════════════════════════════════════
+
+    @action(detail=True, methods=['post'], url_path='generate-plan')
+    def generate_plan(self, request, pk=None):
+        """
+        Generate an investigation plan for a case that doesn't have one.
+
+        POST /api/cases/{id}/generate-plan/
+
+        Uses existing case data (brief sections, inquiries) to bootstrap a plan.
+        Returns 409 if the case already has a plan.
+        """
+        case = self.get_object()
+
+        # Check if plan already exists
+        try:
+            existing = case.plan  # noqa: F841
+            return Response(
+                {'error': 'Case already has a plan'},
+                status=status.HTTP_409_CONFLICT
+            )
+        except InvestigationPlan.DoesNotExist:
+            pass
+
+        # Gather case data to build plan from
+        from apps.inquiries.models import Inquiry
+        inquiries = list(
+            Inquiry.objects.filter(case=case).order_by('sequence_index')
+        )
+
+        # Build analysis dict from existing case data
+        analysis = {
+            'assumptions': [],
+            'decision_criteria': [],
+            'position_draft': case.position or '',
+        }
+
+        # Extract assumptions from brief sections if available
+        if case.main_brief:
+            from apps.cases.brief_models import BriefSection
+            for section in BriefSection.objects.filter(
+                brief=case.main_brief
+            ):
+                if section.section_type == 'assumptions':
+                    for line in (section.content or '').split('\n'):
+                        line = line.strip().lstrip('- •')
+                        if line:
+                            analysis['assumptions'].append(line)
+
+        plan, version = PlanService.create_initial_plan(
+            case=case,
+            analysis=analysis,
+            inquiries=inquiries,
+        )
+
+        return Response(
+            InvestigationPlanSerializer(plan).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['get'], url_path='section-judgment-summary')
+    def section_judgment_summary(self, request, pk=None):
+        """
+        Get synthesis summary comparing user judgment vs structural grounding.
+
+        GET /api/cases/{id}/section-judgment-summary/
+
+        Returns per-section comparison and highlighted mismatches.
+        """
+        from apps.cases.brief_models import BriefSection, GroundingStatus  # noqa: F811
+
+        case = self.get_object()
+        if not case.main_brief:
+            return Response({'sections': [], 'mismatches': []})
+
+        sections = BriefSection.objects.filter(
+            brief=case.main_brief,
+        ).exclude(section_type='decision_frame').order_by('order')
+
+        # Map grounding status to a numeric strength for comparison
+        grounding_strength = {
+            'empty': 0,
+            'weak': 1,
+            'moderate': 2,
+            'strong': 3,
+            'conflicted': 1,  # Conflicted is structurally weak
+        }
+
+        results = []
+        mismatches = []
+
+        for section in sections:
+            structural_strength = grounding_strength.get(section.grounding_status, 0)
+            user_rating = section.user_confidence  # 1-4 or None
+
+            section_data = {
+                'section_id': section.section_id,
+                'heading': section.heading,
+                'section_type': section.section_type,
+                'grounding_status': section.grounding_status,
+                'grounding_strength': structural_strength,
+                'user_confidence': user_rating,
+                'evidence_count': section.grounding_data.get('evidence_count', 0),
+                'tensions_count': section.grounding_data.get('tensions_count', 0),
+            }
+            results.append(section_data)
+
+            # Detect mismatches
+            if user_rating is not None:
+                # User says high confidence (3-4) but structure is weak (0-1)
+                if user_rating >= 3 and structural_strength <= 1:
+                    mismatches.append({
+                        'section_id': section.section_id,
+                        'heading': section.heading,
+                        'type': 'overconfident',
+                        'description': f'You rated high confidence but evidence is {section.grounding_status}',
+                        'user_confidence': user_rating,
+                        'grounding_status': section.grounding_status,
+                    })
+                # User says low confidence (1-2) but structure is strong (3)
+                elif user_rating <= 2 and structural_strength >= 3:
+                    mismatches.append({
+                        'section_id': section.section_id,
+                        'heading': section.heading,
+                        'type': 'underconfident',
+                        'description': 'You rated low confidence but evidence is strong',
+                        'user_confidence': user_rating,
+                        'grounding_status': section.grounding_status,
+                    })
+
+        return Response({
+            'sections': results,
+            'mismatches': mismatches,
+            'rated_count': sum(1 for s in results if s['user_confidence'] is not None),
+            'total_count': len(results),
+        })
 
 
 class WorkingViewViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1599,6 +2316,24 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         context['request'] = self.request
         return context
     
+    def perform_create(self, serializer):
+        """Emit DOCUMENT_ADDED provenance event after document creation."""
+        document = serializer.save()
+        from apps.events.services import EventService
+        from apps.events.models import EventType, ActorType
+        EventService.append(
+            event_type=EventType.DOCUMENT_ADDED,
+            payload={
+                'document_id': str(document.id),
+                'document_name': document.title,
+                'document_type': document.document_type,
+                'source': 'upload',
+            },
+            actor_type=ActorType.USER,
+            actor_id=self.request.user.id,
+            case_id=document.case_id,
+        )
+
     def get_queryset(self):
         # Users can only see documents from their own cases
         queryset = CaseDocument.objects.filter(case__user=self.request.user)
@@ -1701,11 +2436,11 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         })
     
     @action(detail=True, methods=['post'])
-    def integrate_content(self, request, pk=None):
+    async def integrate_content(self, request, pk=None):
         """
         Intelligently integrate content from chat into document.
         AI determines best placement, formatting, and citation.
-        
+
         POST /api/case-documents/{id}/integrate_content/
         Body: {
             "content": "content to integrate",
@@ -1714,74 +2449,45 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         }
         Returns: {"updated_content": "...", "insertion_section": "..."}
         """
-        from apps.common.llm_providers import get_llm_provider
-        import asyncio
-        
-        document = self.get_object()
+        from apps.common.llm_providers import get_llm_provider, stream_json
+        from apps.intelligence.case_prompts import build_content_integration_prompt
+        from asgiref.sync import sync_to_async
+
+        document = await sync_to_async(self.get_object)()
         content_to_add = request.data.get('content', '')
         hint = request.data.get('hint', 'general')
         message_id = request.data.get('message_id')
-        
+
         if not content_to_add:
             return Response(
                 {'error': 'Content is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # AI prompt to find best integration point
+
+        doc_content = await sync_to_async(lambda: document.content_markdown)()
+
+        system_prompt, user_prompt = build_content_integration_prompt(
+            document_content=doc_content,
+            content_to_add=content_to_add,
+            hint=hint,
+        )
+
         provider = get_llm_provider('fast')
-        system_prompt = "You are an AI editor that helps integrate new information into structured documents."
-        
-        user_prompt = f"""
-Current document:
-{document.content_markdown}
-
-New content to integrate:
-"{content_to_add}"
-
-Content type: {hint}
-
-Instructions:
-1. Analyze the document structure
-2. Find the most appropriate section to add this content
-3. Rewrite the content if needed to match document style and flow
-4. Add a citation marker: [^chat] at the end
-5. Return the FULL updated document with the new content integrated
-
-Return JSON:
-{{
-    "updated_content": "full updated markdown",
-    "insertion_section": "section name where content was added",
-    "rewritten_content": "how the content was adapted"
-}}
-"""
-        
-        async def generate():
-            full_response = ""
-            async for chunk in provider.stream_chat(
-                messages=[{"role": "user", "content": user_prompt}],
-                system_prompt=system_prompt
-            ):
-                full_response += chunk.content
-            
-            # Parse JSON response
-            import json
-            try:
-                return json.loads(full_response)
-            except (json.JSONDecodeError, ValueError) as e:
-                # Fallback: append to end
-                logger.warning(f"Failed to parse document insertion response: {e}")
-                return {
-                    "updated_content": f"{document.content_markdown}\n\n{content_to_add}\n\n[^chat]",
-                    "insertion_section": "End of document",
-                    "rewritten_content": content_to_add
-                }
-        
-        result = asyncio.run(generate())
+        result = await stream_json(
+            provider,
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt,
+            fallback={
+                "updated_content": f"{doc_content}\n\n{content_to_add}\n\n[^chat]",
+                "insertion_section": "End of document",
+                "rewritten_content": content_to_add
+            },
+            description="document content integration",
+        )
         return Response(result)
     
     @action(detail=True, methods=['post'], url_path='generate-suggestions')
-    def generate_suggestions(self, request, pk=None):
+    async def generate_suggestions(self, request, pk=None):
         """
         Generate AI suggestions for improving this document.
 
@@ -1794,76 +2500,71 @@ Return JSON:
         """
         from .suggestions import generate_brief_suggestions
         from apps.signals.models import Signal
+        from apps.common.llm_providers import get_llm_provider, stream_json
+        from apps.intelligence.case_prompts import build_gap_analysis_prompt
+        from asgiref.sync import sync_to_async
 
-        document = self.get_object()
-        case = document.case
+        document = await sync_to_async(self.get_object)()
+        case = await sync_to_async(lambda: document.case)()
 
-        # Build case context
-        inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        )[:20])
+        # Build case context (sync ORM queries wrapped)
+        @sync_to_async
+        def _build_context():
+            inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
+            signals = list(Signal.objects.filter(case=case).values(
+                'id', 'type', 'text'
+            )[:20])
+            return inquiries, signals
 
-        # Get gaps if available (cached or generate)
+        inquiries, signals = await _build_context()
+
+        # Get gaps via LLM
         gaps = {}
         try:
-            from apps.intelligence.case_prompts import build_gap_analysis_prompt
-            from apps.common.llm_providers import get_llm_provider
-            import asyncio
-            import json
-
-            prompt = build_gap_analysis_prompt(case)
+            prompt = await sync_to_async(build_gap_analysis_prompt)(case)
             provider = get_llm_provider('fast')
-
-            async def get_gaps():
-                full_response = ""
-                async for chunk in provider.stream_chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    system_prompt="You analyze decision cases to find gaps."
-                ):
-                    full_response += chunk.content
-                try:
-                    response_text = full_response.strip()
-                    if response_text.startswith("```"):
-                        response_text = response_text.split("```")[1]
-                        if response_text.startswith("json"):
-                            response_text = response_text[4:]
-                        response_text = response_text.strip()
-                    return json.loads(response_text)
-                except Exception:
-                    return {}
-
-            gaps = asyncio.run(get_gaps())
-        except Exception:
-            pass
+            gaps = await stream_json(
+                provider,
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You analyze decision cases to find gaps.",
+                fallback={},
+                description="gap analysis for suggestions",
+            )
+        except Exception as e:
+            logger.debug("Gap analysis failed for case document: %s", e)
 
         # Include grounding data + annotations from BriefSections
-        grounding_data = []
-        try:
-            from apps.cases.brief_models import BriefSection, AnnotationPriority
-            sections = BriefSection.objects.filter(
-                brief=document,
-                parent_section__isnull=True,
-            ).prefetch_related('annotations').order_by('order')
-            for sec in sections:
-                active_annotations = [
-                    {
-                        'type': a.annotation_type,
-                        'description': a.description,
-                        'priority': a.priority,
-                    }
-                    for a in sec.annotations.all()
-                    if a.dismissed_at is None and a.resolved_at is None
-                ]
-                grounding_data.append({
-                    'section_id': sec.section_id,
-                    'heading': sec.heading,
-                    'grounding_status': sec.grounding_status,
-                    'is_linked': sec.is_linked,
-                    'annotations': active_annotations,
-                })
-        except Exception:
-            pass
+        @sync_to_async
+        def _build_grounding():
+            grounding_data = []
+            try:
+                from apps.cases.brief_models import BriefSection
+                sections = BriefSection.objects.filter(
+                    brief=document,
+                    parent_section__isnull=True,
+                ).prefetch_related('annotations').order_by('order')
+                for sec in sections:
+                    active_annotations = [
+                        {
+                            'type': a.annotation_type,
+                            'description': a.description,
+                            'priority': a.priority,
+                        }
+                        for a in sec.annotations.all()
+                        if a.dismissed_at is None and a.resolved_at is None
+                    ]
+                    grounding_data.append({
+                        'section_id': sec.section_id,
+                        'heading': sec.heading,
+                        'grounding_status': sec.grounding_status,
+                        'is_linked': sec.is_linked,
+                        'annotations': active_annotations,
+                    })
+            except Exception:
+                pass
+            return grounding_data
+
+        grounding_data = await _build_grounding()
 
         case_context = {
             'decision_question': case.decision_question,
@@ -1874,8 +2575,9 @@ Return JSON:
         }
 
         max_suggestions = request.data.get('max_suggestions', 5)
-        suggestions = generate_brief_suggestions(
-            brief_content=document.content_markdown,
+        brief_content = await sync_to_async(lambda: document.content_markdown)()
+        suggestions = await sync_to_async(generate_brief_suggestions)(
+            brief_content=brief_content,
             case_context=case_context,
             max_suggestions=max_suggestions
         )
@@ -2301,6 +3003,14 @@ Return JSON:
             inquiries=inquiries
         )
 
+        # Persist evidence-signal links
+        from .evidence_linker import persist_evidence_links
+        persist_result = persist_evidence_links(
+            linked_claims=result.get('claims', []),
+            case_id=str(case.id),
+        )
+        result['persistence'] = persist_result
+
         return Response(result)
 
     @action(detail=True, methods=['post'], url_path='add-citations')
@@ -2330,6 +3040,13 @@ Return JSON:
             signals=signals
         )
 
+        # Persist evidence-signal links
+        from .evidence_linker import persist_evidence_links
+        persist_evidence_links(
+            linked_claims=link_result.get('claims', []),
+            case_id=str(case.id),
+        )
+
         # Create inline citations
         cited_content = create_inline_citations(
             document_content=document.content_markdown,
@@ -2349,100 +3066,65 @@ Return JSON:
         })
 
     @action(detail=True, methods=['post'])
-    def detect_assumptions(self, request, pk=None):
+    async def detect_assumptions(self, request, pk=None):
         """
         AI analyzes document to identify all assumptions.
         Cross-references with existing inquiries and assumption signals.
-        
+
         POST /api/case-documents/{id}/detect_assumptions/
         Returns: [{
             text, status, risk_level, inquiry_id, validation_approach
         }]
         """
-        from apps.common.llm_providers import get_llm_provider
-        from apps.signals.models import Signal
-        import asyncio
-        import json
-        
-        document = self.get_object()
-        case = document.case
-        
-        # Get existing context
-        inquiries = list(case.inquiries.all())
-        assumption_signals = list(Signal.objects.filter(
-            case=case,
-            type='Assumption'
-        ))
-        
-        # AI prompt
+        from apps.common.llm_providers import get_llm_provider, stream_json
+        from apps.signals.models import Signal, SignalType
+        from asgiref.sync import sync_to_async
+
+        document = await sync_to_async(self.get_object)()
+
+        @sync_to_async
+        def _get_context():
+            case = document.case
+            inqs = list(case.inquiries.all())
+            assumption_sigs = list(Signal.objects.filter(
+                case=case,
+                type=SignalType.ASSUMPTION
+            ))
+            return case, inqs, assumption_sigs
+
+        case, inquiries, assumption_signals = await _get_context()
+
+        doc_content = await sync_to_async(lambda: document.content_markdown)()
+
+        from apps.intelligence.case_prompts import build_assumption_detection_prompt
+        system_prompt, user_prompt = build_assumption_detection_prompt(
+            document_content=doc_content,
+            inquiries=inquiries,
+            assumption_signals=assumption_signals,
+        )
+
         provider = get_llm_provider('fast')
-        system_prompt = "You are an AI that identifies and analyzes assumptions in decision documents."
-        
-        user_prompt = f"""
-Analyze this case brief and identify ALL assumptions (stated or implied):
+        assumptions = await stream_json(
+            provider,
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt,
+            fallback=[],
+            description="assumption detection",
+        )
 
-Brief:
-{document.content_markdown}
+        # Enhance with inquiry links (pure Python, no ORM)
+        if isinstance(assumptions, list):
+            for assumption in assumptions:
+                assumption_text = assumption.get('text', '').lower()
+                for inquiry in inquiries:
+                    if (
+                        assumption_text in inquiry.title.lower() or
+                        inquiry.title.lower() in assumption_text
+                    ):
+                        assumption['inquiry_id'] = str(inquiry.id)
+                        assumption['status'] = 'validated' if inquiry.status == 'resolved' else 'investigating'
+                        break
 
-Existing inquiries being investigated:
-{[f"- {i.title} (status: {i.status})" for i in inquiries]}
-
-Previously extracted assumption signals:
-{[f"- {s.text}" for s in assumption_signals[:5]]}
-
-For each assumption, provide:
-1. text: The exact assumption text (quote from document)
-2. status: "untested" | "investigating" | "validated"
-   - investigating if matching inquiry exists
-   - validated if inquiry resolved
-   - untested otherwise
-3. risk_level: "low" | "medium" | "high" based on impact if assumption is wrong
-4. inquiry_id: UUID if matching inquiry exists (match by similarity)
-5. validation_approach: Brief suggestion for how to validate
-
-Return JSON array:
-[{{
-    "text": "assumption text",
-    "status": "untested",
-    "risk_level": "high",
-    "inquiry_id": null,
-    "validation_approach": "Research market data"
-}}]
-
-Return ONLY the JSON array, no other text.
-"""
-        
-        async def generate():
-            full_response = ""
-            async for chunk in provider.stream_chat(
-                messages=[{"role": "user", "content": user_prompt}],
-                system_prompt=system_prompt
-            ):
-                full_response += chunk.content
-            
-            try:
-                # Parse JSON response
-                assumptions = json.loads(full_response.strip())
-                
-                # Enhance with inquiry links
-                for assumption in assumptions:
-                    # Find matching inquiry by title similarity
-                    assumption_text = assumption['text'].lower()
-                    for inquiry in inquiries:
-                        if (
-                            assumption_text in inquiry.title.lower() or
-                            inquiry.title.lower() in assumption_text
-                        ):
-                            assumption['inquiry_id'] = str(inquiry.id)
-                            assumption['status'] = 'validated' if inquiry.status == 'resolved' else 'investigating'
-                            break
-                
-                return assumptions
-            except Exception as e:
-                logger.warning(f"Failed to extract assumptions: {e}")
-                return []
-        
-        assumptions = asyncio.run(generate())
         return Response(assumptions)
     
     @action(detail=False, methods=['post'])
@@ -2575,8 +3257,46 @@ Return ONLY the JSON array, no other text.
             inquiry=inquiry,
             user=request.user
         )
-        
+
         return Response(
             CaseDocumentSerializer(critique_doc, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=['patch'], url_path='section-confidence')
+    def section_confidence(self, request, pk=None):
+        """
+        Set user's confidence for a brief section.
+
+        PATCH /api/case-documents/{id}/section-confidence/
+        Body: { "section_id": "sf-xxx", "confidence": 1-4 }
+        """
+        from apps.cases.brief_models import BriefSection
+
+        document = self.get_object()
+        section_id = request.data.get('section_id')
+        confidence = request.data.get('confidence')
+
+        if not section_id or confidence not in [1, 2, 3, 4, None]:
+            return Response(
+                {'error': 'section_id required, confidence must be 1-4 or null'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            section = BriefSection.objects.get(
+                brief=document,
+                section_id=section_id,
+            )
+        except BriefSection.DoesNotExist:
+            return Response({'error': 'Section not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        section.user_confidence = confidence
+        section.user_confidence_at = timezone.now() if confidence else None
+        section.save(update_fields=['user_confidence', 'user_confidence_at', 'updated_at'])
+
+        return Response({
+            'section_id': section.section_id,
+            'user_confidence': section.user_confidence,
+            'user_confidence_at': section.user_confidence_at,
+        })

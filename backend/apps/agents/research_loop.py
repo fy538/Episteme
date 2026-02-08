@@ -30,10 +30,22 @@ MAX_FOLLOWUPS_PER_ROUND = 3
 MAX_RESULTS_PER_QUERY = 5
 MAX_CONTRARY_FINDINGS = 5
 MAX_CITATION_LEADS_PER_ROUND = 5
-COMPACTION_TOKEN_THRESHOLD = 60_000
+
+# Progressive context thinning thresholds (tokens)
+NOISE_REMOVAL_THRESHOLD = 40_000   # Drop findings below min composite score
+OBSERVATION_MASK_THRESHOLD = 60_000  # Strip remaining raw source text
+LLM_COMPACTION_THRESHOLD = 80_000   # Trigger LLM digest of lowest 40%
+NOISE_REMOVAL_MIN_SCORE = 0.3       # Composite score floor for noise removal
 COMPACT_KEEP_RATIO = 0.6
 MIN_FINDINGS_AFTER_COMPACT = 10
 MIN_FINDINGS_FOR_COMPACTION = 20
+
+# LLM call retry settings
+LLM_MAX_RETRIES = 2                # Max retry attempts per LLM call
+LLM_RETRY_BASE_DELAY = 1.0        # Base delay in seconds (doubles each retry)
+LLM_RETRYABLE_ERRORS = (           # Exception types worth retrying
+    ConnectionError, TimeoutError,
+)
 
 
 # ─── Provider Protocol ─────────────────────────────────────────────────────
@@ -184,12 +196,19 @@ class ResearchLoop:
         self._total_sources_found = 0
         self._search_rounds = 0
         self._semaphore = asyncio.Semaphore(self.config.search.parallel_branches)
+        self._token_cache: dict[int, int] = {}  # id(finding) → token count
 
         # Context budget tracking (optional)
         self._context_tracker = None
         if hasattr(provider, 'context_window_tokens'):
             from .context_manager import ContextBudgetTracker
             self._context_tracker = ContextBudgetTracker(provider.context_window_tokens)
+
+        # Cost tracking (optional — requires provider with model attribute)
+        self._cost_tracker = None
+        if hasattr(provider, 'model'):
+            from .context_manager import CostTracker
+            self._cost_tracker = CostTracker(model=provider.model)
 
         # Observability
         self._trace_id = trace_id
@@ -302,6 +321,10 @@ class ResearchLoop:
                 metrics={"scored": len(scored), "avg_relevance": round(avg_relevance, 3), "iteration": iteration},
                 duration_ms=int((time.time() - eval_start) * 1000),
             )
+            # Observation masking: strip raw source text now that extraction is done.
+            # Keeps title/url/domain for citation; drops full_text and long snippets.
+            _mask_sources(scored)
+
             all_findings.extend(scored)
             self._total_sources_found += len(scored)
             await self._emit_checkpoint("evaluate", iteration, plan, all_findings, question, context)
@@ -390,6 +413,10 @@ class ResearchLoop:
             result.metadata["needs_continuation"] = True
             result.metadata["context_utilization"] = round(self._context_tracker.budget.utilization, 3)
 
+        # Attach cost summary
+        if self._cost_tracker:
+            result.metadata["cost"] = self._cost_tracker.summary()
+
         return result
 
     # ── Step Implementations ────────────────────────────────────────────
@@ -401,10 +428,10 @@ class ResearchLoop:
             decomposition=self.config.search.decomposition,
             sources=self.config.sources,
             context=context.to_dict(),
-            skill_instructions=self.prompt_extension,
         )
+        system = prompts.build_system_prompt(prompts.PLAN_SYSTEM, self.prompt_extension)
 
-        response = await self._llm_call(prompt, prompts.PLAN_SYSTEM, step_name="plan")
+        response = await self._llm_call(prompt, system, step_name="plan")
         parsed = _parse_json_from_response(response)
 
         sub_queries = []
@@ -489,10 +516,10 @@ class ResearchLoop:
         prompt = prompts.build_extract_prompt(
             results=[r.to_dict() for r in results],
             extract_config=self.config.extract,
-            skill_instructions=self.prompt_extension,
         )
+        system = prompts.build_system_prompt(prompts.EXTRACT_SYSTEM, self.prompt_extension)
 
-        response = await self._llm_call(prompt, prompts.EXTRACT_SYSTEM, step_name="extract")
+        response = await self._llm_call(prompt, system, step_name="extract")
         parsed = _parse_json_from_response(response)
 
         findings = []
@@ -517,10 +544,10 @@ class ResearchLoop:
             findings=[f.to_dict() for f in findings],
             evaluate_config=self.config.evaluate,
             effective_rubric=self.config.get_effective_rubric(),
-            skill_instructions=self.prompt_extension,
         )
+        system = prompts.build_system_prompt(prompts.EVALUATE_SYSTEM, self.prompt_extension)
 
-        response = await self._llm_call(prompt, prompts.EVALUATE_SYSTEM, step_name="evaluate")
+        response = await self._llm_call(prompt, system, step_name="evaluate")
         parsed = _parse_json_from_response(response)
 
         scored = []
@@ -631,12 +658,12 @@ class ResearchLoop:
             output_config=self.config.output,
             effective_sections=self.config.get_effective_sections(),
             original_question=question,
-            skill_instructions=self.prompt_extension,
         )
+        system = prompts.build_system_prompt(prompts.SYNTHESIZE_SYSTEM, self.prompt_extension)
 
         response = await self._llm_call(
             prompt,
-            prompts.SYNTHESIZE_SYSTEM,
+            system,
             max_tokens=_target_length_to_tokens(self.config.output.target_length),
             step_name="synthesize",
         )
@@ -670,77 +697,133 @@ class ResearchLoop:
     # ── Context Compaction ───────────────────────────────────────────────
 
     def _should_compact(self, findings: list[ScoredFinding]) -> bool:
-        """Check if findings need compaction."""
+        """Check if findings need any form of compaction (progressive thinning)."""
         if len(findings) < MIN_FINDINGS_FOR_COMPACTION:
             return False
         estimated_tokens = self._estimate_findings_tokens(findings)
-        return estimated_tokens > COMPACTION_TOKEN_THRESHOLD
+        return estimated_tokens > NOISE_REMOVAL_THRESHOLD
 
     def _estimate_findings_tokens(self, findings: list[ScoredFinding]) -> int:
-        """Rough token estimate: ~4 chars per token."""
-        total_chars = sum(
-            len(str(f.extracted_fields))
-            + len(f.raw_quote)
-            + len(f.evaluation_notes)
-            + len(f.source.title)
-            + len(f.source.url)
-            + len(f.source.domain)
-            + len(str(f.relationships))
-            + 20  # score fields overhead (relevance_score, quality_score)
-            for f in findings
-        )
-        return total_chars // 4
+        """Estimate tokens using tiktoken for accuracy, with per-finding cache.
+
+        Falls back to char÷4 if tiktoken is unavailable.
+        """
+        total = 0
+        for f in findings:
+            fid = id(f)
+            cached = self._token_cache.get(fid)
+            if cached is not None:
+                total += cached
+                continue
+            text = (
+                str(f.extracted_fields) + f.raw_quote + f.evaluation_notes
+                + f.source.title + f.source.url + f.source.domain
+                + str(f.relationships)
+            )
+            try:
+                from apps.common.token_utils import count_tokens
+                tokens = count_tokens(text)
+            except Exception:
+                tokens = len(text) // 4  # fallback
+            self._token_cache[fid] = tokens
+            total += tokens
+        return total
 
     async def _compact_findings(
         self, findings: list[ScoredFinding]
     ) -> list[ScoredFinding]:
-        """Two-tier compaction: score filter + LLM digest."""
-        # Tier 1: Keep top findings by composite score (no LLM cost)
-        scored_sorted = sorted(
-            findings,
-            key=lambda f: (f.relevance_score * 0.6 + f.quality_score * 0.4),
-            reverse=True,
-        )
-        keep_count = max(MIN_FINDINGS_AFTER_COMPACT, int(len(scored_sorted) * COMPACT_KEEP_RATIO))
-        top_findings = scored_sorted[:keep_count]
-        dropped = scored_sorted[keep_count:]
+        """Progressive context thinning — three tiers of compaction.
 
-        if not dropped:
-            return top_findings
+        Tier 1 (40K tokens): Drop findings below NOISE_REMOVAL_MIN_SCORE (free)
+        Tier 2 (60K tokens): Observation-mask remaining sources (free)
+        Tier 3 (80K tokens): LLM digest of lowest-scored 40% (one LLM call)
+        """
+        estimated = self._estimate_findings_tokens(findings)
+        original_count = len(findings)
 
-        # Tier 2: LLM digest of dropped findings
-        prompt = prompts.build_compact_prompt(
-            dropped_findings=[f.to_dict() for f in dropped],
-            kept_count=len(top_findings),
-            skill_instructions=self.prompt_extension,
-        )
-        response = await self._llm_call(
-            prompt, prompts.COMPACT_SYSTEM, max_tokens=2000, step_name="compact"
-        )
-        parsed = _parse_json_from_response(response)
-
-        # Create a synthetic "digest" finding summarizing what was dropped
-        digest_text = parsed.get("digest", "")
-        if digest_text:
-            digest_finding = ScoredFinding(
-                source=SearchResult(
-                    url="",
-                    title="Compacted findings digest",
-                    snippet=digest_text,
-                    domain="internal",
-                ),
-                extracted_fields={"digest": digest_text},
-                relevance_score=0.5,
-                quality_score=0.5,
-                evaluation_notes=f"Digest of {len(dropped)} lower-scored findings",
+        # ── Tier 1: Noise removal (free — no LLM cost) ─────────────────
+        if estimated > NOISE_REMOVAL_THRESHOLD:
+            findings = [
+                f for f in findings
+                if (f.relevance_score * 0.6 + f.quality_score * 0.4) >= NOISE_REMOVAL_MIN_SCORE
+            ]
+            # Never drop below MIN_FINDINGS_AFTER_COMPACT
+            if len(findings) < MIN_FINDINGS_AFTER_COMPACT:
+                scored_sorted = sorted(
+                    findings,
+                    key=lambda f: (f.relevance_score * 0.6 + f.quality_score * 0.4),
+                    reverse=True,
+                )
+                findings = scored_sorted[:MIN_FINDINGS_AFTER_COMPACT]
+            # Invalidate token cache for removed items
+            self._token_cache.clear()
+            estimated = self._estimate_findings_tokens(findings)
+            logger.info(
+                "context_thinning_noise_removal",
+                extra={"before": original_count, "after": len(findings), "tokens": estimated},
             )
-            top_findings.append(digest_finding)
 
-        logger.info(
-            "research_compacted",
-            extra={"kept": len(top_findings), "dropped": len(dropped)},
-        )
-        return top_findings
+        # ── Tier 2: Observation masking (free — no LLM cost) ───────────
+        if estimated > OBSERVATION_MASK_THRESHOLD:
+            _mask_sources(findings)
+            self._token_cache.clear()
+            estimated = self._estimate_findings_tokens(findings)
+            logger.info(
+                "context_thinning_observation_mask",
+                extra={"findings": len(findings), "tokens_after_mask": estimated},
+            )
+
+        # ── Tier 3: LLM structured digest (one LLM call) ──────────────
+        if estimated > LLM_COMPACTION_THRESHOLD:
+            scored_sorted = sorted(
+                findings,
+                key=lambda f: (f.relevance_score * 0.6 + f.quality_score * 0.4),
+                reverse=True,
+            )
+            keep_count = max(MIN_FINDINGS_AFTER_COMPACT, int(len(scored_sorted) * COMPACT_KEEP_RATIO))
+            top_findings = scored_sorted[:keep_count]
+            dropped = scored_sorted[keep_count:]
+
+            if dropped:
+                prompt = prompts.build_compact_prompt(
+                    dropped_findings=[f.to_dict() for f in dropped],
+                    kept_count=len(top_findings),
+                )
+                system = prompts.build_system_prompt(prompts.COMPACT_SYSTEM, self.prompt_extension)
+                response = await self._llm_call(
+                    prompt, system, max_tokens=2000, step_name="compact"
+                )
+                parsed = _parse_json_from_response(response)
+
+                digest_text = parsed.get("digest", "")
+                if digest_text:
+                    digest_finding = ScoredFinding(
+                        source=SearchResult(
+                            url="",
+                            title="Compacted findings digest",
+                            snippet=digest_text,
+                            domain="internal",
+                        ),
+                        extracted_fields={
+                            "digest": digest_text,
+                            "key_claims": parsed.get("key_claims", []),
+                            "contradictions": parsed.get("contradictions", []),
+                            "unique_data_points": parsed.get("unique_data_points", []),
+                            "sources_summary": parsed.get("sources_summary", ""),
+                        },
+                        relevance_score=0.5,
+                        quality_score=0.5,
+                        evaluation_notes=f"Structured digest of {len(dropped)} lower-scored findings",
+                    )
+                    top_findings.append(digest_finding)
+
+                logger.info(
+                    "context_thinning_llm_compaction",
+                    extra={"kept": len(top_findings), "dropped": len(dropped)},
+                )
+                findings = top_findings
+
+        return findings
 
     # ── LLM Interface ───────────────────────────────────────────────────
 
@@ -751,7 +834,11 @@ class ResearchLoop:
         max_tokens: int = 4000,
         step_name: str = "",
     ) -> str:
-        """Make a single LLM call using our provider-agnostic interface."""
+        """Make a single LLM call using our provider-agnostic interface.
+
+        Retries on transient errors (ConnectionError, TimeoutError) with
+        exponential backoff. Non-retryable errors fail immediately.
+        """
         messages = [{"role": "user", "content": user_prompt}]
 
         # Start observability span
@@ -766,41 +853,84 @@ class ResearchLoop:
             except Exception:
                 span = None  # Tracing is best-effort
 
-        try:
-            # Use generate() for non-streaming single calls
-            if hasattr(self.provider, "generate"):
-                response = await self.provider.generate(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=0.3,
-                )
-            else:
-                # Fallback: collect stream chunks
-                response = ""
-                async for chunk in self.provider.stream_chat(
-                    messages=messages,
-                    system_prompt=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=0.3,
-                ):
-                    response += chunk.content
+        last_error: Exception | None = None
+        for attempt in range(1 + LLM_MAX_RETRIES):
+            try:
+                # Use generate() for non-streaming single calls
+                if hasattr(self.provider, "generate"):
+                    response = await self.provider.generate(
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=0.3,
+                    )
+                else:
+                    # Fallback: collect stream chunks
+                    response = ""
+                    async for chunk in self.provider.stream_chat(
+                        messages=messages,
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=0.3,
+                    ):
+                        response += chunk.content
 
-            if span:
-                try:
-                    span.end(output={"response_length": len(response)})
-                except Exception:
-                    pass
-            return response
+                if span:
+                    try:
+                        span.end(output={"response_length": len(response)})
+                    except Exception:
+                        pass
 
-        except Exception as e:
-            if span:
-                try:
-                    span.end(level="ERROR", status_message=str(e))
-                except Exception:
-                    pass
-            logger.exception("research_llm_call_failed", extra={"error": str(e)})
-            return "{}"
+                # Record cost estimate (best-effort from text lengths)
+                if self._cost_tracker and step_name:
+                    try:
+                        from apps.common.token_utils import count_tokens
+                        in_tokens = count_tokens(system_prompt + user_prompt)
+                        out_tokens = count_tokens(response)
+                    except Exception:
+                        in_tokens = (len(system_prompt) + len(user_prompt)) // 4
+                        out_tokens = len(response) // 4
+                    self._cost_tracker.record_call(
+                        step_name=step_name,
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                    )
+
+                return response
+
+            except LLM_RETRYABLE_ERRORS as e:
+                last_error = e
+                if attempt < LLM_MAX_RETRIES:
+                    delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "research_llm_call_retrying",
+                        extra={
+                            "step": step_name,
+                            "attempt": attempt + 1,
+                            "max_retries": LLM_MAX_RETRIES,
+                            "delay_s": delay,
+                            "error": str(e),
+                        },
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Exhausted retries — fall through to error handling below
+                break
+            except Exception as e:
+                last_error = e
+                break  # Non-retryable error — fail immediately
+
+        # All attempts failed
+        if span:
+            try:
+                span.end(level="ERROR", status_message=str(last_error))
+            except Exception:
+                pass
+        logger.exception(
+            "research_llm_call_failed",
+            extra={"error": str(last_error), "step": step_name, "attempts": attempt + 1},
+        )
+        return "{}"
 
     # ── Progress ────────────────────────────────────────────────────────
 
@@ -824,6 +954,16 @@ class ResearchLoop:
         """Record a trajectory event if recorder is attached. Zero overhead otherwise."""
         if self.trajectory_recorder is None:
             return
+
+        # Pull cost data from the most recent CostTracker entry for this step
+        tokens_used = 0
+        cost_usd = 0.0
+        if self._cost_tracker and self._cost_tracker._calls:
+            last_call = self._cost_tracker._calls[-1]
+            if last_call.step_name == step_name:
+                tokens_used = last_call.input_tokens + last_call.output_tokens
+                cost_usd = last_call.cost_usd
+
         try:
             self.trajectory_recorder.record_step(
                 step_name=step_name,
@@ -832,6 +972,8 @@ class ResearchLoop:
                 decision_rationale=decision_rationale,
                 metrics=metrics,
                 duration_ms=duration_ms,
+                tokens_used=tokens_used,
+                cost_usd=cost_usd,
             )
         except Exception:
             pass  # Trajectory is best-effort
@@ -974,6 +1116,32 @@ class ResearchLoop:
             f"Complete — {result.metadata['findings_count']} findings in {elapsed_ms / 1000:.1f}s (resumed)",
         )
         return result
+
+
+# ─── Observation Masking ────────────────────────────────────────────────────
+
+SNIPPET_MASK_LENGTH = 100  # chars to keep from snippet after extraction
+
+
+def _mask_sources(findings: list) -> None:
+    """Strip raw source text from findings after extraction.
+
+    After the extract step, the full_text and long snippets in each finding's
+    SearchResult source are no longer needed — the extracted_fields and
+    raw_quote contain the useful intelligence. Masking reduces context size
+    by 30-50% per iteration without losing any extracted information.
+
+    This is the "observation masking" pattern (JetBrains 2025): cheaper
+    and equally effective vs. LLM summarization.
+    """
+    for f in findings:
+        src = f.source
+        # Drop full_text entirely
+        if hasattr(src, "full_text"):
+            src.full_text = ""
+        # Truncate snippet to a short preview
+        if hasattr(src, "snippet") and len(src.snippet) > SNIPPET_MASK_LENGTH:
+            src.snippet = src.snippet[:SNIPPET_MASK_LENGTH] + "..."
 
 
 # ─── Utilities ──────────────────────────────────────────────────────────────

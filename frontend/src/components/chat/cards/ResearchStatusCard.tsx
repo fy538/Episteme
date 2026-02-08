@@ -2,6 +2,7 @@ import { ResearchStatusCard as CardType, CardAction } from '@/lib/types/cards';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
+import { CostSummary } from '@/components/workflow/CostSummary';
 
 interface Props {
   card: CardType;
@@ -66,6 +67,11 @@ export function ResearchStatusCard({ card, onAction }: Props) {
           </div>
         )}
         
+        {/* Cost summary (shown when workflow completes with correlation_id) */}
+        {card.status === 'completed' && card.metadata?.correlation_id && (
+          <CostSummary correlationId={card.metadata.correlation_id} compact />
+        )}
+
         {/* Actions */}
         {card.actions.length > 0 && (
           <div className="flex gap-2 pt-2 border-t">

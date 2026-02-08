@@ -1,14 +1,16 @@
 /**
- * Workspace Tab - Workspace and case preferences
+ * Workspace Tab — Case view defaults and evidence preferences
+ *
+ * Uses SettingsCard grid for default view selection,
+ * SettingsRow for inline controls.
  */
 
 'use client';
 
 import * as React from 'react';
-import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { SettingsGroup, SettingsRow, SettingsCard, SettingsCardGrid } from '../SettingsSection';
 import type { UserPreferences } from '@/lib/api/preferences';
 
 interface WorkspaceTabProps {
@@ -16,88 +18,98 @@ interface WorkspaceTabProps {
   onChange: (updates: Partial<UserPreferences>) => void;
 }
 
+const CASE_VIEW_OPTIONS = [
+  {
+    value: 'brief' as const,
+    label: 'Brief',
+    description: 'Editable document view',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    value: 'dashboard' as const,
+    label: 'Inquiry Dashboard',
+    description: 'Investigation overview',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+    ),
+  },
+  {
+    value: 'documents' as const,
+    label: 'Documents',
+    description: 'Document tree view',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+      </svg>
+    ),
+  },
+];
+
 export function WorkspaceTab({ preferences, onChange }: WorkspaceTabProps) {
   return (
-    <div className="space-y-6">
-      {/* Default View */}
-      <div>
-        <Label className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Default Case View</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-3">
-          Choose which view to show when opening a case
-        </p>
-        <div className="space-y-2">
-          {[
-            { value: 'brief', label: 'Brief', description: 'Editable document view' },
-            { value: 'dashboard', label: 'Inquiry Dashboard', description: 'Investigation overview' },
-            { value: 'documents', label: 'Documents', description: 'Document tree view' },
-          ].map((option) => (
-            <label
+    <div className="space-y-8">
+      {/* Default Case View */}
+      <SettingsGroup title="Default Case View" description="Choose which view to show when opening a case">
+        <SettingsCardGrid columns={3}>
+          {CASE_VIEW_OPTIONS.map((option) => (
+            <SettingsCard
               key={option.value}
-              className={`block p-3 border-2 rounded-lg cursor-pointer transition-all ${
-                preferences.default_case_view === option.value
-                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
-                  : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
-              }`}
-            >
-              <div className="flex items-start">
-                <input
-                  type="radio"
-                  name="default_case_view"
-                  value={option.value}
-                  checked={preferences.default_case_view === option.value}
-                  onChange={(e) => onChange({ default_case_view: e.target.value as 'brief' | 'dashboard' | 'documents' })}
-                  className="mt-1 mr-3"
-                />
-                <div>
-                  <p className="font-medium text-neutral-900 dark:text-neutral-100">{option.label}</p>
-                  <p className="text-sm text-neutral-600 dark:text-neutral-400">{option.description}</p>
-                </div>
-              </div>
-            </label>
+              active={preferences.default_case_view === option.value}
+              onClick={() => onChange({ default_case_view: option.value })}
+              icon={option.icon}
+              title={option.label}
+              description={option.description}
+            />
           ))}
-        </div>
-      </div>
+        </SettingsCardGrid>
+      </SettingsGroup>
 
-      {/* Auto-save Delay */}
-      <div>
-        <Label htmlFor="auto-save-delay" className="text-neutral-900 dark:text-neutral-100">Auto-save Delay</Label>
-        <div className="flex items-center gap-2 mt-2">
-          <Input
-            id="auto-save-delay"
-            type="number"
-            min="0"
-            max="5000"
-            step="500"
-            value={preferences.auto_save_delay_ms || 1000}
-            onChange={(e) => onChange({ auto_save_delay_ms: parseInt(e.target.value) })}
-            className="w-24"
-          />
-          <span className="text-sm text-neutral-600 dark:text-neutral-400">milliseconds</span>
-        </div>
-        <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-1">
-          How long to wait before auto-saving (1000 = 1 second)
-        </p>
-      </div>
+      {/* Auto-save */}
+      <SettingsGroup title="Auto-save" description="Configure automatic saving behavior" divider>
+        <SettingsRow
+          label="Auto-save delay"
+          description="How long to wait before auto-saving (1000 = 1 second)"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="0"
+              max="5000"
+              step="500"
+              value={preferences.auto_save_delay_ms || 1000}
+              onChange={(e) => onChange({ auto_save_delay_ms: parseInt(e.target.value) })}
+              className="w-24"
+            />
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">ms</span>
+          </div>
+        </SettingsRow>
+      </SettingsGroup>
 
       {/* Evidence Defaults */}
-      <div>
-        <Label htmlFor="evidence-credibility" className="text-neutral-900 dark:text-neutral-100">Evidence Credibility Threshold</Label>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-2">
-          Minimum star rating for resolution suggestions
-        </p>
-        <Select
-          id="evidence-credibility"
-          value={preferences.evidence_min_credibility || 3}
-          onChange={(e) => onChange({ evidence_min_credibility: parseInt(e.target.value) })}
-          className="w-full max-w-xs"
+      <SettingsGroup title="Evidence" description="Configure evidence quality thresholds" divider>
+        <SettingsRow
+          label="Credibility threshold"
+          description="Minimum star rating for resolution suggestions"
         >
-          {[1, 2, 3, 4, 5].map((stars) => (
-            <option key={stars} value={stars}>
-              {stars} star{stars > 1 ? 's' : ''} minimum
-            </option>
-          ))}
-        </Select>
-      </div>
+          <Select
+            value={preferences.evidence_min_credibility || 3}
+            onChange={(e) => onChange({ evidence_min_credibility: parseInt(e.target.value) })}
+            className="w-40"
+          >
+            {[1, 2, 3, 4, 5].map((stars) => (
+              <option key={stars} value={stars}>
+                {'★'.repeat(stars)}{'☆'.repeat(5 - stars)} {stars} star{stars > 1 ? 's' : ''}
+              </option>
+            ))}
+          </Select>
+        </SettingsRow>
+      </SettingsGroup>
     </div>
   );
 }

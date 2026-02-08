@@ -3,6 +3,9 @@ Case-aware prompt builders for AI co-pilot integration.
 
 These prompts help the AI understand case context and generate
 relevant suggestions for inquiries, gaps, and evidence sources.
+
+Prompt builders are pure functions that return prompt strings.
+They never call LLM providers or perform async I/O.
 """
 from typing import List, Dict, Any, Optional
 
@@ -344,3 +347,159 @@ Format as JSON:
 }"""
 
     return prompt
+
+
+# ── Document-level prompt builders ──────────────────────────────────────
+
+
+def build_content_integration_prompt(
+    document_content: str,
+    content_to_add: str,
+    hint: str = "general",
+) -> tuple:
+    """
+    Build prompt to intelligently integrate new content into a document.
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    system_prompt = (
+        "You are an AI editor that helps integrate new information "
+        "into structured documents."
+    )
+
+    user_prompt = f"""
+Current document:
+{document_content}
+
+New content to integrate:
+"{content_to_add}"
+
+Content type: {hint}
+
+Instructions:
+1. Analyze the document structure
+2. Find the most appropriate section to add this content
+3. Rewrite the content if needed to match document style and flow
+4. Add a citation marker: [^chat] at the end
+5. Return the FULL updated document with the new content integrated
+
+Return JSON:
+{{
+    "updated_content": "full updated markdown",
+    "insertion_section": "section name where content was added",
+    "rewritten_content": "how the content was adapted"
+}}
+"""
+    return system_prompt, user_prompt
+
+
+def build_assumption_detection_prompt(
+    document_content: str,
+    inquiries: list,
+    assumption_signals: list,
+) -> tuple:
+    """
+    Build prompt to detect assumptions in a document.
+
+    Args:
+        document_content: The brief markdown
+        inquiries: List of Inquiry model instances (need .title, .status)
+        assumption_signals: List of Signal instances (need .text)
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    system_prompt = (
+        "You are an AI that identifies and analyzes assumptions "
+        "in decision documents."
+    )
+
+    inq_lines = [f"- {i.title} (status: {i.status})" for i in inquiries]
+    sig_lines = [f"- {s.text}" for s in assumption_signals[:5]]
+
+    user_prompt = f"""
+Analyze this case brief and identify ALL assumptions (stated or implied):
+
+Brief:
+{document_content}
+
+Existing inquiries being investigated:
+{inq_lines}
+
+Previously extracted assumption signals:
+{sig_lines}
+
+For each assumption, provide:
+1. text: The exact assumption text (quote from document)
+2. status: "untested" | "investigating" | "validated"
+   - investigating if matching inquiry exists
+   - validated if inquiry resolved
+   - untested otherwise
+3. risk_level: "low" | "medium" | "high" based on impact if assumption is wrong
+4. inquiry_id: UUID if matching inquiry exists (match by similarity)
+5. validation_approach: Brief suggestion for how to validate
+
+Return JSON array:
+[{{
+    "text": "assumption text",
+    "status": "untested",
+    "risk_level": "high",
+    "inquiry_id": null,
+    "validation_approach": "Research market data"
+}}]
+
+Return ONLY the JSON array, no other text.
+"""
+    return system_prompt, user_prompt
+
+
+def build_brief_update_prompt(
+    brief_content: str,
+    inquiry_title: str,
+    inquiry_conclusion: str,
+    inquiry_id: str,
+    conclusion_confidence: Optional[float] = None,
+    origin_text: Optional[str] = None,
+) -> tuple:
+    """
+    Build prompt to update a case brief based on an inquiry resolution.
+
+    Returns:
+        tuple: (system_prompt, user_prompt)
+    """
+    system_prompt = (
+        "You are an AI editor that updates decision briefs "
+        "based on research findings."
+    )
+
+    user_prompt = f"""
+Original case brief:
+{brief_content}
+
+Inquiry that was just resolved:
+Question: {inquiry_title}
+Conclusion: {inquiry_conclusion}
+Confidence: {conclusion_confidence or 'N/A'}
+
+{f'Origin text in brief: "{origin_text}"' if origin_text else ''}
+
+Task:
+1. Update the brief to incorporate this inquiry conclusion
+2. If origin_text exists, update or replace that assumption
+3. If no origin_text, find the most relevant section to add this finding
+4. Add citation: [[inquiry:{inquiry_id}]]
+5. Maintain markdown formatting and document structure
+6. Be concise - don't rewrite sections that don't need updating
+
+Return JSON:
+{{
+    "updated_content": "full updated markdown brief",
+    "changes": [
+        {{"type": "replace", "old": "text that changed", "new": "updated text"}},
+        {{"type": "add", "section": "section name", "content": "what was added"}}
+    ],
+    "summary": "brief summary of changes made"
+}}
+"""
+    return system_prompt, user_prompt

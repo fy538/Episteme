@@ -19,6 +19,7 @@ class EventSerializer(serializers.ModelSerializer):
             'actor_type',
             'actor_id',
             'type',
+            'category',
             'payload',
             'correlation_id',
             'case_id',

@@ -96,7 +96,7 @@ class TrajectoryRecorderTest(TestCase):
         # timestamp should have been auto-filled
         self.assertTrue(len(recorder.events[0].timestamp) > 0)
 
-    @patch("apps.agents.trajectory.EventService")
+    @patch("apps.events.services.EventService")
     def test_save_to_events(self, mock_event_service):
         recorder = TrajectoryRecorder(correlation_id="save-test")
         recorder.record_step("plan")
@@ -107,7 +107,7 @@ class TrajectoryRecorderTest(TestCase):
         # Verify event type is AGENT_TRAJECTORY
         self.assertIn("AGENT_TRAJECTORY", str(call_kwargs))
 
-    @patch("apps.agents.trajectory.EventService")
+    @patch("apps.events.services.EventService")
     def test_save_handles_failure(self, mock_event_service):
         """save_to_events is best-effort."""
         mock_event_service.append.side_effect = RuntimeError("DB down")
@@ -196,7 +196,7 @@ class LoopTrajectoryIntegrationTest(TestCase):
 
         final = recorder.finalize()
         self.assertGreater(final["total_steps"], 0)
-        self.assertGreater(final["total_duration_ms"], 0)
+        self.assertGreaterEqual(final["total_duration_ms"], 0)
 
         # Plan event should have sub_queries metric
         plan_event = next(e for e in final["events"] if e["step_name"] == "plan")

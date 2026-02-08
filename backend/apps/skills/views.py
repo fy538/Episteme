@@ -8,12 +8,14 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import models
 
-from .models import Skill, SkillVersion
+from .models import Skill, SkillVersion, SkillPack
 from .serializers import (
     SkillSerializer,
     SkillListSerializer,
     SkillVersionSerializer,
-    CreateSkillSerializer
+    CreateSkillSerializer,
+    SkillPackSerializer,
+    SkillPackListSerializer,
 )
 from .parser import parse_skill_md, validate_skill_md
 from .permissions import SkillPermission
@@ -40,13 +42,19 @@ class SkillViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Filter skills based on scope and permissions"""
         user = self.request.user
-        
-        return Skill.objects.filter(
+
+        qs = Skill.objects.filter(
             models.Q(scope='public') |  # Public skills
             models.Q(owner=user) |  # Skills owned by user
             models.Q(can_view=user) |  # Skills user has view permission for
-            models.Q(scope='organization', organization__isnull=False)  # Org skills (TODO: filter by user's org)
+            models.Q(scope='organization', organization__members=user)  # Org skills for user's org
+        ).select_related(
+            'organization', 'owner', 'created_by',
+            'source_case', 'forked_from', 'team',
+        ).prefetch_related(
+            'versions',
         ).distinct()
+        return qs
     
     def get_serializer_class(self):
         """Use different serializers for different actions"""
@@ -57,9 +65,11 @@ class SkillViewSet(viewsets.ModelViewSet):
         return SkillSerializer
     
     def perform_create(self, serializer):
-        """Set created_by when creating a skill"""
-        # TODO: Set organization from user when org relationship exists
-        serializer.save()
+        """Set created_by and owner when creating a skill"""
+        serializer.save(
+            owner=self.request.user,
+            created_by=self.request.user,
+        )
     
     @action(detail=True, methods=['post'])
     def create_version(self, request, pk=None):
@@ -95,32 +105,41 @@ class SkillViewSet(viewsets.ModelViewSet):
         metadata = parsed['metadata']
         
         # Update skill metadata if provided in YAML
+        changed_fields = []
         if 'name' in metadata:
             skill.name = metadata['name']
+            changed_fields.append('name')
         if 'description' in metadata:
             skill.description = metadata['description']
+            changed_fields.append('description')
         if 'domain' in metadata:
             skill.domain = metadata.get('domain', '')
+            changed_fields.append('domain')
         if 'episteme' in metadata:
             episteme = metadata['episteme']
             if 'applies_to_agents' in episteme:
                 skill.applies_to_agents = episteme['applies_to_agents']
+                changed_fields.append('applies_to_agents')
             # Store full episteme config
             skill.episteme_config = episteme
-        
-        # Create new version
-        new_version = SkillVersion.objects.create(
-            skill=skill,
-            version=skill.current_version + 1,
-            skill_md_content=skill_md,
-            resources=request.data.get('resources', {}),
-            created_by=request.user,
-            changelog=request.data.get('changelog', '')
-        )
-        
-        # Update skill
-        skill.current_version = new_version.version
-        skill.save()
+            changed_fields.append('episteme_config')
+
+        from django.db import transaction as db_transaction
+        with db_transaction.atomic():
+            # Create new version
+            new_version = SkillVersion.objects.create(
+                skill=skill,
+                version=skill.current_version + 1,
+                skill_md_content=skill_md,
+                resources=request.data.get('resources', {}),
+                created_by=request.user,
+                changelog=request.data.get('changelog', '')
+            )
+
+            # Update skill — save ALL changed fields
+            skill.current_version = new_version.version
+            changed_fields.extend(['current_version', 'updated_at'])
+            skill.save(update_fields=changed_fields)
         
         return Response(
             SkillVersionSerializer(new_version).data,
@@ -180,14 +199,13 @@ class SkillViewSet(viewsets.ModelViewSet):
         """
         case_title = request.data.get('title', '')
         case_position = request.data.get('position', '')
-        
-        # Simple keyword matching (can be enhanced with embeddings later)
-        # TODO: Filter by organization when org relationship exists
-        skills = Skill.objects.filter(status='active')
-        
+
+        # Use the same scoped queryset so users only see skills they have access to
+        skills = self.get_queryset().filter(status='active')
+
         suggested = []
         text = f"{case_title} {case_position}".lower()
-        
+
         for skill in skills:
             # Match domain keywords
             if skill.domain:
@@ -195,11 +213,11 @@ class SkillViewSet(viewsets.ModelViewSet):
                 if any(kw in text for kw in keywords):
                     suggested.append(skill)
                     continue
-            
+
             # Match skill name
             if skill.name.lower() in text:
                 suggested.append(skill)
-        
+
         serializer = SkillListSerializer(suggested, many=True)
         return Response(serializer.data)
     
@@ -324,3 +342,34 @@ class SkillViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class SkillPackViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only endpoints for skill packs
+
+    Endpoints:
+    - GET /api/skill-packs/ - List all active packs
+    - GET /api/skill-packs/{slug}/ - Get pack detail with ordered skills
+    """
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        """Return active packs visible to the requesting user."""
+        user = self.request.user
+        return SkillPack.objects.filter(
+            status='active',
+        ).filter(
+            models.Q(scope='public') |
+            models.Q(scope='organization', organization__members=user)
+        ).select_related(
+            'organization', 'created_by',
+        ).prefetch_related(
+            'skillpackmembership_set__skill',
+        ).distinct()
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return SkillPackListSerializer
+        return SkillPackSerializer

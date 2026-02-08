@@ -15,33 +15,45 @@ episteme/
 
 ## Documentation
 
-### User Guides
-- [Local Dev Runbook](./docs/LOCAL_DEV_RUNBOOK.md) - Daily development operations
-- [API Reference](./docs/API.md) - Complete REST API documentation
-- [Deployment Guide](./docs/DEPLOYMENT_GUIDE.md) - Production deployment
-- [Fly.io Deployment](./docs/FLY_IO_DEPLOYMENT.md) - Fly.io specific guide
+See **[docs/README.md](./docs/README.md)** for the full documentation index.
 
-### Architecture & Design
-- [Product Vision & UX](./docs/PRODUCT_VISION_AND_UX.md) - Product strategy and vision
-- [Skill System Architecture](./docs/SKILL_SYSTEM_ARCHITECTURE.md) - Deep customization system
-- [Agent Orchestration](./docs/AGENT_ORCHESTRATION_DESIGN.md) - Multi-agent design
-- [Intelligent Agent Routing](./docs/INTELLIGENT_AGENT_ROUTING.md) - Agent selection logic
-- [Evidence vs Signals](./docs/EVIDENCE_VS_SIGNALS.md) - Core conceptual model
-- [Memory Integration](./docs/MEMORY_INTEGRATION.md) - Long-term memory system
+### Getting Started
+- [Local Dev Runbook](./docs/guides/LOCAL_DEV_RUNBOOK.md) - Daily development operations
+- [API Reference](./docs/reference/API.md) - Complete REST API documentation
+- [Deployment Guide](./docs/guides/DEPLOYMENT_GUIDE.md) - Production deployment
+- [Getting Started with AI](./docs/guides/GETTING_STARTED_WITH_AI.md) - 5-minute AI setup
 
-### Backend Documentation
-- [AI Services Quick Reference](./docs/backend/AI_SERVICES_QUICK_REFERENCE.md) - Using PydanticAI
-- [PydanticAI Migration](./docs/backend/PYDANTIC_AI_MIGRATION.md) - Migration guide
-- [Document System Quickstart](./docs/backend/QUICKSTART_DOCUMENT_SYSTEM.md) - Document processing
+### Architecture
+- [Intelligence Engine](./docs/architecture/INTELLIGENCE_ENGINE.md) - Unified analysis, agents, signal extraction
+- [Chat Streaming](./docs/architecture/CHAT_STREAMING_ARCHITECTURE.md) - SSE pipeline, optimistic rendering
+- [Auto-Reasoning & Cascade](./docs/architecture/AUTO_REASONING_CASCADE.md) - Evidence → assumption status → brief grounding loop
+- [Brief Grounding & Evidence Linking](./docs/architecture/BRIEF_GROUNDING_AND_EVIDENCE_LINKING.md) - Evidence quality tracking
+- [Event Sourcing](./docs/architecture/EVENT_SOURCING.md) - Append-only event store, provenance, correlation IDs
+- [Celery Workflows](./docs/architecture/CELERY_WORKFLOWS.md) - Async task orchestration
+- [Inquiries System](./docs/architecture/INQUIRIES_SYSTEM.md) - Evidence, objections, dependencies, resolution
+- [Evidence Ingestion & Companion](./docs/architecture/EVIDENCE_INGESTION_AND_COMPANION.md) - Universal pipeline, graph analyzer
+- [Investigation Plan Service](./docs/architecture/INVESTIGATION_PLAN_SERVICE.md) - Versioned plans, assumption sync
+- [Skill System](./docs/architecture/SKILL_SYSTEM_ARCHITECTURE.md) - Deep customization system
 
-### Frontend Documentation
+### Concepts & Design
+- [Product Vision](./docs/concepts/PRODUCT_VISION.md) - Product strategy and vision
+- [Evidence vs Signals](./docs/concepts/EVIDENCE_VS_SIGNALS.md) - Core conceptual model
+- [Design Principles](./docs/concepts/DESIGN_PRINCIPLES.md) - Design philosophy
+
+### Reference
+- [Auth & Unified Search](./docs/reference/AUTH_AND_SEARCH.md) - JWT auth, preferences, semantic search
+- [AI Services Quick Reference](./docs/reference/AI_SERVICES_QUICK_REFERENCE.md) - Using PydanticAI
+- [AI System Architecture](./docs/reference/AI_SYSTEM_ARCHITECTURE.md) - LLM provider abstraction
+- [Document System Quickstart](./docs/reference/QUICKSTART_DOCUMENT_SYSTEM.md) - Document processing
+
+### Strategy
+- [User Personas](./docs/strategy/USER_PERSONAS.md) - Consultant, tech lead, solo founder
+- [Competitive Positioning & Moat](./docs/strategy/COMPETITIVE_POSITIONING.md) - Landscape, differentiators, replication cost
+- [Workflow & Value Map](./docs/strategy/WORKFLOW_AND_VALUE_MAP.md) - 4-stage journey, feature-to-value mapping
+- [Category & Positioning](./docs/strategy/CATEGORY_AND_POSITIONING.md) - Category, messaging, language guide
+
+### Frontend
 - [Frontend README](./frontend/README.md) - Frontend overview
-- [Design System](./frontend/DESIGN_SYSTEM.md) - UI components and tokens
-- [Testing Guide](./frontend/TESTING_GUIDE.md) - Testing practices
-
-### Strategic Documentation
-- [Solo Founder AI Strategy](./docs/SOLO_FOUNDER_AI_STRATEGY.md) - Cost-optimized model selection
-- [Getting Started with AI](./docs/GETTING_STARTED_WITH_AI.md) - 5-minute AI setup
 
 ## Quick Start
 
@@ -265,7 +277,7 @@ For complex, multi-step reasoning requiring agent coordination:
 - Clean supervisor/worker patterns
 - Perfect for long-horizon tasks
 
-See `docs/backend/PYDANTIC_AI_MIGRATION.md` for implementation details.
+See `docs/reference/PYDANTIC_AI_MIGRATION.md` for implementation details.
 
 ## Documentation Strategy
 
