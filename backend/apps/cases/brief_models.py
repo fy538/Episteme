@@ -1,7 +1,7 @@
 """
 Brief section and annotation models.
 
-Provides a structured metadata overlay on top of CaseDocument markdown.
+Provides a structured metadata overlay on top of WorkingDocument markdown.
 Sections link to markdown via <!-- section:ID --> markers and optionally
 to Inquiries for grounding computation. Annotations are system-generated
 observations about section quality (tensions, blind spots, evidence gaps).
@@ -65,12 +65,12 @@ class BriefSection(UUIDModel, TimestampedModel):
     - User-created (added manually)
     - Agent-suggested (proposed by AI)
 
-    Linked sections (with inquiry FK or tagged_signals) get full
-    intelligence overlay. Unlinked sections are pure prose.
+    Linked sections (with inquiry FK) get full intelligence overlay.
+    Unlinked sections are pure prose.
     """
     # Link to the brief document
     brief = models.ForeignKey(
-        'cases.CaseDocument',
+        'cases.WorkingDocument',
         on_delete=models.CASCADE,
         related_name='brief_sections'
     )
@@ -126,15 +126,7 @@ class BriefSection(UUIDModel, TimestampedModel):
     # Linking state
     is_linked = models.BooleanField(
         default=False,
-        help_text='True if linked to inquiry or has tagged signals'
-    )
-
-    # For custom sections: user/system can tag specific signals
-    # for partial grounding without a full inquiry link
-    tagged_signals = models.ManyToManyField(
-        'signals.Signal',
-        blank=True,
-        related_name='tagged_in_sections'
+        help_text='True if linked to inquiry'
     )
 
     # Computed grounding (cached, refreshed by evolve_scaffold)
@@ -191,7 +183,7 @@ class BriefSection(UUIDModel, TimestampedModel):
 
     def save(self, *args, **kwargs):
         """Auto-compute is_linked and depth."""
-        self.is_linked = bool(self.inquiry_id) or False  # M2M checked separately
+        self.is_linked = bool(self.inquiry_id)
         if self.parent_section:
             self.depth = self.parent_section.depth + 1
         super().save(*args, **kwargs)
@@ -237,11 +229,6 @@ class BriefAnnotation(UUIDModel, TimestampedModel):
     )
 
     # What triggered this annotation
-    source_signals = models.ManyToManyField(
-        'signals.Signal',
-        blank=True,
-        related_name='brief_annotations'
-    )
     source_inquiry = models.ForeignKey(
         'inquiries.Inquiry',
         null=True,

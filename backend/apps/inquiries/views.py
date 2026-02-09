@@ -10,13 +10,11 @@ logger = logging.getLogger(__name__)
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.inquiries.models import Inquiry, InquiryStatus, Evidence, Objection
+from apps.inquiries.models import Inquiry, InquiryStatus, Objection
 from apps.inquiries.serializers import (
     InquirySerializer,
     InquiryListSerializer,
     InquiryCreateSerializer,
-    EvidenceSerializer,
-    EvidenceCreateSerializer,
     ObjectionSerializer,
     ObjectionCreateSerializer,
 )
@@ -63,7 +61,7 @@ class InquiryViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status__in=[InquiryStatus.OPEN, InquiryStatus.INVESTIGATING])
 
         return queryset.select_related('case').prefetch_related(
-            'related_signals', 'blocked_by', 'evidence_items',
+            'blocked_by',
         )
     
     @action(detail=True, methods=['get'])
@@ -75,8 +73,8 @@ class InquiryViewSet(viewsets.ModelViewSet):
         
         Returns array of confidence changes with timestamps and reasons.
         """
-        from apps.companion.models import InquiryHistory
-        from apps.companion.serializers import InquiryHistorySerializer
+        from apps.inquiries.models import InquiryHistory
+        from apps.inquiries.serializers import InquiryHistorySerializer
         
         inquiry = self.get_object()
         
@@ -117,18 +115,6 @@ class InquiryViewSet(viewsets.ModelViewSet):
             inquiry.save(update_fields=[
                 'conclusion', 'conclusion_confidence', 'status', 'updated_at',
             ])
-
-        # Record session receipt if thread_id provided (outside transaction — non-critical)
-        if thread_id:
-            try:
-                from apps.companion.receipts import SessionReceiptService
-                SessionReceiptService.record_inquiry_resolved(
-                    thread_id=thread_id,
-                    inquiry=inquiry,
-                    conclusion=conclusion
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record inquiry resolution receipt: {e}")
 
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
@@ -271,127 +257,6 @@ class InquiryViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(inquiry)
         return Response(serializer.data)
     
-    @action(detail=True, methods=['get'])
-    def evidence_summary(self, request, pk=None):
-        """
-        Get aggregated evidence summary for inquiry.
-        
-        GET /api/inquiries/{id}/evidence_summary/
-        
-        Returns evidence grouped by direction with aggregate confidence.
-        Core experience improvement - helps users know if they're ready to resolve.
-        """
-        from django.db.models import Avg
-        
-        inquiry = self.get_object()
-        evidence = Evidence.objects.filter(inquiry=inquiry).select_related('document')
-        
-        # Group by direction
-        supporting = evidence.filter(direction='SUPPORTS')
-        contradicting = evidence.filter(direction='CONTRADICTS')
-        neutral = evidence.filter(direction='NEUTRAL')
-        
-        # Calculate aggregate confidence
-        total_count = evidence.count()
-        
-        if total_count > 0:
-            support_ratio = supporting.count() / total_count
-            contradict_ratio = contradicting.count() / total_count
-            
-            # Get average credibility from user ratings
-            avg_credibility = evidence.aggregate(
-                Avg('user_credibility_rating')
-            )['user_credibility_rating__avg'] or 0.0
-            
-            # Aggregate confidence formula:
-            # High if: many supporting, few contradicting, high credibility
-            # Weight support positively, contradiction negatively
-            aggregate_confidence = (
-                (support_ratio - contradict_ratio * 0.5) * (avg_credibility / 5.0)
-            )
-            aggregate_confidence = max(0.0, min(1.0, aggregate_confidence))  # Clamp 0-1
-            
-        else:
-            aggregate_confidence = 0.0
-            avg_credibility = 0.0
-        
-        # Determine strength category
-        if aggregate_confidence > 0.7:
-            strength = 'strong'
-        elif aggregate_confidence > 0.4:
-            strength = 'moderate'
-        else:
-            strength = 'weak'
-        
-        # Check if ready to resolve
-        ready_to_resolve = (
-            aggregate_confidence > 0.6 and
-            total_count >= 2 and
-            avg_credibility >= 3.0
-        )
-        
-        # Generate recommended conclusion if strong evidence
-        recommended_conclusion = None
-        if aggregate_confidence > 0.7 and total_count >= 3:
-            if support_ratio > 0.7:
-                recommended_conclusion = f"Evidence strongly supports investigating {inquiry.title}"
-            elif contradict_ratio > 0.7:
-                recommended_conclusion = f"Evidence suggests {inquiry.title} may not be the right approach"
-        
-        return Response({
-            'supporting': EvidenceSerializer(supporting, many=True).data,
-            'contradicting': EvidenceSerializer(contradicting, many=True).data,
-            'neutral': EvidenceSerializer(neutral, many=True).data,
-            'summary': {
-                'total_evidence': total_count,
-                'supporting_count': supporting.count(),
-                'contradicting_count': contradicting.count(),
-                'neutral_count': neutral.count(),
-                'avg_credibility': round(avg_credibility, 2),
-                'aggregate_confidence': round(aggregate_confidence, 2),
-                'strength': strength,
-                'ready_to_resolve': ready_to_resolve,
-                'recommended_conclusion': recommended_conclusion
-            }
-        })
-    
-    @action(detail=True, methods=['post'], url_path='add-evidence')
-    def add_evidence(self, request, pk=None):
-        """
-        Create evidence for this inquiry (e.g., user observation from chat).
-
-        POST /api/inquiries/{id}/add-evidence/
-        {
-            "evidence_text": "...",
-            "evidence_type": "user_observation",  // optional, defaults to user_observation
-            "direction": "supports",              // optional, defaults to neutral
-            "strength": 0.5,                      // optional
-            "credibility": 0.5                    // optional
-        }
-        """
-        inquiry = self.get_object()
-        evidence_text = request.data.get('evidence_text', '').strip()
-        if not evidence_text:
-            return Response(
-                {'error': 'evidence_text is required'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        evidence = Evidence.objects.create(
-            inquiry=inquiry,
-            evidence_type=request.data.get('evidence_type', 'user_observation'),
-            evidence_text=evidence_text,
-            direction=request.data.get('direction', 'NEUTRAL').upper(),
-            strength=float(request.data.get('strength', 0.5)),
-            credibility=float(request.data.get('credibility', 0.5)),
-            created_by=request.user,
-        )
-
-        return Response(
-            EvidenceSerializer(evidence).data,
-            status=status.HTTP_201_CREATED,
-        )
-
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
         """
@@ -401,8 +266,6 @@ class InquiryViewSet(viewsets.ModelViewSet):
 
         Returns organized view of all inquiries for a case with actionable insights.
         """
-        from django.db.models import Count, Q
-        
         case_id = request.query_params.get('case_id')
         if not case_id:
             return Response(
@@ -454,19 +317,15 @@ class InquiryViewSet(viewsets.ModelViewSet):
                 'priority': 1
             })
         
-        # Priority 2: Resolve investigating inquiries with evidence
-        investigating = (
-            inquiries.filter(status=InquiryStatus.INVESTIGATING)
-            .annotate(evidence_count=Count('evidence_items'))
-        )
+        # Priority 2: Resolve investigating inquiries
+        investigating = inquiries.filter(status=InquiryStatus.INVESTIGATING)
         for inq in investigating:
-            if inq.evidence_count >= 2:  # Has enough evidence
-                next_actions.append({
-                    'type': 'resolve_inquiry',
-                    'inquiry_id': str(inq.id),
-                    'title': f'Ready to resolve: {inq.title}',
-                    'priority': 2
-                })
+            next_actions.append({
+                'type': 'resolve_inquiry',
+                'inquiry_id': str(inq.id),
+                'title': f'Ready to resolve: {inq.title}',
+                'priority': 2
+            })
         
         return Response({
             'by_status': by_status,
@@ -584,7 +443,7 @@ class InquiryViewSet(viewsets.ModelViewSet):
         }
         """
         from apps.common.llm_providers import get_llm_provider, stream_json
-        from apps.cases.models import CaseDocument
+        from apps.cases.models import WorkingDocument
         from apps.intelligence.case_prompts import build_brief_update_prompt
         from asgiref.sync import sync_to_async
 
@@ -598,8 +457,8 @@ class InquiryViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            brief = await sync_to_async(CaseDocument.objects.get)(id=brief_id, case__user=request.user)
-        except CaseDocument.DoesNotExist:
+            brief = await sync_to_async(WorkingDocument.objects.get)(id=brief_id, case__user=request.user)
+        except WorkingDocument.DoesNotExist:
             return Response(
                 {'error': 'Brief not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -753,117 +612,6 @@ Return ONLY the markdown plan with these 4 sections. Be specific and actionable.
             full_response += chunk.content
         
         return Response({'plan_markdown': full_response.strip()})
-
-
-class EvidenceViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing evidence for inquiries.
-    
-    Evidence can come from documents, experiments, or user observations.
-    """
-    queryset = Evidence.objects.all()
-    serializer_class = EvidenceSerializer
-    
-    def get_serializer_class(self):
-        if self.action == 'create':
-            return EvidenceCreateSerializer
-        return EvidenceSerializer
-    
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
-    
-    def get_queryset(self):
-        from apps.common.utils import is_valid_uuid
-
-        # Scope to current user's cases
-        queryset = Evidence.objects.filter(inquiry__case__user=self.request.user)
-
-        # Filter by inquiry
-        inquiry_id = self.request.query_params.get('inquiry')
-        if inquiry_id and is_valid_uuid(inquiry_id):
-            queryset = queryset.filter(inquiry_id=inquiry_id)
-
-        # Filter by direction
-        direction = self.request.query_params.get('direction')
-        if direction:
-            queryset = queryset.filter(direction=direction)
-
-        # Filter by document
-        document_id = self.request.query_params.get('document')
-        if document_id and is_valid_uuid(document_id):
-            queryset = queryset.filter(source_document_id=document_id)
-
-        return queryset.select_related('inquiry', 'source_document', 'created_by')
-    
-    @action(detail=False, methods=['post'])
-    def cite_document(self, request):
-        """
-        Create evidence by citing a document or specific chunks.
-
-        POST /api/evidence/cite_document/
-        {
-            "inquiry_id": "uuid",
-            "document_id": "uuid",
-            "chunk_ids": ["uuid1", "uuid2"],  // optional
-            "evidence_text": "User's interpretation",
-            "direction": "supports",
-            "strength": 0.8,
-            "thread_id": "uuid"  // optional: for session receipt recording
-        }
-        """
-        inquiry_id = request.data.get('inquiry_id')
-        document_id = request.data.get('document_id')
-        chunk_ids = request.data.get('chunk_ids', [])
-        thread_id = request.data.get('thread_id')
-
-        if not inquiry_id or not document_id:
-            return Response(
-                {'error': 'inquiry_id and document_id are required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Determine evidence type
-        evidence_type = 'document_chunks' if chunk_ids else 'document_full'
-
-        # Create evidence
-        serializer = EvidenceCreateSerializer(
-            data={
-                'inquiry': inquiry_id,
-                'evidence_type': evidence_type,
-                'source_document': document_id,
-                'chunk_ids': chunk_ids,
-                'evidence_text': request.data.get('evidence_text', ''),
-                'direction': request.data.get('direction', 'neutral'),
-                'strength': request.data.get('strength', 0.5),
-                'credibility': request.data.get('credibility', 0.5),
-            },
-            context={'request': request}
-        )
-
-        serializer.is_valid(raise_exception=True)
-        evidence = serializer.save()
-
-        # Record session receipt if thread_id provided
-        if thread_id:
-            try:
-                from apps.companion.receipts import SessionReceiptService
-                inquiry = Inquiry.objects.get(id=inquiry_id)
-                direction = request.data.get('direction', 'neutral')
-                SessionReceiptService.record_evidence_added(
-                    thread_id=thread_id,
-                    inquiry=inquiry,
-                    evidence_count=1,
-                    direction=direction
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record evidence addition receipt: {e}")
-
-        return Response(
-            EvidenceSerializer(evidence).data,
-            status=status.HTTP_201_CREATED
-        )
 
 
 class ObjectionViewSet(viewsets.ModelViewSet):

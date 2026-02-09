@@ -180,7 +180,7 @@ class SubAgentToolTest(TestCase):
         """Successful sub-agent should return a SearchResult."""
         mock_task = AsyncMock(return_value={
             "status": "completed",
-            "artifact_id": "art-123",
+            "document_id": "doc-123",
         })
 
         self.registry.register(AgentDescriptor(
@@ -198,7 +198,7 @@ class SubAgentToolTest(TestCase):
         results = asyncio.run(tool.execute("test query"))
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], SearchResult)
-        self.assertIn("art-123", results[0].url)
+        self.assertIn("doc-123", results[0].url)
         self.assertEqual(results[0].domain, "internal")
 
     def test_failed_sub_agent_returns_empty(self):

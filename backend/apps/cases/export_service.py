@@ -21,7 +21,6 @@ from apps.cases.models import Case
 from apps.cases.brief_models import (
     BriefSection, GroundingStatus, AnnotationType,
 )
-from apps.signals.models import SignalType
 
 logger = logging.getLogger(__name__)
 
@@ -183,18 +182,7 @@ class BriefExportService:
             'inquiry',
         ).prefetch_related(
             'annotations',
-            'annotations__source_signals',
-            'inquiry__evidence_items',
-            'inquiry__evidence_items__source_document',
-            'inquiry__related_signals',
-            'inquiry__related_signals__supported_by_evidence',
-            'inquiry__related_signals__contradicted_by_evidence',
-            'inquiry__related_signals__contradicts',
-            'inquiry__related_signals__depends_on',
             'inquiry__objections',
-            'tagged_signals',
-            'tagged_signals__supported_by_evidence',
-            'tagged_signals__contradicted_by_evidence',
             'subsections',
         ).order_by('order')
 
@@ -305,29 +293,37 @@ class BriefExportService:
             'neutral': 0,
         }
 
-        # Get signals — from inquiry or tagged_signals
-        signals = []
         if section.inquiry:
-            signals = list(section.inquiry.related_signals.filter(dismissed_at__isnull=True))
-
-            # Build evidence quality from inquiry evidence items
-            for ev in section.inquiry.evidence_items.all():
-                evidence_quality['total'] += 1
-                if ev.direction == 'supports':
-                    evidence_quality['supporting'] += 1
-                elif ev.direction == 'contradicts':
-                    evidence_quality['contradicting'] += 1
-                else:
-                    evidence_quality['neutral'] += 1
-
-                strength = ev.strength or 0
-                if strength >= 0.7:
-                    evidence_quality['high_confidence'] += 1
-                elif strength > 0:
-                    evidence_quality['low_confidence'] += 1
-
-        elif section.tagged_signals.exists():
-            signals = list(section.tagged_signals.filter(dismissed_at__isnull=True))
+            # Build evidence quality from graph evidence nodes
+            try:
+                from apps.graph.models import Node, Edge, EdgeType
+                case = section.inquiry.case
+                if case and case.project:
+                    evidence_nodes = Node.objects.filter(
+                        project=case.project,
+                        node_type='evidence',
+                    )
+                    evidence_quality['total'] = evidence_nodes.count()
+                    evidence_quality['supporting'] = Edge.objects.filter(
+                        source_node__in=evidence_nodes,
+                        edge_type=EdgeType.SUPPORTS,
+                    ).count()
+                    evidence_quality['contradicting'] = Edge.objects.filter(
+                        source_node__in=evidence_nodes,
+                        edge_type=EdgeType.CONTRADICTS,
+                    ).count()
+                    evidence_quality['neutral'] = max(
+                        0,
+                        evidence_quality['total'] - evidence_quality['supporting'] - evidence_quality['contradicting'],
+                    )
+                    for node in evidence_nodes:
+                        conf = node.confidence or 0
+                        if conf >= 0.7:
+                            evidence_quality['high_confidence'] += 1
+                        elif conf > 0:
+                            evidence_quality['low_confidence'] += 1
+            except Exception:
+                pass
 
         # Use cached grounding_data if available (for evidence quality fallback)
         if evidence_quality['total'] == 0 and section.grounding_data:
@@ -340,29 +336,9 @@ class BriefExportService:
         # Categorize signals
         seen_tension_pairs = set()
 
-        for signal in signals:
-            if signal.type == SignalType.ASSUMPTION:
-                assumptions.append(cls._build_assumption(signal))
-            elif signal.type in (SignalType.CLAIM, SignalType.EVIDENCE_MENTION):
-                claim = cls._build_claim(signal, section, export_type)
-                claims.append(claim)
-
-            # Detect tensions (contradicting pairs)
-            for contra in signal.contradicts.filter(dismissed_at__isnull=True):
-                pair = tuple(sorted([str(signal.id), str(contra.id)]))
-                if pair not in seen_tension_pairs:
-                    seen_tension_pairs.add(pair)
-                    both_high = (
-                        (signal.confidence or 0) >= 0.7 and
-                        (contra.confidence or 0) >= 0.7
-                    )
-                    tensions.append({
-                        'description': f'"{signal.text[:60]}..." vs "{contra.text[:60]}..."',
-                        'signal_a': {'id': str(signal.id), 'text': signal.text},
-                        'signal_b': {'id': str(contra.id), 'text': contra.text},
-                        'both_high_confidence': both_high,
-                        'priority': 'blocking' if both_high else 'important',
-                    })
+        # Note: Signals no longer include Claim/Assumption/EvidenceMention types.
+        # Claims, assumptions, and tensions are now provided by the graph layer.
+        # Signals in the export are decision-context only (Question, Goal, etc.).
 
         # For executive_summary, limit to top 3 claims by confidence
         if export_type == 'executive_summary' and len(claims) > 3:
@@ -374,74 +350,6 @@ class BriefExportService:
             'assumptions': assumptions,
             'tensions': tensions,
             'evidence_quality': evidence_quality,
-        }
-
-    @classmethod
-    def _build_claim(cls, signal, section: BriefSection, export_type: str) -> dict:
-        """Build a claim entry with evidence support."""
-        supporting = list(signal.supported_by_evidence.all())
-        contradicting = list(signal.contradicted_by_evidence.all())
-
-        # Determine claim status
-        if len(supporting) >= 2 and len(contradicting) == 0:
-            claim_status = 'well_grounded'
-        elif len(contradicting) > 0:
-            claim_status = 'contested'
-        elif len(supporting) == 0:
-            claim_status = 'ungrounded'
-        else:
-            claim_status = 'well_grounded' if len(supporting) >= 1 else 'ungrounded'
-
-        evidence_items = []
-
-        # Only include full evidence in non-executive exports
-        if export_type != 'executive_summary':
-            # Also pull inquiry-level evidence if available
-            if section.inquiry:
-                for ev in section.inquiry.evidence_items.all():
-                    source_info = {}
-                    if ev.source_document:
-                        source_info = {
-                            'document_id': str(ev.source_document.id),
-                            'document_title': ev.source_document.title,
-                        }
-                    evidence_items.append({
-                        'id': str(ev.id),
-                        'text': ev.evidence_text or '',
-                        'direction': ev.direction,
-                        'strength': ev.strength,
-                        'credibility': ev.credibility,
-                        'source': source_info,
-                    })
-
-        return {
-            'id': str(signal.id),
-            'text': signal.text,
-            'type': signal.type,
-            'confidence': signal.confidence,
-            'evidence_support': {
-                'supporting_count': len(supporting),
-                'contradicting_count': len(contradicting),
-                'evidence_items': evidence_items,
-            },
-            'status': claim_status,
-        }
-
-    @staticmethod
-    def _build_assumption(signal) -> dict:
-        """Build an assumption entry."""
-        has_evidence = signal.supported_by_evidence.exists()
-        depends_on_ids = [str(s.id) for s in signal.depends_on.all()]
-        contradicted_by_ids = [str(s.id) for s in signal.contradicts.filter(dismissed_at__isnull=True)]
-
-        return {
-            'id': str(signal.id),
-            'text': signal.text,
-            'confidence': signal.confidence,
-            'assumption_status': getattr(signal, 'assumption_status', 'untested') or 'untested',
-            'has_evidence': has_evidence,
-            'depends_on': depends_on_ids,
-            'contradicted_by': contradicted_by_ids,
         }
 
     # ─── Global Patterns ──────────────────────────────────────────────

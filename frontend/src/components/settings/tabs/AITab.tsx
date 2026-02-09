@@ -166,28 +166,6 @@ export function AITab({ preferences, onChange }: AITabProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* Signal Highlighting */}
-      <SettingsGroup title="Signal Highlighting" description="Highlight detected signals directly in chat messages" divider>
-        <SettingsRow label="Assumptions" description="Highlight assumption signals">
-          <Switch
-            checked={preferences.highlight_assumptions ?? true}
-            onCheckedChange={(checked) => onChange({ highlight_assumptions: checked })}
-          />
-        </SettingsRow>
-        <SettingsRow label="Questions" description="Highlight question signals">
-          <Switch
-            checked={preferences.highlight_questions ?? true}
-            onCheckedChange={(checked) => onChange({ highlight_questions: checked })}
-          />
-        </SettingsRow>
-        <SettingsRow label="Evidence" description="Highlight evidence signals">
-          <Switch
-            checked={preferences.highlight_evidence ?? true}
-            onCheckedChange={(checked) => onChange({ highlight_evidence: checked })}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
       {/* Agent Behavior */}
       <SettingsGroup title="Agent Behavior" description="Control how AI agents are suggested and triggered" divider>
         {/* Detection Frequency - segmented control */}

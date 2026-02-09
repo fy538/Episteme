@@ -14,7 +14,7 @@
 /**
  * Chat modes determining the context and behavior
  */
-export type ChatMode = 'casual' | 'case' | 'inquiry_focus';
+export type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph';
 
 /**
  * Context for the current chat mode
@@ -34,9 +34,7 @@ export interface ModeContext {
  */
 export type SessionReceiptType =
   | 'case_created'
-  | 'signals_extracted'
   | 'inquiry_resolved'
-  | 'evidence_added'
   | 'research_completed';
 
 /**

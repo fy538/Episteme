@@ -26,7 +26,7 @@ episteme:
       - Company 10-K/10-Q filings
     minimum_credibility: 0.80
     requires_citation: true
-  artifact_template:
+  document_template:
     brief:
       sections:
         - heading: Regulatory Landscape

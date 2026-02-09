@@ -70,13 +70,6 @@ export interface CaseAnalysisResponse {
   assumptions: string[];
   constraints: Constraint[];
   success_criteria: SuccessCriterion[];
-  signals_summary: {
-    assumptions: number;
-    questions: number;
-    claims: number;
-    constraints: number;
-    goals: number;
-  };
   confidence: number;
   correlation_id: string;
   message_count: number;
@@ -98,13 +91,11 @@ export interface Inquiry {
   // Dependency fields
   blocked_by?: string[];
   blocks?: string[];
-  // Optional computed fields
-  related_signals_count?: number;
   created_at: string;
   updated_at: string;
 }
 
-export interface CaseDocument {
+export interface WorkingDocument {
   id: string;
   case: string;
   inquiry?: string;
@@ -123,35 +114,6 @@ export interface CaseDocument {
   updated_at: string;
 }
 
-// Evidence Landscape types (replaces computed confidence)
-export interface EvidenceLandscape {
-  evidence: {
-    supporting: number;
-    contradicting: number;
-    neutral: number;
-  };
-  assumptions: {
-    total: number;
-    validated: number;
-    untested: number;
-    untested_list: Array<{
-      id: string;
-      text: string;
-      inquiry_id?: string;
-    }>;
-  };
-  inquiries: {
-    total: number;
-    open: number;
-    investigating: number;
-    resolved: number;
-  };
-  unlinked_claims: Array<{
-    text: string;
-    location: string;
-  }>;
-}
-
 // Readiness Checklist types
 export interface ReadinessChecklistItem {
   id: string;
@@ -160,7 +122,7 @@ export interface ReadinessChecklistItem {
   is_complete: boolean;
   completed_at?: string;
   linked_inquiry?: string;
-  linked_assumption_signal?: string;
+  linked_assumption?: string;
   order: number;
   created_at: string;
   updated_at: string;
@@ -181,7 +143,6 @@ export interface BlindSpotPrompt {
   type: 'alternative' | 'assumption' | 'evidence_gap';
   text: string;
   action: 'create_inquiry' | 'investigate' | 'add_evidence';
-  signal_id?: string;
 }
 
 // ── Intelligent Brief Types ─────────────────────────────────────
@@ -196,7 +157,7 @@ export interface BriefAnnotation {
   annotation_type: AnnotationType;
   description: string;
   priority: AnnotationPriority;
-  source_signal_ids: string[];
+  source_ids: string[];
   source_inquiry?: string;
   created_at: string;
   dismissed_at?: string;
@@ -317,7 +278,7 @@ export interface UpdateBriefSectionData {
 
 export interface ScaffoldResult {
   case: Case;
-  brief: CaseDocument;
+  brief: WorkingDocument;
   inquiries: Inquiry[];
   sections: BriefSection[];
 }
@@ -357,3 +318,4 @@ export interface SectionJudgmentSummary {
   rated_count: number;
   total_count: number;
 }
+

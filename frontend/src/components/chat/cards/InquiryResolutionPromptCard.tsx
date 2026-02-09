@@ -1,7 +1,7 @@
 /**
  * InquiryResolutionPromptCard - Prompts user to resolve an inquiry
  *
- * Appears when there's strong evidence suggesting an inquiry can be resolved.
+ * Appears when the AI suggests an inquiry can be resolved.
  * Includes confirmation step before resolving.
  */
 
@@ -21,7 +21,7 @@ import type { InlineActionCard, InquiryResolutionPromptData } from '@/lib/types/
 interface InquiryResolutionPromptCardProps {
   card: InlineActionCard;
   onResolve: (inquiryId: string, conclusion?: string) => void;
-  onAddMore: (inquiryId: string) => void;
+  onAddMore?: (inquiryId: string) => void;
   onDismiss: () => void;
   isResolving?: boolean;
 }
@@ -29,13 +29,12 @@ interface InquiryResolutionPromptCardProps {
 export function InquiryResolutionPromptCard({
   card,
   onResolve,
-  onAddMore,
   onDismiss,
   isResolving = false,
 }: InquiryResolutionPromptCardProps) {
   const [showConfirm, setShowConfirm] = useState(false);
   const data = card.data as unknown as InquiryResolutionPromptData;
-  const { inquiryId, inquiryTitle, evidenceCount, suggestedConclusion } = data;
+  const { inquiryId, inquiryTitle, suggestedConclusion } = data;
 
   // Confirmation view
   if (showConfirm) {
@@ -97,7 +96,7 @@ export function InquiryResolutionPromptCard({
         <ActionCardHeader icon="!">
           <ActionCardTitle>Ready to resolve?</ActionCardTitle>
           <ActionCardDescription>
-            &quot;{inquiryTitle}&quot; has {evidenceCount} pieces of evidence.
+            &quot;{inquiryTitle}&quot; may be ready for resolution.
           </ActionCardDescription>
 
           {/* Suggested conclusion */}
@@ -119,13 +118,6 @@ export function InquiryResolutionPromptCard({
             onClick={() => setShowConfirm(true)}
           >
             Resolve
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAddMore(inquiryId)}
-          >
-            Add More Evidence
           </Button>
           <Button variant="ghost" size="sm" onClick={onDismiss}>
             Not Yet

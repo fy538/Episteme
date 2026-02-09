@@ -1,16 +1,20 @@
 /**
- * Navigation type definitions for the two-tier sidebar architecture.
+ * Navigation type definitions for the sidebar architecture.
  *
- * Rail sections represent the top-level navigation modes.
+ * Sidebar tabs represent the top-level navigation modes (Decisions / Threads).
  * Panel modes represent the contextual content shown in the sidebar panel.
  *
  * Consolidated to 2 primary sections:
- *   - conversations: Chat threads + hero input landing
- *   - cases: Cases grouped by project
+ *   - decisions (cases): Cases grouped by project
+ *   - threads (conversations): Chat threads
  */
 
-// --- Rail ---
+// --- Sidebar Tab ---
 
+/** The two tabs shown in the sidebar panel header. */
+export type SidebarTab = 'decisions' | 'threads';
+
+/** @deprecated Use SidebarTab instead. Kept for migration compatibility. */
 export type RailSection = 'conversations' | 'cases';
 
 // --- Panel ---
@@ -23,28 +27,14 @@ export type PanelMode =
 // --- Navigation State ---
 
 export interface NavigationState {
-  /** Currently active rail section (derived from URL) */
+  /** Currently active sidebar tab */
+  activeTab: SidebarTab;
+  /** @deprecated Use activeTab. Derived from URL for backwards compat. */
   railSection: RailSection;
-  /** Panel content mode (derived from rail section + route params) */
+  /** Panel content mode (derived from tab + route params) */
   panelMode: PanelMode;
   /** Whether the context panel is collapsed */
   isPanelCollapsed: boolean;
-  /** Whether a rail transition animation is in progress */
+  /** Whether a tab transition animation is in progress */
   isTransitioning: boolean;
-  /** Previous rail section (for animation direction) */
-  previousRailSection: RailSection | null;
 }
-
-// --- Rail Item ---
-
-export interface RailItem {
-  id: RailSection;
-  label: string;
-  href: string;
-  icon: 'conversations' | 'cases';
-}
-
-export const RAIL_ITEMS: RailItem[] = [
-  { id: 'conversations', label: 'Chat', href: '/chat', icon: 'conversations' },
-  { id: 'cases', label: 'Cases', href: '/cases', icon: 'cases' },
-];

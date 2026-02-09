@@ -11,7 +11,6 @@ class Migration(migrations.Migration):
     dependencies = [
         ('cases', '0006_case_decision_frame_fields'),
         ('inquiries', '0002_inquiry_blocked_by'),
-        ('signals', '0001_initial'),
     ]
 
     operations = [
@@ -60,7 +59,6 @@ class Migration(migrations.Migration):
                 ('order', models.IntegerField(default=0, help_text='Display order')),
                 ('case', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='readiness_checklist', to='cases.case')),
                 ('linked_inquiry', models.ForeignKey(blank=True, help_text='Inquiry that validates this criterion', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='readiness_items', to='inquiries.inquiry')),
-                ('linked_assumption_signal', models.ForeignKey(blank=True, help_text='Assumption signal related to this criterion', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='readiness_items', to='signals.signal')),
             ],
             options={
                 'ordering': ['order', 'id'],

@@ -26,7 +26,7 @@ export interface PlanPhase {
 
 export interface PlanAssumption {
   id: string;
-  signal_id: string | null;  // Reference to Signal record (single source of truth)
+  assumption_id: string | null;  // Unique identifier for the assumption
   text: string;
   status: AssumptionStatus;
   test_strategy: string;
@@ -85,16 +85,6 @@ export interface CaseHomeInquiry {
   conclusion: string | null;
 }
 
-export interface CaseHomeSignal {
-  id: string;
-  type: string;
-  text: string;
-  confidence: number;
-  temperature: string;
-  assumption_status?: string;
-  created_at: string;
-}
-
 export interface CaseHomeEvent {
   id: string;
   type: string;
@@ -122,10 +112,6 @@ export interface CaseHomeData {
   case: CaseHomeCaseSummary;
   plan: InvestigationPlan | null;
   inquiries: CaseHomeInquiry[];
-  signals: {
-    recent: CaseHomeSignal[];
-    total_count: number;
-  };
   activity: {
     recent_events: CaseHomeEvent[];
   };

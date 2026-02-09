@@ -2,14 +2,14 @@
  * AppShell
  *
  * Unified layout wrapper for all authenticated app routes.
- * Provides the two-tier sidebar (IconRail + SidebarPanel) and main content area.
+ * Provides the sidebar panel (with integrated tabs) and main content area.
  *
  * Layout (desktop ≥1024px):
- *   [IconRail 48px] [SidebarPanel 240px] [Main Content flex-1]
+ *   [SidebarPanel 240px] [Main Content flex-1]
  *
  * Responsive behavior:
- *   < lg (1024px): Panel auto-collapses into push layout, floating toggle appears
- *   < md (768px):  Rail also hidden, floating toggle opens overlay drawer with rail + panel
+ *   < lg (1024px): Panel auto-collapses, floating toggle appears to open overlay
+ *   < md (768px):  Same overlay pattern, no separate treatment needed
  *
  * Overlay pattern: On narrow screens, a floating button in the top-left opens
  * the sidebar as an overlay drawer (slides over content with scrim backdrop).
@@ -19,7 +19,6 @@
 'use client';
 
 import { type ReactNode, useEffect, useState } from 'react';
-import { IconRail } from './IconRail';
 import { SidebarPanel } from './SidebarPanel';
 import { useNavigation } from './NavigationProvider';
 import { useGlobalKeyboardShortcuts } from '@/hooks/useGlobalKeyboard';
@@ -49,9 +48,8 @@ function useMediaQuery(query: string): boolean {
 export function AppShell({ children, className }: AppShellProps) {
   const nav = useNavigation();
   const isSmallScreen = useMediaQuery('(max-width: 1023px)');
-  const isMobileScreen = useMediaQuery('(max-width: 767px)');
 
-  // Activate global keyboard shortcuts (Cmd+1/2 for rail, Cmd+B for panel toggle)
+  // Activate global keyboard shortcuts (Cmd+B for panel toggle)
   // On narrow screens, Cmd+B toggles the overlay drawer instead of the inline panel
   useGlobalKeyboardShortcuts({
     onTogglePanel: isSmallScreen
@@ -93,18 +91,9 @@ export function AppShell({ children, className }: AppShellProps) {
 
   return (
     <div className={cn('flex h-screen bg-white dark:bg-neutral-950', className)}>
-      {/* ─── Inline Icon Rail (hidden on mobile <768px, overlay provides it there) ─── */}
-      {!isMobileScreen && (
-        <IconRail
-          activeSection={nav.railSection}
-          onSearchClick={nav.navigateToSearch}
-        />
-      )}
-
       {/* Desktop panel (only on large screens) */}
       {!isSmallScreen && (
         <SidebarPanel
-          mode={nav.panelMode}
           isCollapsed={nav.isPanelCollapsed}
           onToggleCollapse={nav.togglePanel}
         />
@@ -125,33 +114,18 @@ export function AppShell({ children, className }: AppShellProps) {
             aria-hidden="true"
           />
 
-          {/* Sliding drawer */}
+          {/* Sliding drawer — just the sidebar panel (no separate rail) */}
           <div
             className={cn(
-              'fixed top-0 z-50 h-full flex',
+              'fixed top-0 left-0 z-50 h-full',
               'transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]',
-              // On mobile: slide from far left (includes rail)
-              // On tablet: slide from after the inline rail (48px offset)
-              isMobileScreen ? 'left-0' : 'left-12',
               nav.isOverlayOpen
                 ? 'translate-x-0'
                 : '-translate-x-full'
             )}
           >
-            {/* Rail inside overlay — only on mobile where inline rail is hidden */}
-            {isMobileScreen && (
-              <IconRail
-                activeSection={nav.railSection}
-                onSearchClick={() => {
-                  nav.navigateToSearch();
-                  nav.closeOverlay();
-                }}
-              />
-            )}
-
             {/* Panel inside overlay */}
             <SidebarPanel
-              mode={nav.panelMode}
               isCollapsed={false}
               onToggleCollapse={() => nav.closeOverlay()}
             />
@@ -173,7 +147,7 @@ export function AppShell({ children, className }: AppShellProps) {
 
       {/* ─── Main content area ─── */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        {/* Floating toggle button — appears when sidebar is hidden on narrow screens */}
+        {/* Floating toggle button — appears when sidebar is hidden */}
         {showFloatingToggle && (
           <button
             onClick={isSmallScreen ? nav.openOverlay : nav.togglePanel}

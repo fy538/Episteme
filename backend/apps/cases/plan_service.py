@@ -51,45 +51,19 @@ class PlanService:
         - Assumptions from analysis with untested status
         - Decision criteria from analysis (if present)
 
-        Signal is the single source of truth for assumption lifecycle.
-        Plan assumptions reference Signal IDs via the signal_id field.
+        Assumption lifecycle is now tracked via graph nodes (apps.graph.models.Node).
+        Plan assumptions are stored for display but no longer link to Signal IDs.
 
         Returns: (plan, version)
         """
-        from apps.signals.models import Signal, SignalType, AssumptionStatus
-
         # Build assumption test strategies from analysis (if enhanced prompt provided them)
         test_strategies = analysis.get('assumption_test_strategies', {})
 
-        # Look up existing Assumption Signals for this case
-        existing_signals = {
-            s.normalized_text: s
-            for s in Signal.objects.filter(
-                case=case,
-                type=SignalType.ASSUMPTION,
-                dismissed_at__isnull=True,
-            )
-        }
-
-        # Build assumptions with Signal linkage
+        # Build assumptions for the plan (graph nodes handle lifecycle)
         assumptions = []
         for a_text in analysis.get('assumptions', []):
-            # Try to find a matching Signal by normalized text
-            normalized = a_text.lower().strip()
-            matching_signal = existing_signals.get(normalized)
-
-            if matching_signal:
-                signal_id = str(matching_signal.id)
-                # Set the assumption_status on the Signal if not already set
-                if not matching_signal.assumption_status:
-                    matching_signal.assumption_status = AssumptionStatus.UNTESTED
-                    matching_signal.save(update_fields=['assumption_status'])
-            else:
-                signal_id = None
-
             assumptions.append({
                 "id": str(uuid.uuid4()),
-                "signal_id": signal_id,
                 "text": a_text,
                 "status": "untested",
                 "test_strategy": test_strategies.get(a_text, ""),
@@ -344,24 +318,8 @@ class PlanService:
             },
         )
 
-        # Sync status back to linked Signal (single source of truth)
-        signal_id = None
-        for a in content['assumptions']:
-            if a['id'] == assumption_id:
-                signal_id = a.get('signal_id')
-                break
-
-        if signal_id:
-            from apps.signals.models import Signal
-            try:
-                signal = Signal.objects.get(id=signal_id)
-                signal.assumption_status = new_status
-                signal.save(update_fields=['assumption_status'])
-            except Signal.DoesNotExist:
-                logger.warning(
-                    "assumption_signal_not_found",
-                    extra={"signal_id": signal_id, "assumption_id": assumption_id},
-                )
+        # Note: assumption_status sync to Signal removed — assumption lifecycle
+        # is now tracked via graph node status in apps.graph.models.Node.
 
         cls._trigger_regrounding(case_id, context='assumption_update')
 

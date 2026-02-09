@@ -25,6 +25,7 @@ const MODE_LABELS: Record<ChatMode, string> = {
   casual: 'THINKING',
   case: 'CASE_ANALYSIS',
   inquiry_focus: 'INQUIRY_FOCUS',
+  graph: 'GRAPH_ANALYSIS',
 };
 
 // Map chat mode to theme section

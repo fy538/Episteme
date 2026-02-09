@@ -63,16 +63,3 @@ class CaseServiceTest(TestCase):
         self.assertIsNotNone(patch_event)
         self.assertIn('position', patch_event.payload['changes'])
     
-    def test_refresh_working_view(self):
-        """Test refreshing working view"""
-        case = CaseService.create_case(
-            user=self.user,
-            title='Test Case',
-        )
-        
-        working_view = CaseService.refresh_working_view(case.id)
-        
-        self.assertIsNotNone(working_view.id)
-        self.assertEqual(working_view.case, case)
-        self.assertIn('position', working_view.summary_json)
-        self.assertEqual(working_view.summary_json['title'], 'Test Case')

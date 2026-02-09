@@ -1,14 +1,17 @@
 """
 Case service
 """
+import logging
 import uuid
 from typing import Optional
 from django.contrib.auth.models import User
 from django.db import transaction
 
-from .models import Case, CaseStatus, StakesLevel, WorkingView
+logger = logging.getLogger(__name__)
+
+from .models import Case, CaseStatus, StakesLevel
 from apps.events.services import EventService
-from apps.events.models import EventType, ActorType, Event
+from apps.events.models import EventType, ActorType
 
 
 class CaseService:
@@ -25,7 +28,7 @@ class CaseService:
         stakes: StakesLevel = StakesLevel.MEDIUM,
         thread_id: Optional[uuid.UUID] = None,
         project_id: Optional[uuid.UUID] = None,  # Phase 2
-    ) -> tuple[Case, 'CaseDocument']:
+    ) -> tuple[Case, 'WorkingDocument']:
         """
         Create a new case with auto-generated brief.
         
@@ -42,7 +45,7 @@ class CaseService:
         Returns:
             Tuple of (case, case_brief)
         """
-        from apps.cases.document_service import CaseDocumentService
+        from apps.cases.document_service import WorkingDocumentService
         
         # Generate correlation ID for this workflow
         correlation_id = uuid.uuid4()
@@ -63,7 +66,7 @@ class CaseService:
         )
         
         # 2. Create case with brief (Phase 2A)
-        case, case_brief = CaseDocumentService.create_case_with_brief(
+        case, case_brief = WorkingDocumentService.create_case_with_brief(
             user=user,
             title=title,
             project_id=project_id,
@@ -87,8 +90,15 @@ class CaseService:
                 thread_id=thread_id,
             )
         
+        # Auto-pull relevant project graph nodes into case (best-effort)
+        try:
+            from apps.graph.services import GraphService
+            GraphService.auto_pull_project_nodes(case)
+        except Exception:
+            logger.warning("Auto-pull failed for case %s", case.id, exc_info=True)
+
         return case, case_brief
-    
+
     # Fields that callers are allowed to update via update_case
     ALLOWED_UPDATE_FIELDS = frozenset({
         'title', 'position', 'stakes', 'status',
@@ -182,71 +192,7 @@ class CaseService:
             case.save(update_fields=list(changes.keys()) + ['updated_at'])
         
         return case
-    
-    @staticmethod
-    def refresh_working_view(case_id: uuid.UUID, user: Optional[User] = None) -> WorkingView:
-        """
-        Create a new WorkingView snapshot for a case (Phase 1)
 
-        Args:
-            case_id: Case to snapshot
-            user: Optional user for ownership check (defense-in-depth)
-
-        Returns:
-            Created WorkingView
-        """
-        filters = {'id': case_id}
-        if user is not None:
-            filters['user'] = user
-        case = Case.objects.get(**filters)
-        
-        # Get latest event affecting this case
-        latest_event = Event.objects.filter(case_id=case_id).order_by('-timestamp').first()
-        
-        if not latest_event:
-            # No events yet, use case creation event
-            latest_event_id = case.created_from_event_id
-        else:
-            latest_event_id = latest_event.id
-        
-        # Check if we already have an up-to-date view
-        last_view = case.working_views.first()
-        if last_view and last_view.based_on_event_id == latest_event_id:
-            return last_view
-        
-        # Build summary (Phase 1 will include signals)
-        summary = {
-            'title': case.title,
-            'position': case.position,
-            'stakes': case.stakes,
-            'user_confidence': case.user_confidence,
-            'status': case.status,
-            # Phase 1: Add signals here
-            'assumptions': [],
-            'questions': [],
-            'constraints': [],
-        }
-        
-        # Create new snapshot
-        working_view = WorkingView.objects.create(
-            case=case,
-            summary_json=summary,
-            based_on_event_id=latest_event_id,
-        )
-        
-        # Emit event
-        EventService.append(
-            event_type=EventType.WORKING_VIEW_MATERIALIZED,
-            payload={
-                'case_id': str(case.id),
-                'working_view_id': str(working_view.id),
-            },
-            actor_type=ActorType.SYSTEM,
-            case_id=case.id,
-        )
-        
-        return working_view
-    
     @classmethod
     @transaction.atomic
     def create_case_from_analysis(
@@ -256,7 +202,7 @@ class CaseService:
         thread_id: uuid.UUID,
         correlation_id: uuid.UUID,
         user_edits: Optional[dict] = None
-    ) -> tuple[Case, 'CaseDocument', list]:
+    ) -> tuple[Case, 'WorkingDocument', list]:
         """
         Create case with pre-populated content from conversation analysis.
         Auto-creates inquiries from questions.
@@ -272,7 +218,7 @@ class CaseService:
         Returns:
             Tuple of (case, brief, inquiries)
         """
-        from apps.cases.document_service import CaseDocumentService
+        from apps.cases.document_service import WorkingDocumentService
         from apps.inquiries.services import InquiryService
         from apps.inquiries.models import ElevationReason
         

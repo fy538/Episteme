@@ -2,7 +2,7 @@
 Shared constants for the cases app.
 
 Centralizes thresholds and limits that were previously hardcoded
-across plan_service.py, evidence_linker.py, and brief_grounding.py.
+across plan_service.py and brief_grounding.py.
 """
 
 # ── Evidence Linker ──────────────────────────────────────────────────────

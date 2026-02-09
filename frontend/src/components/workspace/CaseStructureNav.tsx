@@ -25,13 +25,14 @@ interface CaseStructureNavProps {
   caseTitle: string;
   plan: InvestigationPlan | null;
   inquiries: Inquiry[];
+  documentCount?: number;
   viewMode: ViewMode;
   activeInquiryId: string | null;
   onNavigate: (mode: ViewMode, inquiryId?: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   activeSkills?: ActiveSkillSummary[];
-  onAddEvidence?: () => void;
+  hideCollapseToggle?: boolean;
 }
 
 export function CaseStructureNav({
@@ -39,13 +40,14 @@ export function CaseStructureNav({
   caseTitle,
   plan,
   inquiries,
+  documentCount = 0,
   viewMode,
   activeInquiryId,
   onNavigate,
   isCollapsed,
   onToggleCollapse,
   activeSkills,
-  onAddEvidence,
+  hideCollapseToggle,
 }: CaseStructureNavProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['phases', 'assumptions', 'criteria'])
@@ -131,6 +133,13 @@ export function CaseStructureNav({
           label="Brief"
           isActive={viewMode === 'brief'}
           onClick={() => onNavigate('brief')}
+        />
+        <NavItem
+          icon={<UploadIcon />}
+          label="Documents"
+          badge={documentCount > 0 ? documentCount : undefined}
+          isActive={viewMode === 'document'}
+          onClick={() => onNavigate('document')}
         />
 
         {/* Plan-dependent sections */}
@@ -306,24 +315,18 @@ export function CaseStructureNav({
           isActive={viewMode === 'readiness'}
           onClick={() => onNavigate('readiness')}
         />
-        {onAddEvidence && (
-          <NavItem
-            icon={<AddEvidenceIcon />}
-            label="Add Evidence"
-            isActive={false}
-            onClick={onAddEvidence}
-          />
-        )}
       </div>
 
       {/* Collapse toggle */}
-      <button
-        onClick={onToggleCollapse}
-        className="flex items-center justify-center py-2 border-t border-neutral-200/60 dark:border-neutral-800/60 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-        title={isCollapsed ? 'Expand nav' : 'Collapse nav'}
-      >
-        <CollapseIcon className="w-4 h-4" />
-      </button>
+      {!hideCollapseToggle && (
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center justify-center py-2 border-t border-neutral-200/60 dark:border-neutral-800/60 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          title={isCollapsed ? 'Expand nav' : 'Collapse nav'}
+        >
+          <CollapseIcon className="w-4 h-4" />
+        </button>
+      )}
     </nav>
   );
 }
@@ -333,12 +336,14 @@ export function CaseStructureNav({
 function NavItem({
   icon,
   label,
+  badge,
   isActive,
   onClick,
   indent = false,
 }: {
   icon: React.ReactNode;
   label: string;
+  badge?: number;
   isActive: boolean;
   onClick: () => void;
   indent?: boolean;
@@ -355,7 +360,12 @@ function NavItem({
       )}
     >
       <span className="shrink-0">{icon}</span>
-      <span className="truncate">{label}</span>
+      <span className="truncate flex-1">{label}</span>
+      {badge !== undefined && (
+        <span className="text-[10px] text-neutral-400 dark:text-neutral-500 tabular-nums">
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
@@ -420,6 +430,16 @@ function DocIcon() {
     <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
       <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
     </svg>
   );
 }
@@ -522,13 +542,3 @@ function QuestionIcon({ className }: { className?: string }) {
   );
 }
 
-function AddEvidenceIcon() {
-  return (
-    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-      <path d="M14 2v6h6" strokeLinecap="round" />
-      <line x1="12" y1="11" x2="12" y2="17" strokeLinecap="round" />
-      <line x1="9" y1="14" x2="15" y2="14" strokeLinecap="round" />
-    </svg>
-  );
-}

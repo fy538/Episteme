@@ -5,18 +5,16 @@
 import { apiClient } from './client';
 import type {
   Case,
-  CaseDocument,
+  WorkingDocument,
   CaseAnalysisResponse,
   Constraint,
   SuccessCriterion,
   Stakeholder,
-  EvidenceLandscape,
   ReadinessChecklistItem,
   ReadinessChecklistResponse,
   BlindSpotPrompt,
   BriefSection,
   BriefSectionsResponse,
-  BriefOverview,
   EvolveBriefResponse,
   CreateBriefSectionData,
   UpdateBriefSectionData,
@@ -30,7 +28,7 @@ export type { SectionJudgmentSection, SectionJudgmentMismatch } from '../types/c
 
 interface CreateCaseResponse {
   case: Case;
-  main_brief: CaseDocument;
+  main_brief: WorkingDocument;
 }
 
 export const casesAPI = {
@@ -55,10 +53,6 @@ export const casesAPI = {
     return apiClient.patch<Case>(`/cases/${caseId}/`, data);
   },
 
-  async deleteCase(caseId: string): Promise<void> {
-    return apiClient.delete(`/cases/${caseId}/`);
-  },
-
   /**
    * Update decision frame fields
    */
@@ -75,35 +69,10 @@ export const casesAPI = {
   },
 
   /**
-   * Get evidence landscape (counts, not scores)
-   */
-  async getEvidenceLandscape(caseId: string): Promise<EvidenceLandscape> {
-    return apiClient.get(`/cases/${caseId}/evidence-landscape/`);
-  },
-
-  /**
    * Save user's premortem text
    */
   async savePremortem(caseId: string, text: string): Promise<{ premortem_text: string; premortem_at: string }> {
     return apiClient.patch(`/cases/${caseId}/premortem/`, { premortem_text: text });
-  },
-
-  /**
-   * Set user's self-assessed confidence
-   */
-  async setUserConfidence(
-    caseId: string,
-    confidence: number,
-    whatWouldChangeMind?: string
-  ): Promise<{
-    user_confidence: number;
-    user_confidence_updated_at: string;
-    what_would_change_mind: string;
-  }> {
-    return apiClient.patch(`/cases/${caseId}/user-confidence/`, {
-      user_confidence: confidence,
-      what_would_change_mind: whatWouldChangeMind,
-    });
   },
 
   /**
@@ -258,13 +227,6 @@ export const casesAPI = {
    */
   async evolveBrief(caseId: string): Promise<EvolveBriefResponse> {
     return apiClient.post(`/cases/${caseId}/evolve-brief/`, {});
-  },
-
-  /**
-   * Get lightweight brief overview
-   */
-  async getBriefOverview(caseId: string): Promise<BriefOverview> {
-    return apiClient.get(`/cases/${caseId}/brief-overview/`);
   },
 
   /**

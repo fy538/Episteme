@@ -11,22 +11,10 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('artifacts', '0001_initial'),
-        ('projects', '0001_initial'),
-        ('signals', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='artifact',
-            name='input_evidence',
-            field=models.ManyToManyField(blank=True, help_text='Evidence that informed this artifact', related_name='used_in_artifacts', to='projects.evidence'),
-        ),
-        migrations.AddField(
-            model_name='artifact',
-            name='input_signals',
-            field=models.ManyToManyField(blank=True, help_text='Signals that informed this artifact', related_name='used_in_artifacts', to='signals.signal'),
-        ),
         migrations.AddField(
             model_name='artifact',
             name='user',

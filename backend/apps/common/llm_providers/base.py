@@ -3,7 +3,7 @@ Base LLM Provider interface
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 
 @dataclass
@@ -80,7 +80,7 @@ class LLMProvider(ABC):
         Returns:
             Generated text content
         """
-        content = ""
+        chunks = []
         async for chunk in self.stream_chat(
             messages,
             system_prompt=system_prompt,
@@ -88,5 +88,55 @@ class LLMProvider(ABC):
             temperature=temperature,
             **kwargs,
         ):
-            content += chunk.content
-        return content
+            chunks.append(chunk.content)
+        return ''.join(chunks)
+
+    async def generate_with_tools(
+        self,
+        messages: list[dict],
+        tools: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 8192,
+        temperature: float = 0.2,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Generate a response using tool_use / function calling for structured output.
+
+        Each tool dict follows the Anthropic format:
+        {
+            "name": "tool_name",
+            "description": "...",
+            "input_schema": { JSON Schema }
+        }
+
+        Returns the parsed tool input dict directly (the structured data),
+        or falls back to text generation + JSON parsing.
+
+        Returns:
+            Parsed dict from tool_use, or {} if extraction failed.
+        """
+        # Default fallback: call generate() and parse JSON from response
+        import json
+        import re
+
+        response = await self.generate(
+            messages=messages,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs,
+        )
+        # Try to parse JSON from the response
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            pass
+        # Try code fence extraction
+        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+        return {}

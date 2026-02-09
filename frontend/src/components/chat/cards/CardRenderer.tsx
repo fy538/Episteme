@@ -1,5 +1,4 @@
 import { RichCard, CardAction } from '@/lib/types/cards';
-import { SignalExtractionCard } from './SignalExtractionCard';
 import { AssumptionValidatorCard } from './AssumptionValidatorCard';
 import { ActionPromptCard } from './ActionPromptCard';
 import { ResearchStatusCard } from './ResearchStatusCard';
@@ -14,9 +13,6 @@ export function CardRenderer({ card, onAction }: Props) {
   const cardType = card.type;
 
   switch (cardType) {
-    case 'card_signal_extraction':
-      return <SignalExtractionCard card={card} onAction={onAction} />;
-    
     case 'card_assumption_validator':
       return <AssumptionValidatorCard card={card} onAction={onAction} />;
     
@@ -29,7 +25,6 @@ export function CardRenderer({ card, onAction }: Props) {
     // Add other card types here as they're implemented
     case 'card_case_suggestion':
     case 'card_structure_preview':
-    case 'card_evidence_map':
       return (
         <div className="p-4 border rounded bg-neutral-50 dark:bg-neutral-800">
           <p className="text-sm text-neutral-600 dark:text-neutral-400">

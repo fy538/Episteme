@@ -129,25 +129,72 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 case_id=serializer.validated_data.get('case_id'),
             )
         
-        # Trigger new chunking/indexing workflow (async)
+        # Seed initial progress so SSE stream has data immediately
+        # (eliminates the "Connecting..." spinner gap)
+        from django.utils import timezone as tz
+        document.processing_progress = {
+            'stage': 'received',
+            'stage_label': 'Document received',
+            'stage_index': 0,
+            'total_stages': 5,
+            'counts': {},
+            'started_at': tz.now().isoformat(),
+            'updated_at': tz.now().isoformat(),
+            'error': None,
+        }
+        document.save(update_fields=['processing_progress'])
+
+        # Trigger processing workflow (async)
         from tasks.workflows import process_document_workflow
         process_document_workflow.delay(str(document.id))
-        
+
         return Response(
             DocumentSerializer(document).data,
             status=status.HTTP_201_CREATED
         )
     
+    @action(detail=True, methods=['post'])
+    def reprocess(self, request, pk=None):
+        """
+        Re-trigger processing for a failed or stale document.
+
+        POST /api/documents/{id}/reprocess/
+
+        Resets processing/extraction status and re-queues the Celery workflow.
+        """
+        document = self.get_object()
+
+        # Reset statuses
+        document.processing_status = 'pending'
+        document.extraction_status = 'pending'
+        document.extraction_error = ''
+        document.processing_progress = {}
+        document.save(update_fields=[
+            'processing_status', 'extraction_status',
+            'extraction_error', 'processing_progress', 'updated_at',
+        ])
+
+        # Delete existing chunks so they can be regenerated
+        document.chunks.all().delete()
+        document.chunk_count = 0
+        document.save(update_fields=['chunk_count'])
+
+        # Re-trigger processing
+        from tasks.workflows import process_document_workflow
+        process_document_workflow.delay(str(document.id))
+
+        return Response(DocumentSerializer(document).data)
+
     @action(detail=True, methods=['get'])
     def chunks(self, request, pk=None):
         """
         Get all chunks for a document.
-        
+
         GET /api/documents/{id}/chunks/
         """
         document = self.get_object()
         chunks = document.chunks.all().order_by('chunk_index')
-        
+
         serializer = DocumentChunkSerializer(chunks, many=True)
         return Response({
             'document_id': str(document.id),

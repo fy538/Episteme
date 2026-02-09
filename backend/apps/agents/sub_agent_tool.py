@@ -142,18 +142,18 @@ class SubAgentTool(ResearchTool):
 
         results = []
 
-        artifact_id = result.get("artifact_id", "")
+        document_id = result.get("document_id", "")
         status = result.get("status", "")
 
-        if status != "completed" or not artifact_id:
+        if status != "completed" or not document_id:
             return []
 
-        # The sub-agent produced an artifact — represent it as a search result
+        # The sub-agent produced a document — represent it as a search result
         results.append(SearchResult(
-            url=f"artifact://{artifact_id}",
+            url=f"document://{document_id}",
             title=f"Sub-agent ({self.agent_type}): {query[:100]}",
-            snippet=f"Generated artifact {artifact_id} via {self.agent_type} agent",
-            full_text="",  # Full text is in the artifact
+            snippet=f"Generated document {document_id} via {self.agent_type} agent",
+            full_text="",  # Full text is in the document
             domain="internal",
             published_date="",
         ))

@@ -15,20 +15,16 @@ class ProjectSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'user',
-            'total_signals',
             'total_cases',
             'total_documents',
-            'top_themes',
             'is_archived',
             'created_at',
             'updated_at',
         ]
         read_only_fields = [
             'id',
-            'total_signals',
             'total_cases',
             'total_documents',
-            'top_themes',
             'created_at',
             'updated_at',
         ]
@@ -60,8 +56,12 @@ class DocumentSerializer(serializers.ModelSerializer):
             'case',
             'user',
             'processing_status',
+            'extraction_status',
+            'extraction_error',
+            'processing_progress',
             'chunk_count',
             'indexed_at',
+            'scope',
             'user_rating',
             'notes',
             'signals_extracted',  # Deprecated but kept for backward compat
@@ -71,8 +71,12 @@ class DocumentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'processing_status',
+            'extraction_status',
+            'extraction_error',
+            'processing_progress',
             'chunk_count',
             'indexed_at',
+            'scope',
             'signals_extracted',
             'created_at',
             'updated_at',
@@ -91,7 +95,6 @@ class DocumentChunkSerializer(serializers.ModelSerializer):
             'chunk_text',
             'token_count',
             'span',
-            'summary',
             'created_at',
         ]
         read_only_fields = ['id', 'created_at']

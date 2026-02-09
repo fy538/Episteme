@@ -36,9 +36,16 @@ class EventType(models.TextChoices):
 
     # Knowledge building
     DOCUMENT_ADDED = 'DocumentAdded', 'Document Added'
+    DOCUMENT_DELTA_ANALYZED = 'DocumentDeltaAnalyzed', 'Document Delta Analyzed'
     EVIDENCE_ADDED = 'EvidenceAdded', 'Evidence Added'
-    SIGNAL_PROMOTED = 'SignalPromoted', 'Signal Promoted to Inquiry'
-    SIGNAL_DISMISSED = 'SignalDismissed', 'Signal Dismissed'
+
+    # Graph mutations
+    GRAPH_NODES_EXTRACTED = 'GraphNodesExtracted', 'Graph Nodes Extracted from Document'
+    DOCUMENT_PROMOTED = 'DocumentPromoted', 'Document Promoted to Project Scope'
+    DOCUMENT_DEMOTED = 'DocumentDemoted', 'Document Demoted to Case Scope'
+    CASE_NODES_AUTO_PULLED = 'CaseNodesAutoPulled', 'Project Nodes Auto-Pulled into Case'
+    CASE_NODE_PULLED = 'CaseNodePulled', 'Node Manually Pulled into Case'
+    CASE_NODE_EXCLUDED = 'CaseNodeExcluded', 'Node Excluded from Case'
 
     # Synthesis
     BRIEF_EVOLVED = 'BriefEvolved', 'Brief Grounding Evolved'
@@ -87,11 +94,6 @@ class EventType(models.TextChoices):
     WORKFLOW_STARTED = 'WorkflowStarted', 'Workflow Started'
     WORKFLOW_COMPLETED = 'WorkflowCompleted', 'Workflow Completed'
 
-    # Signal extraction (too noisy for provenance)
-    SIGNAL_EXTRACTED = 'SignalExtracted', 'Signal Extracted'
-    SIGNAL_STATUS_CHANGED = 'SignalStatusChanged', 'Signal Status Changed'
-    SIGNAL_EDITED = 'SignalEdited', 'Signal Edited'
-
     # Internal view management
     WORKING_VIEW_MATERIALIZED = 'WorkingViewMaterialized', 'Working View Materialized'
 
@@ -106,14 +108,26 @@ class EventType(models.TextChoices):
     PLAN_DIFF_REJECTED = 'PlanDiffRejected', 'Plan Diff Rejected'
     PLAN_RESTORED = 'PlanRestored', 'Plan Restored to Previous Version'
 
+    # ══ GRAPH ═════════════════════════════════════════════════════
+    # Knowledge graph events — Node/Edge/GraphDelta lifecycle.
+
+    GRAPH_NODE_CREATED = 'GraphNodeCreated', 'Graph Node Created'
+    GRAPH_EDGE_CREATED = 'GraphEdgeCreated', 'Graph Edge Created'
+    GRAPH_DELTA_COMPUTED = 'GraphDeltaComputed', 'Graph Delta Computed'
+    GRAPH_EXTRACTION_STARTED = 'GraphExtractionStarted', 'Graph Extraction Started'
+    GRAPH_EXTRACTION_COMPLETED = 'GraphExtractionCompleted', 'Graph Extraction Completed'
+
     # ══ RESERVED ══════════════════════════════════════════════════
     # Defined for planned features but not yet emitted.
     # Do NOT delete — referenced in migrations.
 
     INQUIRY_PRIORITY_CHANGED = 'InquiryPriorityChanged', 'Inquiry Priority Changed'
-    CASE_DOCUMENT_CREATED = 'CaseDocumentCreated', 'Case Document Created'
-    CASE_DOCUMENT_UPDATED = 'CaseDocumentUpdated', 'Case Document Updated'
-    CASE_DOCUMENT_DELETED = 'CaseDocumentDeleted', 'Case Document Deleted'
+    CASE_DOCUMENT_CREATED = 'CaseDocumentCreated', 'Case Document Created'  # deprecated
+    CASE_DOCUMENT_UPDATED = 'CaseDocumentUpdated', 'Case Document Updated'  # deprecated
+    CASE_DOCUMENT_DELETED = 'CaseDocumentDeleted', 'Case Document Deleted'  # deprecated
+    WORKING_DOCUMENT_CREATED = 'WorkingDocumentCreated', 'Working Document Created'
+    WORKING_DOCUMENT_UPDATED = 'WorkingDocumentUpdated', 'Working Document Updated'
+    WORKING_DOCUMENT_DELETED = 'WorkingDocumentDeleted', 'Working Document Deleted'
     EVIDENCE_CREATED = 'EvidenceCreated', 'Evidence Created'
     EVIDENCE_UPDATED = 'EvidenceUpdated', 'Evidence Updated'
     OBJECTION_CREATED = 'ObjectionCreated', 'Objection Created'
@@ -121,7 +135,14 @@ class EventType(models.TextChoices):
     OBJECTION_DISMISSED = 'ObjectionDismissed', 'Objection Dismissed'
     CITATION_CREATED = 'CitationCreated', 'Citation Created'
     CITATION_DELETED = 'CitationDeleted', 'Citation Deleted'
+    # Signal events (deprecated — signals removed, kept for migration history)
+    SIGNAL_PROMOTED = 'SignalPromoted', 'Signal Promoted to Inquiry'
+    SIGNAL_DISMISSED = 'SignalDismissed', 'Signal Dismissed'
+    SIGNAL_EXTRACTED = 'SignalExtracted', 'Signal Extracted'
+    SIGNAL_STATUS_CHANGED = 'SignalStatusChanged', 'Signal Status Changed'
+    SIGNAL_EDITED = 'SignalEdited', 'Signal Edited'
     SIGNALS_LINKED_TO_CASE = 'SignalsLinkedToCase', 'Signals Linked to Case'
+
     AGENT_SUGGESTED = 'AgentSuggested', 'Agent Suggested'
     AGENT_CONFIRMED = 'AgentConfirmed', 'Agent Confirmed by User'
     AGENT_DECLINED = 'AgentDeclined', 'Agent Declined by User'

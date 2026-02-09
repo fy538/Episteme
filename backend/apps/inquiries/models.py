@@ -60,7 +60,7 @@ class Inquiry(UUIDModel, TimestampedModel):
         help_text="Selected text from document that sparked this inquiry"
     )
     origin_document = models.ForeignKey(
-        'cases.CaseDocument',
+        'cases.WorkingDocument',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -127,7 +127,7 @@ class Inquiry(UUIDModel, TimestampedModel):
     
     # Inquiry brief (Phase 2A)
     brief = models.ForeignKey(
-        'cases.CaseDocument',
+        'cases.WorkingDocument',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -173,106 +173,54 @@ class Inquiry(UUIDModel, TimestampedModel):
         return self.status in [InquiryStatus.OPEN, InquiryStatus.INVESTIGATING]
 
 
-class Evidence(UUIDModel, TimestampedModel):
+class InquiryHistory(UUIDModel):
     """
-    Evidence supporting or contradicting an inquiry.
-    
-    Evidence can come from:
-    - Documents (whole or specific chunks)
-    - Experiments/tests
-    - External data
-    - User observations
-    
-    Documents are cited, not extracted - preserving full context.
+    Tracks confidence changes over time for inquiries.
+
+    Enables visualization of confidence evolution ("75% -> 45%").
+    Each time an inquiry's confidence changes, a history entry is created.
     """
     inquiry = models.ForeignKey(
-        Inquiry,
+        'inquiries.Inquiry',
         on_delete=models.CASCADE,
-        related_name='evidence_items'
+        related_name='confidence_history',
+        help_text="Inquiry being tracked"
     )
-    
-    # Evidence source type
-    evidence_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('document_full', 'Whole Document'),
-            ('document_chunks', 'Document Section'),
-            ('experiment', 'Experiment/Test'),
-            ('external_data', 'External Data'),
-            ('user_observation', 'User Observation'),
-        ]
+
+    confidence = models.FloatField(
+        help_text="Confidence level at this point in time (0.0-1.0)"
     )
-    
-    # If from document
-    source_document = models.ForeignKey(
-        'projects.Document',
+
+    # What caused the change
+    trigger_event = models.ForeignKey(
+        'events.Event',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='evidence_uses'
+        help_text="Event that caused this confidence change"
     )
-    
-    source_chunks = models.ManyToManyField(
-        'projects.DocumentChunk',
-        related_name='evidence_uses',
-        blank=True
-    )
-    
-    # Evidence content
-    evidence_text = models.TextField(
-        help_text="User's interpretation or direct quote"
-    )
-    
-    # How it relates to inquiry
-    direction = models.CharField(
-        max_length=20,
-        choices=[
-            ('supports', 'Supports'),
-            ('contradicts', 'Contradicts'),
-            ('neutral', 'Neutral/Context'),
-        ]
-    )
-    
-    # Strength and credibility
-    strength = models.FloatField(
-        default=0.5,
-        help_text="How strong is this evidence (0.0-1.0)"
-    )
-    
-    credibility = models.FloatField(
-        default=0.5,
-        help_text="How credible is the source (0.0-1.0)"
-    )
-    
-    # User verification
-    verified = models.BooleanField(
-        default=False,
-        help_text="User has verified this evidence"
-    )
-    
-    notes = models.TextField(
+
+    reason = models.TextField(
         blank=True,
-        help_text="User's notes about this evidence"
+        help_text="Human-readable explanation for the change"
     )
-    
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='created_evidence'
+
+    # Timestamp
+    timestamp = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this confidence level was recorded"
     )
-    
+
     class Meta:
-        verbose_name_plural = 'evidence'
-        ordering = ['-created_at']
+        verbose_name_plural = 'inquiry histories'
+        ordering = ['-timestamp']
         indexes = [
-            models.Index(fields=['inquiry', 'direction']),
-            models.Index(fields=['source_document']),
-            models.Index(fields=['created_by', '-created_at']),
+            models.Index(fields=['inquiry', '-timestamp']),
+            models.Index(fields=['timestamp']),
         ]
-    
+
     def __str__(self):
-        preview = self.evidence_text[:50] if self.evidence_text else ''
-        return f"{self.direction} evidence for {self.inquiry.title[:30]}: {preview}..."
+        return f"{self.inquiry.title[:40]} @ {int(self.confidence * 100)}% ({self.timestamp.strftime('%Y-%m-%d %H:%M')})"
 
 
 class Objection(UUIDModel, TimestampedModel):

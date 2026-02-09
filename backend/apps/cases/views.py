@@ -12,16 +12,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Case, CaseStatus, WorkingView, CaseDocument, CaseDocumentVersion, ReadinessChecklistItem, DEFAULT_READINESS_CHECKLIST, InvestigationPlan, PlanVersion
+from .models import Case, CaseStatus, WorkingDocument, WorkingDocumentVersion, InvestigationPlan, PlanVersion
 from .brief_models import BriefSection, BriefAnnotation
 from .serializers import (
     CaseSerializer,
-    WorkingViewSerializer,
     CreateCaseSerializer,
     UpdateCaseSerializer,
-    ReadinessChecklistItemSerializer,
-    CreateChecklistItemSerializer,
-    UpdateChecklistItemSerializer,
     UserConfidenceSerializer,
     InvestigationPlanSerializer,
     PlanVersionSerializer,
@@ -41,13 +37,13 @@ from .brief_serializers import (
     BriefAnnotationSerializer,
 )
 from .document_serializers import (
-    CaseDocumentSerializer,
-    CaseDocumentListSerializer,
-    CaseDocumentCreateSerializer,
+    WorkingDocumentSerializer,
+    WorkingDocumentListSerializer,
+    WorkingDocumentCreateSerializer,
     DocumentCitationSerializer,
 )
 from .services import CaseService
-from .document_service import CaseDocumentService
+from .document_service import WorkingDocumentService
 from apps.chat.models import ChatThread
 from apps.chat.serializers import ChatThreadSerializer, ChatThreadDetailSerializer
 
@@ -94,22 +90,10 @@ class CaseViewSet(viewsets.ModelViewSet):
             project_id=serializer.validated_data.get('project_id'),  # Phase 2
         )
 
-        # Record session receipt if created from a thread
-        thread_id = serializer.validated_data.get('thread_id')
-        if thread_id:
-            try:
-                from apps.companion.receipts import SessionReceiptService
-                SessionReceiptService.record_case_created(
-                    thread_id=thread_id,
-                    case=case
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record case creation receipt: {e}")
-
         return Response(
             {
                 'case': CaseSerializer(case).data,
-                'main_brief': CaseDocumentSerializer(case_brief, context={'request': request}).data
+                'main_brief': WorkingDocumentSerializer(case_brief, context={'request': request}).data
             },
             status=status.HTTP_201_CREATED
         )
@@ -131,39 +115,6 @@ class CaseViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         """Partial update of a case"""
         return self.update(request, *args, **kwargs)
-    
-    @action(detail=True, methods=['get'])
-    def work(self, request, pk=None):
-        """
-        Get the working view for this case
-        
-        GET /api/cases/{id}/work/
-        
-        Returns the latest WorkingView snapshot
-        """
-        case = self.get_object()
-        
-        # Get or create working view
-        working_view = CaseService.refresh_working_view(case.id)
-        
-        return Response(WorkingViewSerializer(working_view).data)
-    
-    @action(detail=True, methods=['post'])
-    def refresh(self, request, pk=None):
-        """
-        Force refresh the working view for this case
-        
-        POST /api/cases/{id}/refresh/
-        """
-        case = self.get_object()
-        
-        # Force create new working view
-        working_view = CaseService.refresh_working_view(case.id)
-        
-        return Response(
-            WorkingViewSerializer(working_view).data,
-            status=status.HTTP_201_CREATED
-        )
     
     @action(detail=True, methods=['get'], url_path='threads')
     def get_threads(self, request, pk=None):
@@ -315,69 +266,12 @@ _What actions follow from this decision?_
 
         POST /api/cases/{id}/activate-pack/
 
-        Request body:
-        {
-            "pack_slug": "consulting-starter"
-        }
-
-        Replaces existing active skills with the pack's skills (in order).
-        Records provenance (which pack activated each skill).
+        SkillPack was removed during skill system cleanup.
         """
-        from apps.skills.models import SkillPack, SkillPackMembership
-        from apps.skills.serializers import SkillListSerializer
-        from apps.cases.models import CaseActiveSkill
-
-        case = self.get_object()
-        pack_slug = request.data.get('pack_slug')
-
-        if not pack_slug:
-            return Response(
-                {'error': 'pack_slug is required'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Filter by scope: public packs or org packs the user belongs to
-        user = request.user
-        try:
-            pack = SkillPack.objects.filter(
-                slug=pack_slug,
-                status='active',
-            ).filter(
-                models.Q(scope='public') |
-                models.Q(scope='organization', organization__members=user)
-            ).get()
-        except SkillPack.DoesNotExist:
-            return Response(
-                {'error': f'Skill pack not found: {pack_slug}'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        memberships = list(
-            SkillPackMembership.objects.filter(pack=pack)
-            .select_related('skill')
-            .order_by('order')
+        return Response(
+            {'error': 'Skill packs are no longer available'},
+            status=status.HTTP_501_NOT_IMPLEMENTED,
         )
-
-        # Replace existing active skills with pack skills — atomic
-        with transaction.atomic():
-            CaseActiveSkill.objects.filter(case=case).delete()
-            CaseActiveSkill.objects.bulk_create([
-                CaseActiveSkill(
-                    case=case,
-                    skill=m.skill,
-                    order=m.order,
-                    activated_from_pack=pack,
-                )
-                for m in memberships
-            ])
-
-        activated = [m.skill for m in memberships]
-        return Response({
-            'case_id': str(case.id),
-            'pack_slug': pack.slug,
-            'pack_name': pack.name,
-            'active_skills': SkillListSerializer(activated, many=True).data,
-        })
 
     @action(detail=True, methods=['get'])
     def onboarding(self, request, pk=None):
@@ -528,35 +422,10 @@ _What actions follow from this decision?_
         
         Returns: Created skill
         """
-        from apps.skills.conversion import CaseSkillConverter
-        from apps.skills.serializers import SkillSerializer
-        
-        case = self.get_object()
-        skill_name = request.data.get('name')
-        scope = request.data.get('scope', 'personal')
-        custom_description = request.data.get('description')
-        
-        if not skill_name:
-            return Response(
-                {'error': 'Skill name is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Convert case to skill
-        skill = CaseSkillConverter.case_to_skill(
-            case=case,
-            skill_name=skill_name,
-            scope=scope,
-            user=request.user,
-            custom_description=custom_description
-        )
-        
+        # CaseSkillConverter was removed during skill system cleanup
         return Response(
-            {
-                'skill': SkillSerializer(skill).data,
-                'case': CaseSerializer(case).data
-            },
-            status=status.HTTP_201_CREATED
+            {'error': 'Case-to-skill conversion is not currently available'},
+            status=status.HTTP_501_NOT_IMPLEMENTED
         )
     
     @action(detail=True, methods=['get'])
@@ -592,66 +461,72 @@ _What actions follow from this decision?_
             unlinked_claims: [{text, location}]
         }
         """
-        from apps.signals.models import Signal, SignalType
-        from apps.inquiries.models import Inquiry, InquiryStatus, Evidence
+        from apps.inquiries.models import Inquiry, InquiryStatus
 
         case = self.get_object()
 
-        # 1) Count inquiry Evidence items (which have direction)
-        inquiry_evidence = Evidence.objects.filter(inquiry__case=case)
-        direction_counts = (
-            inquiry_evidence
-            .values('direction')
-            .annotate(count=models.Count('id'))
-        )
-        direction_map = {row['direction']: row['count'] for row in direction_counts}
-        inquiry_supporting = direction_map.get('supports', 0)
-        inquiry_contradicting = direction_map.get('contradicts', 0)
-        inquiry_neutral = direction_map.get('neutral', 0)
-
-        # 2) Count EvidenceMention signals (no direction — counted as neutral)
-        signal_neutral = Signal.objects.filter(case=case, type=SignalType.EVIDENCE_MENTION).count()
-
-        # 3) Combine both sources
-        total_supporting = inquiry_supporting
-        total_contradicting = inquiry_contradicting
-        total_neutral = inquiry_neutral + signal_neutral
+        # Evidence counts now come from graph Node(type=EVIDENCE) + Edge(type=SUPPORTS/CONTRADICTS)
+        try:
+            from apps.graph.models import Node, Edge, EdgeType
+            evidence_nodes = Node.objects.filter(
+                project=case.project,
+                node_type='evidence',
+            )
+            total_evidence = evidence_nodes.count()
+            total_supporting = Edge.objects.filter(
+                source_node__in=evidence_nodes,
+                edge_type=EdgeType.SUPPORTS,
+            ).count()
+            total_contradicting = Edge.objects.filter(
+                source_node__in=evidence_nodes,
+                edge_type=EdgeType.CONTRADICTS,
+            ).count()
+            total_neutral = total_evidence - total_supporting - total_contradicting
+        except Exception:
+            total_evidence = 0
+            total_supporting = 0
+            total_contradicting = 0
+            total_neutral = 0
 
         evidence = {
-            'total': total_supporting + total_contradicting + total_neutral,
+            'total': total_evidence,
             'supporting': total_supporting,
             'contradicting': total_contradicting,
-            'neutral': total_neutral,
+            'neutral': max(0, total_neutral),
         }
 
-        # Count assumptions and their validation status
-        # Prefetch inquiry relationship to avoid N+1
-        assumption_signals = (
-            Signal.objects.filter(case=case, type=SignalType.ASSUMPTION)
-            .select_related('inquiry')
-        )
-        total_assumptions = assumption_signals.count()
-
-        # An assumption is validated if it has a linked inquiry that is resolved
-        validated_assumptions = 0
-        untested_list = []
-
-        for assumption in assumption_signals:
-            linked_inquiry = assumption.inquiry
-            if linked_inquiry and linked_inquiry.status == InquiryStatus.RESOLVED:
-                validated_assumptions += 1
-            else:
-                untested_list.append({
-                    'id': str(assumption.id),
-                    'text': assumption.text[:200] if assumption.text else '',
-                    'inquiry_id': str(linked_inquiry.id) if linked_inquiry else None,
-                })
+        # Count assumptions from the graph layer (Node model)
+        try:
+            from apps.graph.models import Node
+            assumption_nodes = Node.objects.filter(
+                project=case.project,
+                node_type='assumption',
+            )
+            total_assumptions = assumption_nodes.count()
+            validated_assumptions = assumption_nodes.filter(
+                status__in=['confirmed', 'refuted']
+            ).count()
+            untested_nodes = assumption_nodes.exclude(
+                status__in=['confirmed', 'refuted']
+            )[:10]
+            untested_list = [
+                {
+                    'id': str(node.id),
+                    'text': node.content[:200] if node.content else '',
+                    'status': node.status,
+                }
+                for node in untested_nodes
+            ]
+        except Exception:
+            total_assumptions = 0
+            validated_assumptions = 0
+            untested_list = []
 
         assumptions = {
             'total': total_assumptions,
             'validated': validated_assumptions,
             'untested': total_assumptions - validated_assumptions,
-            'untested_list': untested_list[:10],  # Limit to 10
+            'untested_list': untested_list,
         }
 
         # Count inquiries by status — single aggregate query
@@ -664,18 +539,22 @@ _What actions follow from this decision?_
             resolved=Count('id', filter=Q(status=InquiryStatus.RESOLVED)),
         )
 
-        # Find claims from the brief (metadata not available on Signal model)
+        # Find unvalidated claims from the graph layer
         unlinked_claims = []
-        if case.main_brief:
-            claim_signals = Signal.objects.filter(
-                case=case,
-                type=SignalType.CLAIM,
+        try:
+            from apps.graph.models import Node
+            claim_nodes = Node.objects.filter(
+                project=case.project,
+                node_type='claim',
+                status='unvalidated',
             )[:5]
-            for claim in claim_signals:
+            for node in claim_nodes:
                 unlinked_claims.append({
-                    'text': claim.text[:150] if claim.text else '',
-                    'location': 'brief',
+                    'text': node.content[:150] if node.content else '',
+                    'location': 'graph',
                 })
+        except Exception:
+            pass
 
         return Response({
             'evidence': evidence,
@@ -741,263 +620,6 @@ _What actions follow from this decision?_
             'premortem_text': case.premortem_text,
             'premortem_at': case.premortem_at,
         })
-
-    @action(detail=True, methods=['patch'], url_path='what-changed-mind-response')
-    def what_changed_mind_response(self, request, pk=None):
-        """
-        Record user's response to "what would change your mind" resurface.
-
-        PATCH /api/cases/{id}/what-changed-mind-response/
-        Body: { "response": "updated_view" | "proceeding_anyway" | "not_materialized" }
-        """
-        case = self.get_object()
-        response_value = request.data.get('response', '')
-
-        valid_responses = ['updated_view', 'proceeding_anyway', 'not_materialized']
-        if response_value not in valid_responses:
-            return Response(
-                {'error': f'Invalid response. Must be one of: {valid_responses}'},
-                status=400
-            )
-
-        case.what_changed_mind_response = response_value
-        case.what_changed_mind_response_at = timezone.now()
-        case.save(update_fields=[
-            'what_changed_mind_response',
-            'what_changed_mind_response_at',
-            'updated_at'
-        ])
-
-        return Response({
-            'what_changed_mind_response': case.what_changed_mind_response,
-            'what_changed_mind_response_at': case.what_changed_mind_response_at,
-        })
-
-    @action(detail=True, methods=['get', 'post'], url_path='readiness-checklist')
-    def readiness_checklist(self, request, pk=None):
-        """
-        Get or create checklist items for this case.
-
-        GET /api/cases/{id}/readiness-checklist/
-        Returns list of checklist items.
-
-        POST /api/cases/{id}/readiness-checklist/
-        Creates a new checklist item.
-        Body: {description, is_required?, linked_inquiry?, linked_assumption_signal?}
-        """
-        case = self.get_object()
-
-        if request.method == 'GET':
-            items = case.readiness_checklist.all()
-            serializer = ReadinessChecklistItemSerializer(items, many=True)
-
-            # Calculate progress
-            total = items.count()
-            completed = items.filter(is_complete=True).count()
-            required = items.filter(is_required=True).count()
-            required_completed = items.filter(is_required=True, is_complete=True).count()
-
-            return Response({
-                'items': serializer.data,
-                'progress': {
-                    'completed': completed,
-                    'required': required,
-                    'required_completed': required_completed,
-                    'total': total,
-                }
-            })
-
-        elif request.method == 'POST':
-            serializer = CreateChecklistItemSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-
-            # Get next order
-            max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or 0
-
-            item = ReadinessChecklistItem.objects.create(
-                case=case,
-                description=serializer.validated_data['description'],
-                is_required=serializer.validated_data.get('is_required', True),
-                linked_inquiry_id=serializer.validated_data.get('linked_inquiry'),
-                linked_assumption_signal_id=serializer.validated_data.get('linked_assumption_signal'),
-                order=max_order + 1,
-            )
-
-            return Response(
-                ReadinessChecklistItemSerializer(item).data,
-                status=status.HTTP_201_CREATED
-            )
-
-    @action(detail=True, methods=['patch', 'delete'], url_path=r'readiness-checklist/(?P<item_id>[^/.]+)')
-    def readiness_checklist_item(self, request, pk=None, item_id=None):
-        """
-        Update or delete a specific checklist item.
-
-        PATCH /api/cases/{id}/readiness-checklist/{item_id}/
-        Body: {description?, is_required?, is_complete?, order?}
-
-        DELETE /api/cases/{id}/readiness-checklist/{item_id}/
-        """
-        case = self.get_object()
-
-        try:
-            item = case.readiness_checklist.get(id=item_id)
-        except ReadinessChecklistItem.DoesNotExist:
-            return Response(
-                {'error': 'Checklist item not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if request.method == 'DELETE':
-            item.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        # PATCH
-        serializer = UpdateChecklistItemSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        changed_fields = []
-        if 'description' in serializer.validated_data:
-            item.description = serializer.validated_data['description']
-            changed_fields.append('description')
-        if 'is_required' in serializer.validated_data:
-            item.is_required = serializer.validated_data['is_required']
-            changed_fields.append('is_required')
-        if 'order' in serializer.validated_data:
-            item.order = serializer.validated_data['order']
-            changed_fields.append('order')
-
-        # Handle completion toggle
-        if 'is_complete' in serializer.validated_data:
-            was_complete = item.is_complete
-            item.is_complete = serializer.validated_data['is_complete']
-            changed_fields.append('is_complete')
-
-            if item.is_complete and not was_complete:
-                item.completed_at = timezone.now()
-                changed_fields.append('completed_at')
-            elif not item.is_complete:
-                item.completed_at = None
-                changed_fields.append('completed_at')
-
-        if changed_fields:
-            item.save(update_fields=changed_fields + ['updated_at'])
-
-        return Response(ReadinessChecklistItemSerializer(item).data)
-
-    @action(detail=True, methods=['post'], url_path='readiness-checklist/init-defaults')
-    def init_default_checklist(self, request, pk=None):
-        """
-        Initialize checklist with default items.
-
-        POST /api/cases/{id}/readiness-checklist/init-defaults/
-
-        Only creates items if checklist is empty.
-        """
-        case = self.get_object()
-
-        if case.readiness_checklist.exists():
-            return Response({
-                'message': 'Checklist already has items',
-                'items': ReadinessChecklistItemSerializer(
-                    case.readiness_checklist.all(), many=True
-                ).data
-            })
-
-        items = []
-        for idx, item_data in enumerate(DEFAULT_READINESS_CHECKLIST):
-            item = ReadinessChecklistItem.objects.create(
-                case=case,
-                description=item_data['description'],
-                is_required=item_data['is_required'],
-                order=idx,
-            )
-            items.append(item)
-
-        return Response({
-            'message': 'Default checklist initialized',
-            'items': ReadinessChecklistItemSerializer(items, many=True).data
-        }, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=['post'], url_path='readiness-checklist/generate')
-    async def generate_checklist(self, request, pk=None):
-        """
-        Generate AI-powered checklist items for this case.
-
-        POST /api/cases/{id}/readiness-checklist/generate/
-
-        Analyzes case context (assumptions, inquiries, decision question)
-        and creates smart checklist items. Does not replace existing items.
-        """
-        from apps.cases.checklist_service import generate_smart_checklist
-        from asgiref.sync import sync_to_async
-
-        case = await sync_to_async(self.get_object)()
-
-        # Generate items based on case context
-        items_data = await generate_smart_checklist(case)
-
-        # Create checklist items in two passes: parents first, then children
-        @sync_to_async
-        def _create_items(case, items_data):
-            created_items = []
-            parent_map = {}  # description -> created parent item
-            max_order = case.readiness_checklist.order_by('-order').values_list('order', flat=True).first() or -1
-
-            # Debug: Log what we're receiving
-            logger.info(f"View received {len(items_data)} items")
-            for item in items_data:
-                logger.debug(f"  - {item['description'][:40]}: parent_matched={item.get('parent_description_matched')}")
-
-            # Pass 1: Create parent items (items with no parent_description_matched)
-            for idx, item_data in enumerate(items_data):
-                if not item_data.get('parent_description_matched'):
-                    item = ReadinessChecklistItem.objects.create(
-                        case=case,
-                        description=item_data['description'],
-                        is_required=item_data.get('is_required', True),
-                        why_important=item_data.get('why_important', ''),
-                        linked_inquiry_id=item_data.get('linked_inquiry_id'),
-                        item_type=item_data.get('item_type', 'custom'),
-                        order=max_order + idx + 1,
-                        created_by_ai=True,
-                        parent=None,  # Explicitly no parent
-                    )
-                    created_items.append(item)
-                    parent_map[item_data['description']] = item
-
-            # Pass 2: Create child items (items with parent_description_matched)
-            child_order = len(created_items)
-            for item_data in items_data:
-                parent_desc = item_data.get('parent_description_matched')
-                if parent_desc and parent_desc in parent_map:
-                    parent_item = parent_map[parent_desc]
-                    item = ReadinessChecklistItem.objects.create(
-                        case=case,
-                        description=item_data['description'],
-                        is_required=item_data.get('is_required', True),
-                        why_important=item_data.get('why_important', ''),
-                        linked_inquiry_id=item_data.get('linked_inquiry_id'),
-                        item_type=item_data.get('item_type', 'custom'),
-                        order=max_order + child_order + 1,
-                        created_by_ai=True,
-                        parent=parent_item,
-                    )
-                    created_items.append(item)
-                    child_order += 1
-
-            return created_items, parent_map
-
-        created_items, parent_map = await _create_items(case, items_data)
-
-        serializer_data = await sync_to_async(
-            lambda: ReadinessChecklistItemSerializer(created_items, many=True, context={'include_children': True}).data
-        )()
-
-        return Response({
-            'message': f'Generated {len(created_items)} checklist items ({len(parent_map)} parents, {len(created_items) - len(parent_map)} children)',
-            'items': serializer_data
-        }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='suggest-inquiries')
     async def suggest_inquiries(self, request, pk=None):
@@ -1176,10 +798,8 @@ _What actions follow from this decision?_
                 'inquiry'
             ).prefetch_related(
                 'annotations',
-                'annotations__source_signals',
                 'subsections',
                 'subsections__annotations',
-                'subsections__annotations__source_signals',
                 'subsections__inquiry',
             ).order_by('order')
 
@@ -1366,7 +986,7 @@ _What actions follow from this decision?_
                     )
             else:
                 section.inquiry = None
-                section.is_linked = section.tagged_signals.exists()
+                section.is_linked = False
 
         # Track if content-related fields changed for provenance
         content_changed = 'heading' in data or 'section_type' in data or 'inquiry' in data
@@ -1489,7 +1109,7 @@ _What actions follow from this decision?_
 
         with transaction.atomic():
             section.inquiry = None
-            section.is_linked = section.tagged_signals.exists()
+            section.is_linked = False
             section.grounding_status = 'empty'
             section.grounding_data = {}
             section.save(update_fields=[
@@ -1724,36 +1344,12 @@ _What actions follow from this decision?_
 
                 # Optionally load skill sections for minimal scaffold
                 skill_sections = None
-                pack_skills_to_activate = []  # (skill, order, pack) tuples
                 skill_id = request.data.get('skill_id')
                 pack_slug = request.data.get('pack_slug')
 
                 if pack_slug:
-                    # Load pack → extract domain skill sections + collect skills to activate
-                    try:
-                        from apps.skills.models import SkillPack, SkillPackMembership
-                        from apps.skills.injection import extract_brief_sections_from_skill
-
-                        pack = SkillPack.objects.filter(
-                            slug=pack_slug, status='active',
-                        ).filter(
-                            models.Q(scope='public') |
-                            models.Q(scope='organization', organization__members=request.user)
-                        ).first()
-                        if pack:
-                            memberships = SkillPackMembership.objects.filter(
-                                pack=pack,
-                            ).select_related('skill').order_by('order')
-
-                            for m in memberships:
-                                pack_skills_to_activate.append((m.skill, m.order, pack))
-                                # Use domain-role skill for brief sections
-                                if m.role == 'domain' and skill_sections is None:
-                                    skill_sections = extract_brief_sections_from_skill(m.skill)
-                        else:
-                            logger.warning(f"Pack not found or not accessible: {pack_slug}")
-                    except (SkillPack.DoesNotExist, ValueError) as e:
-                        logger.warning(f"Could not load pack for minimal scaffold: {e}")
+                    # SkillPack was removed during skill system cleanup
+                    logger.warning(f"pack_slug provided but SkillPack no longer exists: {pack_slug}")
 
                 elif skill_id:
                     try:
@@ -1772,24 +1368,9 @@ _What actions follow from this decision?_
                     skill_sections=skill_sections,
                 )
 
-                # Activate pack skills on the newly created case — atomic
-                if pack_skills_to_activate:
-                    from apps.cases.models import CaseActiveSkill
-                    case = result['case']
-                    with transaction.atomic():
-                        CaseActiveSkill.objects.bulk_create([
-                            CaseActiveSkill(
-                                case=case,
-                                skill=skill_obj,
-                                order=order,
-                                activated_from_pack=pack_ref,
-                            )
-                            for skill_obj, order, pack_ref in pack_skills_to_activate
-                        ], ignore_conflicts=True)
-
             # Serialize response
             case_data = CaseSerializer(result['case']).data
-            brief_data = CaseDocumentSerializer(result['brief']).data
+            brief_data = WorkingDocumentSerializer(result['brief']).data
             sections_data = BriefSectionSerializer(result['sections'], many=True).data
 
             return Response({
@@ -2057,62 +1638,23 @@ _What actions follow from this decision?_
         except InvestigationPlan.DoesNotExist:
             logger.debug("No plan for case %s", case.id)
 
-        # Inquiries with evidence counts — single query via annotations
-        from apps.inquiries.models import Inquiry, Evidence
-        from django.db.models import Count, Max, Subquery, OuterRef
-
-        latest_text_subquery = Evidence.objects.filter(
-            inquiry=OuterRef('pk')
-        ).order_by('-created_at').values('evidence_text')[:1]
+        # Inquiries
+        from apps.inquiries.models import Inquiry
 
         inquiries = (
             Inquiry.objects.filter(case=case)
-            .annotate(
-                evidence_count_ann=Count('evidence_items'),
-                latest_evidence_at_ann=Max('evidence_items__created_at'),
-                latest_evidence_text_ann=Subquery(latest_text_subquery),
-            )
             .order_by('sequence_index')
         )
         inquiry_data = []
         for inq in inquiries:
-            latest_text = inq.latest_evidence_text_ann
             inquiry_data.append({
                 'id': str(inq.id),
                 'title': inq.title,
                 'status': inq.status,
                 'priority': inq.priority,
                 'sequence_index': inq.sequence_index,
-                'evidence_count': inq.evidence_count_ann,
-                'latest_evidence_text': (
-                    latest_text[:100] if latest_text else None
-                ),
-                'latest_evidence_at': (
-                    inq.latest_evidence_at_ann.isoformat()
-                    if inq.latest_evidence_at_ann else None
-                ),
                 'conclusion': inq.conclusion,
             })
-
-        # Recent signals (last 5, not dismissed)
-        from apps.signals.models import Signal
-        recent_signals = Signal.objects.filter(
-            case=case
-        ).exclude(
-            dismissed_at__isnull=False
-        ).order_by('-created_at')[:5]
-        signal_data = [{
-            'id': str(s.id),
-            'type': s.type,
-            'text': s.text,
-            'confidence': s.confidence,
-            'temperature': s.temperature,
-            'assumption_status': s.assumption_status,
-            'created_at': s.created_at.isoformat(),
-        } for s in recent_signals]
-        signal_total = Signal.objects.filter(
-            case=case, dismissed_at__isnull=True
-        ).count()
 
         # Recent provenance events (last 5)
         from apps.events.models import Event, EventCategory
@@ -2132,10 +1674,6 @@ _What actions follow from this decision?_
             'case': CaseSerializer(case).data,
             'plan': plan_data,
             'inquiries': inquiry_data,
-            'signals': {
-                'recent': signal_data,
-                'total_count': signal_total,
-            },
             'activity': {
                 'recent_events': event_data,
             },
@@ -2279,22 +1817,9 @@ _What actions follow from this decision?_
         })
 
 
-class WorkingViewViewSet(viewsets.ReadOnlyModelViewSet):
+class WorkingDocumentViewSet(viewsets.ModelViewSet):
     """
-    Read-only viewset for working views
-    Working views are created via CaseService
-    """
-    serializer_class = WorkingViewSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        # Users can only see working views for their own cases
-        return WorkingView.objects.filter(case__user=self.request.user)
-
-
-class CaseDocumentViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for case documents - briefs, research, debates, etc.
+    ViewSet for case documents - briefs, research, sources, notes, etc.
     
     Supports:
     - CRUD operations on documents
@@ -2306,10 +1831,10 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
     
     def get_serializer_class(self):
         if self.action == 'list':
-            return CaseDocumentListSerializer
+            return WorkingDocumentListSerializer
         elif self.action == 'create':
-            return CaseDocumentCreateSerializer
-        return CaseDocumentSerializer
+            return WorkingDocumentCreateSerializer
+        return WorkingDocumentSerializer
     
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -2317,8 +1842,12 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         return context
     
     def perform_create(self, serializer):
-        """Emit DOCUMENT_ADDED provenance event after document creation."""
-        document = serializer.save()
+        """Validate case ownership, set created_by, emit provenance event."""
+        case = serializer.validated_data.get('case')
+        if case and case.user != self.request.user:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot create documents in another user's case.")
+        document = serializer.save(created_by=self.request.user)
         from apps.events.services import EventService
         from apps.events.models import EventType, ActorType
         EventService.append(
@@ -2336,7 +1865,7 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Users can only see documents from their own cases
-        queryset = CaseDocument.objects.filter(case__user=self.request.user)
+        queryset = WorkingDocument.objects.filter(case__user=self.request.user)
         
         # Filter by case
         case_id = self.request.query_params.get('case')
@@ -2371,7 +1900,7 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         new_content = request.data.get('content_markdown')
         if new_content is not None:
             try:
-                updated_doc = CaseDocumentService.update_document_content(
+                updated_doc = WorkingDocumentService.update_document_content(
                     document=document,
                     new_content=new_content,
                     user=request.user
@@ -2405,9 +1934,9 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         }
         """
         document = self.get_object()
-        
-        outgoing = document.outgoing_citations.all()
-        incoming = document.incoming_citations.all()
+
+        outgoing = document.outgoing_citations.select_related('from_document', 'to_document').all()
+        incoming = document.incoming_citations.select_related('from_document', 'to_document').all()
         
         return Response({
             'outgoing': DocumentCitationSerializer(outgoing, many=True).data,
@@ -2499,7 +2028,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         }]
         """
         from .suggestions import generate_brief_suggestions
-        from apps.signals.models import Signal
         from apps.common.llm_providers import get_llm_provider, stream_json
         from apps.intelligence.case_prompts import build_gap_analysis_prompt
         from asgiref.sync import sync_to_async
@@ -2511,12 +2039,9 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         @sync_to_async
         def _build_context():
             inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
-            signals = list(Signal.objects.filter(case=case).values(
-                'id', 'type', 'text'
-            )[:20])
-            return inquiries, signals
+            return inquiries
 
-        inquiries, signals = await _build_context()
+        inquiries = await _build_context()
 
         # Get gaps via LLM
         gaps = {}
@@ -2560,8 +2085,8 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
                         'is_linked': sec.is_linked,
                         'annotations': active_annotations,
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to build grounding data: %s", e)
             return grounding_data
 
         grounding_data = await _build_grounding()
@@ -2569,7 +2094,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         case_context = {
             'decision_question': case.decision_question,
             'inquiries': inquiries,
-            'signals': signals,
             'gaps': gaps,
             'grounding': grounding_data,
         }
@@ -2596,6 +2120,7 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
 
         Returns: {updated_content, suggestion_applied}
         """
+        from django.db import transaction
         from .suggestions import apply_suggestion
 
         document = self.get_object()
@@ -2607,23 +2132,24 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Snapshot before overwriting
-        CaseDocumentVersion.create_snapshot(
-            document,
-            created_by='ai_suggestion',
-            diff_summary=f"Before applying suggestion: {suggestion.get('suggestion_type', 'unknown')}",
-            task_description=suggestion.get('reason', ''),
-        )
+        with transaction.atomic():
+            # Snapshot before overwriting
+            WorkingDocumentVersion.create_snapshot(
+                document,
+                created_by='ai_suggestion',
+                diff_summary=f"Before applying suggestion: {suggestion.get('suggestion_type', 'unknown')}",
+                task_description=suggestion.get('reason', ''),
+            )
 
-        # Apply the suggestion
-        updated_content = apply_suggestion(
-            document_content=document.content_markdown,
-            suggestion=suggestion
-        )
+            # Apply the suggestion
+            updated_content = apply_suggestion(
+                document_content=document.content_markdown,
+                suggestion=suggestion
+            )
 
-        # Save the updated content
-        document.content_markdown = updated_content
-        document.save(update_fields=['content_markdown', 'updated_at'])
+            # Save the updated content
+            document.content_markdown = updated_content
+            document.save(update_fields=['content_markdown', 'updated_at'])
 
         return Response({
             'updated_content': updated_content,
@@ -2680,7 +2206,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
             get_cached_analysis,
             run_background_analysis
         )
-        from apps.signals.models import Signal
 
         document = self.get_object()
         case = document.case
@@ -2694,14 +2219,10 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
 
         # Build case context
         inquiries = list(case.inquiries.values('id', 'title', 'status'))
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        )[:20])
 
         case_context = {
             'decision_question': case.decision_question,
             'inquiries': inquiries,
-            'signals': signals,
         }
 
         # Run analysis
@@ -2748,7 +2269,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         Returns the task result with plan, changes, and final content.
         """
         from .agentic_tasks import execute_agentic_task
-        from apps.signals.models import Signal
 
         document = self.get_object()
         case = document.case
@@ -2762,14 +2282,10 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
 
         # Build case context
         inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        )[:20])
 
         case_context = {
             'decision_question': case.decision_question,
             'inquiries': inquiries,
-            'signals': signals,
         }
 
         # Execute the task
@@ -2794,7 +2310,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         import json as json_mod
         from django.http import StreamingHttpResponse
         from .agentic_tasks import stream_agentic_task
-        from apps.signals.models import Signal
 
         document = self.get_object()
         case = document.case
@@ -2807,14 +2322,10 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
             )
 
         inquiries = list(case.inquiries.values('id', 'title', 'status', 'conclusion'))
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        )[:20])
 
         case_context = {
             'decision_question': case.decision_question,
             'inquiries': inquiries,
-            'signals': signals,
         }
 
         def event_stream():
@@ -2858,7 +2369,7 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
 
         # Snapshot before overwriting
         task_desc = request.data.get('task_description', '')
-        CaseDocumentVersion.create_snapshot(
+        WorkingDocumentVersion.create_snapshot(
             document,
             created_by='ai_task',
             diff_summary='Before applying agentic task result',
@@ -2883,7 +2394,7 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         Returns list of version snapshots ordered by newest first.
         """
         document = self.get_object()
-        versions = CaseDocumentVersion.objects.filter(
+        versions = WorkingDocumentVersion.objects.filter(
             document=document
         ).order_by('-version')[:50]
 
@@ -2925,18 +2436,18 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            target_version = CaseDocumentVersion.objects.get(
+            target_version = WorkingDocumentVersion.objects.get(
                 id=version_id,
                 document=document
             )
-        except CaseDocumentVersion.DoesNotExist:
+        except WorkingDocumentVersion.DoesNotExist:
             return Response(
                 {'error': 'Version not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
         # Snapshot current content before restoring
-        CaseDocumentVersion.create_snapshot(
+        WorkingDocumentVersion.create_snapshot(
             document,
             created_by='restore',
             diff_summary=f'Before restoring to v{target_version.version}',
@@ -2973,98 +2484,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         result = validate_section_markers(document)
         return Response(result)
 
-    @action(detail=True, methods=['get'], url_path='evidence-links')
-    def evidence_links(self, request, pk=None):
-        """
-        Extract claims and link them to available evidence.
-
-        GET /api/case-documents/{id}/evidence-links/
-
-        Returns claims with their evidence links and coverage metrics.
-        """
-        from .evidence_linker import extract_and_link_claims
-        from apps.signals.models import Signal
-
-        document = self.get_object()
-        case = document.case
-
-        # Get signals for this case
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        ))
-
-        # Get inquiries
-        inquiries = list(case.inquiries.values('id', 'title', 'status'))
-
-        # Extract and link claims
-        result = extract_and_link_claims(
-            document_content=document.content_markdown,
-            signals=signals,
-            inquiries=inquiries
-        )
-
-        # Persist evidence-signal links
-        from .evidence_linker import persist_evidence_links
-        persist_result = persist_evidence_links(
-            linked_claims=result.get('claims', []),
-            case_id=str(case.id),
-        )
-        result['persistence'] = persist_result
-
-        return Response(result)
-
-    @action(detail=True, methods=['post'], url_path='add-citations')
-    def add_citations(self, request, pk=None):
-        """
-        Add inline citations to the document based on evidence links.
-
-        POST /api/case-documents/{id}/add-citations/
-
-        Automatically adds citation markers to substantiated claims
-        and creates a sources section.
-        """
-        from .evidence_linker import extract_and_link_claims, create_inline_citations
-        from apps.signals.models import Signal
-
-        document = self.get_object()
-        case = document.case
-
-        # Get signals
-        signals = list(Signal.objects.filter(case=case).values(
-            'id', 'type', 'text'
-        ))
-
-        # Extract and link claims
-        link_result = extract_and_link_claims(
-            document_content=document.content_markdown,
-            signals=signals
-        )
-
-        # Persist evidence-signal links
-        from .evidence_linker import persist_evidence_links
-        persist_evidence_links(
-            linked_claims=link_result.get('claims', []),
-            case_id=str(case.id),
-        )
-
-        # Create inline citations
-        cited_content = create_inline_citations(
-            document_content=document.content_markdown,
-            linked_claims=link_result.get('claims', [])
-        )
-
-        # Optionally save (controlled by request)
-        save = request.data.get('save', False)
-        if save:
-            document.content_markdown = cited_content
-            document.save(update_fields=['content_markdown', 'updated_at'])
-
-        return Response({
-            'cited_content': cited_content,
-            'claims_cited': link_result.get('summary', {}).get('substantiated', 0),
-            'saved': save
-        })
-
     @action(detail=True, methods=['post'])
     async def detect_assumptions(self, request, pk=None):
         """
@@ -3077,7 +2496,6 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         }]
         """
         from apps.common.llm_providers import get_llm_provider, stream_json
-        from apps.signals.models import Signal, SignalType
         from asgiref.sync import sync_to_async
 
         document = await sync_to_async(self.get_object)()
@@ -3086,11 +2504,16 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         def _get_context():
             case = document.case
             inqs = list(case.inquiries.all())
-            assumption_sigs = list(Signal.objects.filter(
-                case=case,
-                type=SignalType.ASSUMPTION
-            ))
-            return case, inqs, assumption_sigs
+            # Assumptions are now graph nodes, not signals
+            try:
+                from apps.graph.models import Node
+                assumption_nodes = list(Node.objects.filter(
+                    project=case.project,
+                    node_type='assumption',
+                ))
+            except Exception:
+                assumption_nodes = []
+            return case, inqs, assumption_nodes
 
         case, inquiries, assumption_signals = await _get_context()
 
@@ -3165,102 +2588,53 @@ class CaseDocumentViewSet(viewsets.ModelViewSet):
         )
         
         return Response(
-            CaseDocumentSerializer(research_doc, context={'request': request}).data,
+            WorkingDocumentSerializer(research_doc, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
     
-    @action(detail=False, methods=['post'])
-    def generate_debate(self, request):
+    @action(detail=False, methods=['post'], url_path='generate-research-async')
+    def generate_research_async(self, request):
         """
-        Generate AI debate document with multiple personas.
-        
-        POST /api/case-documents/generate_debate/
+        Trigger async research generation via the multi-step research loop.
+
+        POST /api/working-documents/generate-research-async/
         {
-            "inquiry_id": "uuid",
-            "personas": [
-                {"name": "Engineering Lead", "role": "Performance-focused"},
-                {"name": "Finance Director", "role": "Cost-conscious"}
-            ]
+            "case_id": "uuid",
+            "topic": "Research topic"
         }
         """
-        from apps.agents.document_generator import AIDocumentGenerator
-        from apps.inquiries.models import Inquiry
-        
-        inquiry_id = request.data.get('inquiry_id')
-        personas = request.data.get('personas', [])
-        
-        if not inquiry_id:
+        case_id = request.data.get('case_id')
+        topic = request.data.get('topic')
+
+        if not case_id or not topic:
             return Response(
-                {'error': 'inquiry_id is required'},
+                {'error': 'case_id and topic are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if not personas or len(personas) < 2:
-            return Response(
-                {'error': 'At least 2 personas required for debate'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+
+        from apps.cases.models import Case
         try:
-            inquiry = Inquiry.objects.get(id=inquiry_id, case__user=request.user)
-        except Inquiry.DoesNotExist:
+            Case.objects.get(id=case_id, user=request.user)
+        except Case.DoesNotExist:
             return Response(
-                {'error': 'Inquiry not found'},
+                {'error': 'Case not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Generate debate
-        generator = AIDocumentGenerator()
-        debate_doc = generator.generate_debate_for_inquiry(
-            inquiry=inquiry,
-            personas=personas,
-            user=request.user
-        )
-        
-        return Response(
-            CaseDocumentSerializer(debate_doc, context={'request': request}).data,
-            status=status.HTTP_201_CREATED
-        )
-    
-    @action(detail=False, methods=['post'])
-    def generate_critique(self, request):
-        """
-        Generate AI critique document (devil's advocate).
-        
-        POST /api/case-documents/generate_critique/
-        {
-            "inquiry_id": "uuid"
-        }
-        """
-        from apps.agents.document_generator import AIDocumentGenerator
-        from apps.inquiries.models import Inquiry
-        
-        inquiry_id = request.data.get('inquiry_id')
-        
-        if not inquiry_id:
-            return Response(
-                {'error': 'inquiry_id is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            inquiry = Inquiry.objects.get(id=inquiry_id, case__user=request.user)
-        except Inquiry.DoesNotExist:
-            return Response(
-                {'error': 'Inquiry not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Generate critique
-        generator = AIDocumentGenerator()
-        critique_doc = generator.generate_critique_for_inquiry(
-            inquiry=inquiry,
-            user=request.user
+
+        import uuid as uuid_module
+        correlation_id = str(uuid_module.uuid4())
+
+        from apps.agents.research_workflow import generate_research_document
+        task = generate_research_document.delay(
+            case_id=str(case_id),
+            topic=topic,
+            user_id=request.user.id,
+            correlation_id=correlation_id,
         )
 
         return Response(
-            CaseDocumentSerializer(critique_doc, context={'request': request}).data,
-            status=status.HTTP_201_CREATED
+            {'task_id': task.id, 'status': 'generating'},
+            status=status.HTTP_202_ACCEPTED
         )
 
     @action(detail=True, methods=['patch'], url_path='section-confidence')

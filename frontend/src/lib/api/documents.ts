@@ -3,31 +3,32 @@
  */
 
 import { apiClient } from './client';
-import type { CaseDocument } from '../types/case';
+import type { WorkingDocument } from '../types/case';
+import type { UploadedDocument } from '../types/document';
 
 export const documentsAPI = {
-  async getByCase(caseId: string): Promise<CaseDocument[]> {
-    const response = await apiClient.get<CaseDocument[]>(
-      `/cases/documents/?case=${caseId}`
+  async getByCase(caseId: string): Promise<WorkingDocument[]> {
+    const response = await apiClient.get<WorkingDocument[]>(
+      `/working-documents/?case=${caseId}`
     );
     return Array.isArray(response) ? response : [];
   },
 
-  async getDocument(docId: string): Promise<CaseDocument> {
-    return apiClient.get<CaseDocument>(`/cases/documents/${docId}/`);
+  async getDocument(docId: string): Promise<WorkingDocument> {
+    return apiClient.get<WorkingDocument>(`/working-documents/${docId}/`);
   },
 
   async updateDocument(
     docId: string,
     content: string
-  ): Promise<CaseDocument> {
-    return apiClient.put<CaseDocument>(`/cases/documents/${docId}/`, {
+  ): Promise<WorkingDocument> {
+    return apiClient.put<WorkingDocument>(`/working-documents/${docId}/`, {
       content_markdown: content,
     });
   },
 
-  async update(docId: string, data: Partial<CaseDocument>): Promise<CaseDocument> {
-    return apiClient.patch<CaseDocument>(`/cases/documents/${docId}/`, data);
+  async update(docId: string, data: Partial<WorkingDocument>): Promise<WorkingDocument> {
+    return apiClient.patch<WorkingDocument>(`/working-documents/${docId}/`, data);
   },
 
   async integrateContent(
@@ -40,7 +41,7 @@ export const documentsAPI = {
     insertion_section: string;
     rewritten_content: string;
   }> {
-    return apiClient.post(`/cases/documents/${docId}/integrate_content/`, {
+    return apiClient.post(`/working-documents/${docId}/integrate_content/`, {
       content,
       hint,
       message_id: messageId,
@@ -54,7 +55,7 @@ export const documentsAPI = {
     inquiry_id: string | null;
     validation_approach: string;
   }>> {
-    return apiClient.post(`/cases/documents/${docId}/detect_assumptions/`, {});
+    return apiClient.post(`/working-documents/${docId}/detect_assumptions/`, {});
   },
 
   /**
@@ -70,11 +71,10 @@ export const documentsAPI = {
     current_content: string | null;
     suggested_content: string;
     reason: string;
-    linked_signal_id: string | null;
     confidence: number;
     status: 'pending' | 'accepted' | 'rejected';
   }>> {
-    return apiClient.post(`/cases/documents/${docId}/generate-suggestions/`, {
+    return apiClient.post(`/working-documents/${docId}/generate-suggestions/`, {
       max_suggestions: maxSuggestions,
     });
   },
@@ -95,7 +95,7 @@ export const documentsAPI = {
     updated_content: string;
     suggestion_applied: string;
   }> {
-    return apiClient.post(`/cases/documents/${docId}/apply-suggestion/`, {
+    return apiClient.post(`/working-documents/${docId}/apply-suggestion/`, {
       suggestion,
     });
   },
@@ -109,7 +109,7 @@ export const documentsAPI = {
     contextAfter: string,
     maxLength: number = 50
   ): Promise<{ completion: string | null }> {
-    return apiClient.post(`/cases/documents/${docId}/inline-complete/`, {
+    return apiClient.post(`/working-documents/${docId}/inline-complete/`, {
       context_before: contextBefore,
       context_after: contextAfter,
       max_length: maxLength,
@@ -130,7 +130,7 @@ export const documentsAPI = {
     onError: (error: string) => void,
   ): { abort: () => void } {
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-    const url = `${API_BASE}/cases/documents/${docId}/execute-task-stream/`;
+    const url = `${API_BASE}/working-documents/${docId}/execute-task-stream/`;
     const controller = new AbortController();
 
     // Use fetch with ReadableStream since EventSource doesn't support POST
@@ -212,62 +212,6 @@ export const documentsAPI = {
   },
 
   /**
-   * Apply the result of an agentic task
-   */
-  async applyTaskResult(
-    docId: string,
-    finalContent: string
-  ): Promise<{ success: boolean; message: string }> {
-    return apiClient.post(`/cases/documents/${docId}/apply-task-result/`, {
-      final_content: finalContent,
-    });
-  },
-
-  /**
-   * Get evidence links for claims in a document
-   */
-  async getEvidenceLinks(docId: string): Promise<{
-    claims: Array<{
-      id: string;
-      text: string;
-      location: string;
-      claim_type: string;
-      linked_signals: Array<{
-        signal_id: string;
-        signal_type: string;
-        relevance: number;
-        excerpt: string;
-      }>;
-      confidence: number;
-      is_substantiated: boolean;
-      suggestion?: string;
-    }>;
-    summary: {
-      total_claims: number;
-      substantiated: number;
-      unsubstantiated: number;
-      average_confidence: number;
-    };
-    evidence_coverage: number;
-  }> {
-    return apiClient.get(`/cases/documents/${docId}/evidence-links/`);
-  },
-
-  /**
-   * Add inline citations to the document
-   */
-  async addCitations(
-    docId: string,
-    save: boolean = false
-  ): Promise<{
-    cited_content: string;
-    claims_cited: number;
-    saved: boolean;
-  }> {
-    return apiClient.post(`/cases/documents/${docId}/add-citations/`, { save });
-  },
-
-  /**
    * Get version history for a document
    */
   async getVersionHistory(docId: string): Promise<Array<{
@@ -278,7 +222,7 @@ export const documentsAPI = {
     task_description: string;
     created_at: string;
   }>> {
-    return apiClient.get(`/cases/documents/${docId}/version-history/`);
+    return apiClient.get(`/working-documents/${docId}/version-history/`);
   },
 
   /**
@@ -293,7 +237,7 @@ export const documentsAPI = {
     created_at: string;
     content_markdown: string;
   }>> {
-    return apiClient.get(`/cases/documents/${docId}/version-history/?include_content=true`);
+    return apiClient.get(`/working-documents/${docId}/version-history/?include_content=true`);
   },
 
   /**
@@ -307,20 +251,110 @@ export const documentsAPI = {
     restored_to_version: number;
     content: string;
   }> {
-    return apiClient.post(`/cases/documents/${docId}/restore-version/`, {
+    return apiClient.post(`/working-documents/${docId}/restore-version/`, {
       version_id: versionId,
     });
   },
 
-  // Phase 2: Create document
+  // ─── Uploaded Source Documents (projects.Document) ──────────────────────────
+
+  /**
+   * List uploaded source documents, optionally filtered by case or project.
+   * Hits /api/documents/ (projects.Document model).
+   */
+  async listUploadedDocuments(params?: {
+    caseId?: string;
+    projectId?: string;
+  }): Promise<UploadedDocument[]> {
+    const query = new URLSearchParams();
+    if (params?.caseId) query.set('case_id', params.caseId);
+    if (params?.projectId) query.set('project_id', params.projectId);
+    const qs = query.toString();
+    const response = await apiClient.get<UploadedDocument[]>(
+      `/documents/${qs ? `?${qs}` : ''}`
+    );
+    return Array.isArray(response) ? response : [];
+  },
+
+  /**
+   * Delete an uploaded source document.
+   */
+  async deleteUploadedDocument(docId: string): Promise<void> {
+    return apiClient.delete(`/documents/${docId}/`);
+  },
+
+  /**
+   * Re-trigger processing for a failed document.
+   * Creates a new processing task on the backend.
+   */
+  async reprocessDocument(docId: string): Promise<UploadedDocument> {
+    return apiClient.post<UploadedDocument>(
+      `/documents/${docId}/reprocess/`,
+      {}
+    );
+  },
+
+  /**
+   * Create a text-based source document (pasted text).
+   * Hits /api/documents/ (projects.Document model).
+   */
   async create(data: {
     title: string;
     source_type: string;
     content_text: string;
     project_id: string;
     case_id?: string;
-  }): Promise<CaseDocument> {
+  }): Promise<UploadedDocument> {
     return apiClient.post('/documents/', data);
+  },
+
+  /**
+   * Upload a file (PDF, DOCX, TXT, MD) via FormData.
+   * The backend extracts text from the file using PyPDF2/python-docx.
+   * Hits /api/documents/ (projects.Document model).
+   */
+  async upload(data: {
+    file: File;
+    title: string;
+    project_id: string;
+    case_id?: string;
+  }): Promise<UploadedDocument> {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('title', data.title);
+    formData.append('source_type', 'upload');
+    formData.append('project_id', data.project_id);
+    if (data.case_id) formData.append('case_id', data.case_id);
+    return apiClient.upload('/documents/', formData);
+  },
+
+  /**
+   * Stream processing progress for a document via SSE.
+   */
+  streamProcessing(
+    documentId: string,
+    onEvent: (event: { event: string; data: any }) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return apiClient.streamGet(
+      `/documents/${documentId}/processing-stream/`,
+      onEvent,
+      signal,
+    );
+  },
+
+  /**
+   * Trigger async research generation via the multi-step research loop.
+   * Returns a task ID; the research runs in the background.
+   */
+  async generateResearch(caseId: string, topic: string): Promise<{
+    task_id: string;
+    status: string;
+  }> {
+    return apiClient.post('/working-documents/generate-research-async/', {
+      case_id: caseId,
+      topic,
+    });
   },
 
   // Alias for backwards compatibility

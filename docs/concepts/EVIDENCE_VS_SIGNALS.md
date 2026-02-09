@@ -1,13 +1,18 @@
 # Evidence vs Signals: The Conceptual Model
 
+**[V1 IMPLEMENTATION NOTE]** This conceptual model describes how Episteme distinguishes user thinking (signals) from external facts (evidence). V1 implements this via a unified Node model where every atomic unit is tracked with its source and type. As the system evolves, these distinctions enable rich graph relationships and reasoning.
+
+---
+
 ## The Key Distinction
 
 ### Signals (User's Epistemic State)
-**What:** User's thoughts, beliefs, uncertainties  
-**Source:** User chat messages ONLY  
-**Types:** Assumption, Question, Constraint, Goal, DecisionIntent  
-**Purpose:** Capture what the user thinks and why  
-**Mutability:** User can change their mind (signals evolve)
+**What:** User's thoughts, beliefs, uncertainties, assumptions
+**Source:** User chat messages or conversation
+**Types:** Assumption, Question, Constraint, Goal, DecisionIntent
+**Purpose:** Capture what the user thinks and why
+**Mutability:** User can refine (signals evolve)
+**In V1:** Extracted from conversation, displayed as nodes in graph with "ungrounded" visual marker
 
 **Examples:**
 - "I assume writes are append-only"
@@ -17,18 +22,19 @@
 
 ---
 
-### Evidence (External Facts)
-**What:** Facts, data points, claims from documents  
-**Source:** User-uploaded documents (PDFs, benchmarks, papers)  
-**Types:** Metric, Benchmark, Fact, Claim, Quote  
-**Purpose:** Ground user's reasoning with external sources  
-**Mutability:** Tied to document version (if doc changes, evidence changes)
+### Evidence (External Facts / Document-Sourced Claims)
+**What:** Facts, data points, claims extracted from documents
+**Source:** User-uploaded documents (PDFs, URLs, notes)
+**Types:** Metric, Benchmark, Fact, Claim, Quote
+**Purpose:** Ground user's reasoning with external sources
+**Mutability:** Versioned with source document
+**In V1:** Extracted from docs, displayed as nodes in graph with source citation
 
 **Examples:**
-- "System handles 50,000 requests per second" (metric)
-- "PostgreSQL 2x faster than MongoDB for writes" (benchmark)
-- "PostgreSQL supports JSONB indexing" (fact)
-- "According to CTO: 'We prioritize availability'" (quote)
+- "System handles 50,000 requests per second" (metric, from performance_report.pdf)
+- "PostgreSQL 2x faster than MongoDB for writes" (benchmark, from benchmark_study.pdf)
+- "PostgreSQL supports JSONB indexing" (fact, from postgres_docs.pdf)
+- "According to CTO: 'We prioritize availability'" (quote, from meeting_notes.txt)
 
 ---
 
@@ -136,40 +142,48 @@ Document: "performance_benchmark.pdf"
 
 ## User Workflows
 
-### Workflow 1: Design Review Prep
+### V1 Workflow: Make Assumptions Visible
 
 ```
 1. User chats: "Should we use Postgres or MongoDB?"
-   → Signal(DecisionIntent) extracted
+   → Signal(DecisionIntent) extracted as node
+   → Marked as: ungrounded (no evidence yet)
 
 2. User uploads benchmark PDF
-   → Evidence extracted: metrics, comparisons
+   → Evidence(Benchmark) extracted as nodes
+   → Linked: "PostgreSQL 2x faster for writes" (source: benchmark.pdf)
 
-3. User asks: "What evidence do we have for Postgres?"
-   → Query returns Evidence items with exact citations
+3. System detects relationship
+   → Edge created: Evidence SUPPORTS Signal
+   → Signal recomputed: partially grounded (1 source)
 
-4. User rates evidence credibility (5 stars for official benchmarks)
+4. User uploads CTO memo
+   → Evidence(Quote) extracted: "We prioritize availability"
+   → System detects: SUPPORTS preference for Postgres
 
-5. AI generates design review brief
-   → Cites signals (user's decision) + evidence (benchmark data)
-   → No circular extraction
+5. User sees graph:
+   → Signal node: "Postgres better" (now shows 2 supporting sources)
+   → Still missing: operational complexity, cost comparison
 ```
 
-### Workflow 2: Metrics Dispute
+### V1 Contradiction Scenario
 
 ```
-1. User: "I believe our latency is under 100ms"
-   → Signal(Claim) extracted
+1. User: "The market is growing at 20% annually"
+   → Signal(Assumption) extracted
 
-2. User uploads monitoring dashboard export
-   → Evidence: "P99 latency: 250ms" (metric)
+2. User uploads market report
+   → Evidence: "Market grew 12% last year" (from report_2024.pdf)
+   → Evidence: "Growth expected to accelerate to 18%" (from forecast.pdf)
 
-3. System detects: Evidence CONTRADICTS Signal
-   → Badge: "⚠️ Your claim contradicts evidence"
+3. System detects CONTRADICTION
+   → Edge marked: Evidence CONTRADICTS Signal
+   → Visual indicator: red line between nodes
+   → User sees: "Your assumption (20%) differs from documented trends (12%-18%)"
 
-4. User investigates, updates assumption
-   → Signal marked as rejected
-   → New Signal: "Latency is 250ms, need to improve"
+4. User refines thinking
+   → Updates Signal: "Market growing 15-18%"
+   → System recomputes: Signal now better-grounded
 ```
 
 ---
@@ -215,42 +229,44 @@ Get all metrics from documents in this case.
 
 ---
 
-## What's Next: Phase 2.3 (Knowledge Graph)
+## V1 Implementation: Unified Node Model
 
-Add relationships to link Evidence → Signals:
+V1 doesn't have separate Signal/Evidence storage — it has a unified **Node** with a type field:
 
 ```python
-# In Evidence model:
-supports_signals = ManyToManyField(Signal, related_name='supported_by_evidence')
-contradicts_signals = ManyToManyField(Signal, related_name='contradicted_by_evidence')
-
-# In Signal model:
-supported_by = ManyToManyField(Evidence)
-contradicted_by = ManyToManyField(Evidence)
+class Node:
+    type: str  # "assumption", "claim", "evidence", etc.
+    content: str
+    source: str  # "conversation" or "document_id"
+    embedding: vector  # for similarity matching
+    created_at: datetime
 ```
 
-Then build graph traversal:
+And **Edges** for relationships:
+
 ```python
-# Get all evidence supporting an assumption
-signal = Signal.objects.get(id=...)
-evidence = signal.supported_by.all()
-
-# Find contradictions
-contradictions = signal.contradicted_by.all()
+class Edge:
+    source_node: Node  # signal or evidence
+    target_node: Node  # signal or evidence
+    relationship: str  # "supports", "contradicts", "relates_to"
 ```
+
+**Why unified:** Cleaner code, easier to query, same interface for all relationships.
+
+**How it preserves the distinction:** Node.type and Node.source tell you whether it's user thinking or external fact.
 
 ---
 
 ## Summary
 
-**Signals** = User's thoughts (from chat)  
-**Evidence** = External facts (from docs)  
-**Artifacts** = AI outputs (cite both) - coming in Phase 2.4
+**The core distinction survives v1:**
+- User thoughts are tracked as nodes with provenance
+- External facts are tracked as nodes with document references
+- Edges show relationships (supports, contradicts)
+- The graph makes both visible and shows how they connect
 
-This clean separation enables:
-- No circular extraction
-- Clear provenance
-- "Receipt" system for assumptions
-- Foundation for knowledge graph reasoning
-
-**Phase 2.2 complete. Ready for Phase 2.3 (graph edges)!**
+This foundation enables:
+- Clear provenance for every claim
+- Contradiction detection (evidence contradicts assumption)
+- Assumption surfacing (here's what you're betting on)
+- Future: gap analysis (here's what should exist but doesn't)

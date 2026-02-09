@@ -83,7 +83,7 @@ def save_checkpoint(checkpoint: ResearchCheckpoint) -> None:
         from apps.events.models import ActorType
 
         EventService.append(
-            event_type="AGENT_CHECKPOINT",
+            event_type="AgentCheckpoint",
             payload=checkpoint.to_dict(),
             actor_type=ActorType.SYSTEM,
             correlation_id=checkpoint.correlation_id,

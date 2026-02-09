@@ -15,8 +15,7 @@ Skills enable organizations to customize how Episteme's AI agents (Research, Cri
 
 ### Models
 
-- **`Skill`**: Organization-level skill definition with metadata
-- **`SkillVersion`**: Version-controlled SKILL.md content
+- **`Skill`**: Skill definition with metadata and SKILL.md content (stored directly on the model as `skill_md_content`)
 - **`Case.active_skills`**: Many-to-many relationship tracking active skills
 - **`Artifact.skills_used`**: Many-to-many relationship tracking skills used in generation
 
@@ -43,7 +42,7 @@ episteme:
       - Legal statutes
       - Case law
     minimum_credibility: 0.85
-  artifact_template:
+  document_template:
     brief:
       sections:
         - Legal Summary
@@ -69,7 +68,7 @@ This prevents context window bloat.
 ### Creating a Skill
 
 ```python
-from apps.skills.models import Skill, SkillVersion
+from apps.skills.models import Skill
 
 skill = Skill.objects.create(
     organization=org,
@@ -78,15 +77,8 @@ skill = Skill.objects.create(
     domain='legal',
     applies_to_agents=['research', 'critique', 'brief'],
     episteme_config={...},
-    created_by=user
-)
-
-SkillVersion.objects.create(
-    skill=skill,
-    version=1,
     skill_md_content=skill_md_content,
-    created_by=user,
-    changelog="Initial version"
+    created_by=user
 )
 ```
 

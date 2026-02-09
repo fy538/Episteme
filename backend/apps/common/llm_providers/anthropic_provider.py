@@ -1,7 +1,7 @@
 """
 Anthropic (Claude) LLM Provider
 """
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 from anthropic import AsyncAnthropic
 
 from .base import LLMProvider, StreamChunk
@@ -117,3 +117,55 @@ class AnthropicProvider(LLMProvider):
         if response.content and len(response.content) > 0:
             return response.content[0].text
         return ""
+
+    async def generate_with_tools(
+        self,
+        messages: list[dict],
+        tools: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 8192,
+        temperature: float = 0.2,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Structured output via Anthropic tool_use.
+
+        Forces the model to call the first tool, then extracts the
+        parsed input dict directly — no JSON parsing needed.
+        """
+        if not messages:
+            raise ValueError("At least one message is required")
+        if not tools:
+            return await super().generate_with_tools(
+                messages, tools, system_prompt, max_tokens, temperature, **kwargs
+            )
+
+        # Build system param with prompt caching
+        if system_prompt and len(system_prompt) > 100:
+            system_param = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        else:
+            system_param = system_prompt or ""
+
+        response = await self.client.messages.create(
+            model=self.model,
+            messages=messages,
+            system=system_param,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+            tool_choice={"type": "tool", "name": tools[0]["name"]},
+            **kwargs,
+        )
+
+        # Extract the tool_use input from response content blocks
+        for block in response.content:
+            if block.type == "tool_use":
+                return block.input
+
+        return {}

@@ -3,7 +3,7 @@ Case serializers
 """
 from rest_framework import serializers
 from .models import (
-    Case, WorkingView, CaseStatus, StakesLevel, ReadinessChecklistItem,
+    Case, CaseStatus, StakesLevel,
     InvestigationPlan, PlanVersion, CaseStage,
 )
 
@@ -34,9 +34,6 @@ class CaseSerializer(serializers.ModelSerializer):
             'user_confidence',
             'user_confidence_updated_at',
             'what_would_change_mind',
-            # "What would change your mind" resurface response
-            'what_changed_mind_response',
-            'what_changed_mind_response_at',
             # Premortem
             'premortem_text',
             'premortem_at',
@@ -64,7 +61,7 @@ class CaseSerializer(serializers.ModelSerializer):
             # Active skills
             'active_skills_summary',
         ]
-        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at', 'what_changed_mind_response_at', 'premortem_at']
+        read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at', 'premortem_at']
 
     def get_active_skills_summary(self, obj):
         """Return lightweight summary of active skills (up to 5).
@@ -93,21 +90,6 @@ class CaseSerializer(serializers.ModelSerializer):
             }
             for a in active
         ]
-
-
-class WorkingViewSerializer(serializers.ModelSerializer):
-    """Serializer for WorkingView model"""
-    
-    class Meta:
-        model = WorkingView
-        fields = [
-            'id',
-            'case',
-            'summary_json',
-            'based_on_event_id',
-            'created_at',
-        ]
-        read_only_fields = fields
 
 
 class CreateCaseSerializer(serializers.Serializer):
@@ -164,84 +146,6 @@ class CaseAnalysisResponseSerializer(serializers.Serializer):
     constraints = serializers.ListField(child=serializers.DictField(), required=False)
     success_criteria = serializers.ListField(child=serializers.DictField(), required=False)
     confidence = serializers.FloatField(required=False)
-
-
-class ReadinessChecklistItemSerializer(serializers.ModelSerializer):
-    """Serializer for readiness checklist items"""
-
-    children = serializers.SerializerMethodField()
-    blocked_by_ids = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ReadinessChecklistItem
-        fields = [
-            'id',
-            'description',
-            'is_required',
-            'is_complete',
-            'completed_at',
-            'linked_inquiry',
-            'linked_assumption_signal',
-            'order',
-            'why_important',
-            'created_by_ai',
-            'completion_note',
-            # Phase 2: Hierarchical fields
-            'parent',
-            'item_type',
-            'children',
-            'blocked_by_ids',
-            # Timestamps
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = ['id', 'completed_at', 'created_at', 'updated_at', 'children', 'blocked_by_ids']
-
-    def get_children(self, obj):
-        """Get child items (for hierarchical display)"""
-        # Only include children in list views, not detail
-        if 'request' in self.context and self.context.get('include_children', True):
-            return ReadinessChecklistItemSerializer(
-                obj.children.all(),
-                many=True,
-                context={'include_children': True}
-            ).data
-        return []
-
-    def get_blocked_by_ids(self, obj):
-        """Get IDs of items blocking this one"""
-        return [str(item.id) for item in obj.blocked_by.all()]
-
-
-class CreateChecklistItemSerializer(serializers.Serializer):
-    """Serializer for creating a checklist item"""
-
-    description = serializers.CharField()
-    is_required = serializers.BooleanField(default=True)
-    linked_inquiry = serializers.UUIDField(required=False, allow_null=True)
-    linked_assumption_signal = serializers.UUIDField(required=False, allow_null=True)
-    # Phase 2
-    parent = serializers.UUIDField(required=False, allow_null=True)
-    item_type = serializers.ChoiceField(
-        choices=['validation', 'investigation', 'analysis', 'stakeholder', 'alternative', 'criteria', 'custom'],
-        default='custom',
-        required=False
-    )
-
-
-class UpdateChecklistItemSerializer(serializers.Serializer):
-    """Serializer for updating a checklist item"""
-
-    description = serializers.CharField(required=False)
-    is_required = serializers.BooleanField(required=False)
-    is_complete = serializers.BooleanField(required=False)
-    order = serializers.IntegerField(required=False)
-    # Phase 2
-    parent = serializers.UUIDField(required=False, allow_null=True)
-    item_type = serializers.ChoiceField(
-        choices=['validation', 'investigation', 'analysis', 'stakeholder', 'alternative', 'criteria', 'custom'],
-        required=False
-    )
 
 
 class UserConfidenceSerializer(serializers.Serializer):

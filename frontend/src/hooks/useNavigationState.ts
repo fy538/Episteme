@@ -1,8 +1,13 @@
 /**
  * useNavigationState Hook
  *
- * Core navigation state for the two-tier sidebar architecture.
- * The rail section is derived from the current URL pathname (router is source of truth).
+ * Core navigation state for the sidebar architecture.
+ *
+ * The sidebar has two tabs (Decisions / Threads). The active tab is:
+ *   1. Auto-derived from the URL pathname (e.g. /chat → threads, /cases → decisions)
+ *   2. Manually overridable by the user clicking a tab
+ *   3. Override resets on the next URL navigation
+ *
  * Panel collapse state is persisted in localStorage.
  */
 
@@ -10,31 +15,36 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import type { RailSection, PanelMode } from '@/lib/types/navigation';
+import type { SidebarTab, RailSection, PanelMode } from '@/lib/types/navigation';
 
 const STORAGE_KEY = 'episteme_nav_panel_collapsed';
+const TAB_STORAGE_KEY = 'episteme_nav_default_tab';
 
 /** Regex patterns for extracting route params from pathname */
 const CHAT_THREAD_RE = /^\/chat\/([^/]+)/;
 const CASE_ID_RE = /^\/cases\/([^/]+)/;
 const PROJECT_ID_RE = /^\/projects\/([^/]+)/;
 
-/** Derive the active rail section from the current pathname */
-function deriveRailSection(pathname: string): RailSection {
-  // Home and chat routes all map to conversations
-  if (pathname === '/') return 'conversations';
-  if (pathname.startsWith('/chat')) return 'conversations';
-  // Cases, inquiries, projects all map to cases
-  if (pathname.startsWith('/cases')) return 'cases';
-  if (pathname.startsWith('/inquiries')) return 'cases';
-  if (pathname.startsWith('/projects')) return 'cases';
-  return 'conversations'; // default to conversations
+/** Derive the sidebar tab from the current pathname */
+function deriveTab(pathname: string): SidebarTab {
+  if (pathname.startsWith('/chat')) return 'threads';
+  // Home, cases, inquiries, projects all map to decisions
+  if (pathname === '/') return 'decisions';
+  if (pathname.startsWith('/cases')) return 'decisions';
+  if (pathname.startsWith('/inquiries')) return 'decisions';
+  if (pathname.startsWith('/projects')) return 'decisions';
+  return 'decisions'; // default
+}
+
+/** Map SidebarTab to the legacy RailSection for backwards compat */
+function tabToRailSection(tab: SidebarTab): RailSection {
+  return tab === 'threads' ? 'conversations' : 'cases';
 }
 
 /** Derive the panel mode from the pathname */
 function derivePanelMode(pathname: string): PanelMode {
-  // Home and /chat both show conversations panel
-  if (pathname === '/') return { section: 'conversations' };
+  // Home shows decisions panel
+  if (pathname === '/') return { section: 'cases' };
 
   if (pathname.startsWith('/chat')) {
     const match = pathname.match(CHAT_THREAD_RE);
@@ -66,6 +76,9 @@ function derivePanelMode(pathname: string): PanelMode {
 
 export interface UseNavigationStateReturn {
   // State
+  /** Active sidebar tab — the source of truth for which panel content to show */
+  activeTab: SidebarTab;
+  /** @deprecated Use activeTab. Derived for backwards compatibility. */
   railSection: RailSection;
   panelMode: PanelMode;
   isPanelCollapsed: boolean;
@@ -74,6 +87,8 @@ export interface UseNavigationStateReturn {
   isOverlayOpen: boolean;
 
   // Actions
+  /** Manually switch the sidebar tab (overrides URL-derived tab until next navigation) */
+  setActiveTab: (tab: SidebarTab) => void;
   setPanelCollapsed: (collapsed: boolean) => void;
   togglePanel: () => void;
   /** Open the sidebar as a floating overlay (for narrow/mobile screens) */
@@ -96,9 +111,36 @@ export function useNavigationState(): UseNavigationStateReturn {
   const pathname = usePathname();
   const router = useRouter();
 
-  // Derive rail section and panel mode from URL
-  const railSection = deriveRailSection(pathname);
+  // Derive tab and panel mode from URL
+  const urlDerivedTab = deriveTab(pathname);
   const panelMode = derivePanelMode(pathname);
+
+  // Active tab state: URL-derived by default, manually overridable
+  const [tabOverride, setTabOverride] = useState<SidebarTab | null>(null);
+  const prevPathnameRef = useRef(pathname);
+
+  // Reset tab override on pathname change (URL navigation takes precedence)
+  useEffect(() => {
+    if (prevPathnameRef.current !== pathname) {
+      setTabOverride(null);
+      prevPathnameRef.current = pathname;
+    }
+  }, [pathname]);
+
+  // Effective active tab: override > URL-derived
+  const activeTab = tabOverride ?? urlDerivedTab;
+
+  // Legacy railSection derived from activeTab
+  const railSection = tabToRailSection(activeTab);
+
+  // Manual tab switch (sets override, doesn't navigate)
+  const setActiveTab = useCallback((tab: SidebarTab) => {
+    setTabOverride(tab);
+    // Persist preference for ambiguous routes (like home)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TAB_STORAGE_KEY, tab);
+    }
+  }, []);
 
   // Panel collapse state (persisted)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(() => {
@@ -111,17 +153,17 @@ export function useNavigationState(): UseNavigationStateReturn {
 
   // Transition state
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const prevRailRef = useRef<RailSection>(railSection);
+  const prevTabRef = useRef<SidebarTab>(activeTab);
 
-  // Detect rail section changes and trigger transition animation
+  // Detect tab changes and trigger transition animation
   useEffect(() => {
-    if (prevRailRef.current !== railSection) {
+    if (prevTabRef.current !== activeTab) {
       setIsTransitioning(true);
       const timer = setTimeout(() => setIsTransitioning(false), 200);
-      prevRailRef.current = railSection;
+      prevTabRef.current = activeTab;
       return () => clearTimeout(timer);
     }
-  }, [railSection]);
+  }, [activeTab]);
 
   // Persist panel collapse state
   const setPanelCollapsed = useCallback((collapsed: boolean) => {
@@ -190,11 +232,13 @@ export function useNavigationState(): UseNavigationStateReturn {
   }, []);
 
   return {
+    activeTab,
     railSection,
     panelMode,
     isPanelCollapsed,
     isTransitioning,
     isOverlayOpen,
+    setActiveTab,
     setPanelCollapsed,
     togglePanel,
     openOverlay,

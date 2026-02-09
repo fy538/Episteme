@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChatPanel } from '@/components/workspace/ChatPanel';
 import { CompanionPanel } from '@/components/companion';
@@ -21,21 +21,37 @@ export default function ConversationPage({
 }: {
   params: { threadId: string };
 }) {
-  // Read initial message from sessionStorage (set by home hero input)
-  const [initialMessage, setInitialMessage] = useState<string | null>(null);
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const msg = sessionStorage.getItem('episteme_initial_message');
-      if (msg) {
-        setInitialMessage(msg);
+  // Read initial message from sessionStorage (set by home hero input).
+  // Stored as JSON { threadId, content } — only consume if threadId matches.
+  //
+  // Uses a lazy useState initializer (not useEffect) so the value is available
+  // from the very first render. This is critical because:
+  // 1. skipInitialLoad in useStreamingChat must be true from the first render
+  //    to avoid a redundant loadMessages() call on a brand-new thread.
+  // 2. React Strict Mode double-mounts components — a useEffect-based read
+  //    would clear sessionStorage on mount 1, leaving mount 2 with nothing.
+  const [initialMessage, setInitialMessage] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const raw = sessionStorage.getItem('episteme_initial_message');
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.threadId === params.threadId) {
+        // Consume immediately — one-shot read prevents Strict Mode double-send
+        sessionStorage.removeItem('episteme_initial_message');
+        return parsed.content;
       }
+      return null;
+    } catch {
+      // Legacy plain-string format fallback
+      sessionStorage.removeItem('episteme_initial_message');
+      return raw;
     }
-  }, []);
+  });
 
   const queryClient = useQueryClient();
-  const { chatState, companion, thread } = useConversationState({
+  const { companion } = useConversationState({
     threadId: params.threadId,
-    initialMessage,
   });
 
   // Merge title update handler into companion stream callbacks
@@ -58,12 +74,7 @@ export default function ConversationPage({
             variant="full"
             streamCallbacks={streamCallbacksWithTitle}
             initialMessage={initialMessage || undefined}
-            onInitialMessageSent={() => {
-              setInitialMessage(null);
-              if (typeof window !== 'undefined') {
-                sessionStorage.removeItem('episteme_initial_message');
-              }
-            }}
+            onInitialMessageSent={() => setInitialMessage(null)}
           />
       </div>
 
@@ -75,7 +86,6 @@ export default function ConversationPage({
             mode="casual"
             position="sidebar"
             actionHints={companion.actionHints}
-            signals={companion.signals}
             rankedSections={companion.rankedSections}
             pinnedSection={companion.pinnedSection}
             onPinSection={companion.setPinnedSection}

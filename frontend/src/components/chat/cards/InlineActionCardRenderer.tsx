@@ -8,10 +8,8 @@
 
 import { motion } from 'framer-motion';
 import type { InlineActionCard } from '@/lib/types/chat';
-import { SignalsCollapsedCard } from './SignalsCollapsedCard';
 import { CaseCreationPromptCard } from './CaseCreationPromptCard';
 import { CasePreviewCard } from './CasePreviewCard';
-import { EvidenceSuggestionCard } from './EvidenceSuggestionCard';
 import { InquiryResolutionPromptCard } from './InquiryResolutionPromptCard';
 import { ResearchResultsCard } from './ResearchResultsCard';
 import { InquiryFocusPromptCard } from './InquiryFocusPromptCard';
@@ -20,10 +18,6 @@ import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { easingCurves, transitionDurations } from '@/lib/motion-config';
 
 export interface InlineCardActions {
-  // Signals
-  onExpandSignals?: () => void;
-  onSignalClick?: (signalText: string) => void;
-
   // Case creation
   onCreateCase?: (suggestedTitle?: string) => void;
 
@@ -31,12 +25,8 @@ export interface InlineCardActions {
   onCreateCaseFromPreview?: (analysis: Record<string, unknown>, title: string) => void;
   onAdjustCasePreview?: () => void;
 
-  // Evidence
-  onAddEvidence?: (inquiryId?: string, direction?: string) => void;
-
   // Inquiry resolution
   onResolveInquiry?: (inquiryId: string, conclusion?: string) => void;
-  onAddMoreEvidence?: (inquiryId: string) => void;
 
   // Research
   onViewResearchResults?: (researchId: string) => void;
@@ -73,16 +63,6 @@ export function InlineActionCardRenderer({
   let cardContent: React.ReactNode;
 
   switch (card.type) {
-    case 'signals_collapsed':
-      cardContent = (
-        <SignalsCollapsedCard
-          card={card}
-          onExpand={actions.onExpandSignals}
-          onSignalClick={actions.onSignalClick}
-        />
-      );
-      break;
-
     case 'case_creation_prompt':
       cardContent = (
         <CaseCreationPromptCard
@@ -106,22 +86,12 @@ export function InlineActionCardRenderer({
       );
       break;
 
-    case 'evidence_suggestion':
-      cardContent = (
-        <EvidenceSuggestionCard
-          card={card}
-          onAddEvidence={actions.onAddEvidence || (() => {})}
-          onDismiss={handleDismiss}
-        />
-      );
-      break;
-
     case 'inquiry_resolution':
       cardContent = (
         <InquiryResolutionPromptCard
           card={card}
           onResolve={actions.onResolveInquiry || (() => {})}
-          onAddMore={actions.onAddMoreEvidence || (() => {})}
+          onAddMore={() => {}}
           onDismiss={handleDismiss}
         />
       );

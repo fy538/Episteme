@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from apps.chat.models import ChatThread, Message, MessageRole
 from apps.cases.models import Case
-from apps.skills.models import Skill, SkillVersion
+from apps.skills.models import Skill
 from apps.common.models import Organization
 from apps.events.models import Event
 from apps.agents.inflection_detector import InflectionDetector
@@ -136,7 +136,7 @@ class AgentOrchestratorTestCase(TestCase):
         ]
         
         content = AgentOrchestrator._build_result_content(
-            artifact_id=str(uuid.uuid4()),
+            document_id=str(uuid.uuid4()),
             blocks=blocks,
             generation_time_ms=25000
         )

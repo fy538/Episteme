@@ -27,7 +27,6 @@ export interface BriefSectionSuggestion {
   current_content?: string;
   suggested_content: string;
   reason: string;
-  linked_signal_id?: string;
   confidence?: number;
   status: 'pending' | 'accepted' | 'rejected';
 }
@@ -36,7 +35,6 @@ interface BriefSuggestionProps {
   suggestion: BriefSectionSuggestion;
   onAccept: (suggestion: BriefSectionSuggestion, editedContent?: string) => Promise<void>;
   onReject: (suggestion: BriefSectionSuggestion) => void;
-  onNavigateToSignal?: (signalId: string) => void;
   isInline?: boolean;
   isLoading?: boolean;
 }
@@ -45,7 +43,6 @@ export function BriefSuggestion({
   suggestion,
   onAccept,
   onReject,
-  onNavigateToSignal,
   isInline = false,
   isLoading = false,
 }: BriefSuggestionProps) {
@@ -121,15 +118,6 @@ export function BriefSuggestion({
               </span>
             )}
           </div>
-          {suggestion.linked_signal_id && onNavigateToSignal && (
-            <button
-              onClick={() => onNavigateToSignal(suggestion.linked_signal_id!)}
-              className="text-xs text-accent-600 hover:text-accent-700 flex items-center gap-1"
-            >
-              <LinkIcon className="w-3 h-3" />
-              View source
-            </button>
-          )}
         </div>
       </div>
 
@@ -257,13 +245,11 @@ export function BriefSuggestionList({
   suggestions,
   onAccept,
   onReject,
-  onNavigateToSignal,
   isLoading = false,
 }: {
   suggestions: BriefSectionSuggestion[];
   onAccept: (suggestion: BriefSectionSuggestion, editedContent?: string) => Promise<void>;
   onReject: (suggestion: BriefSectionSuggestion) => void;
-  onNavigateToSignal?: (signalId: string) => void;
   isLoading?: boolean;
 }) {
   const pendingSuggestions = suggestions.filter((s) => s.status === 'pending');
@@ -299,7 +285,6 @@ export function BriefSuggestionList({
               suggestion={suggestion}
               onAccept={onAccept}
               onReject={onReject}
-              onNavigateToSignal={onNavigateToSignal}
               isLoading={isLoading}
             />
           ))}

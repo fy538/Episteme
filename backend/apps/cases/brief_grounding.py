@@ -2,26 +2,19 @@
 Brief grounding engine.
 
 Computes grounding status and annotations for brief sections by following
-the section → inquiry → signals → evidence chain. Uses existing GraphAnalyzer
-and GraphUtils for pattern detection.
-
-Also derives readiness checklist items from grounding gaps, completing
-the three-way feedback loop: Knowledge Graph → Brief → Readiness.
+the section → inquiry → signals → evidence chain. Uses GraphAnalyzer
+for pattern detection.
 """
 import logging
 from typing import Dict, List, Any
 
-from django.db import models, transaction
-from django.db.models import Exists, OuterRef
+from django.db import transaction
 from django.utils import timezone
 
 from apps.cases.brief_models import (
     BriefSection, BriefAnnotation,
     GroundingStatus, AnnotationType, AnnotationPriority,
 )
-from apps.common.graph_utils import GraphUtils
-from apps.projects.models import Evidence as ProjectEvidence
-from apps.signals.models import Signal, SignalType
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +25,6 @@ class BriefGroundingEngine:
 
     Grounding flows from the knowledge graph:
     - BriefSection → Inquiry → Signals + Evidence
-    - For custom sections: BriefSection → tagged_signals
 
     Annotations are generated from graph analysis:
     - Tensions from contradicting signals
@@ -47,7 +39,6 @@ class BriefGroundingEngine:
         Compute grounding status for a single section.
 
         For inquiry_brief sections: follows section → inquiry → signals + evidence.
-        For custom sections with tagged_signals: computes from tagged signals.
         For unlinked sections: returns empty grounding.
 
         Args:
@@ -79,10 +70,6 @@ class BriefGroundingEngine:
 
         if section.inquiry:
             return BriefGroundingEngine._compute_from_inquiry(section.inquiry, result, evidence_threshold)
-        elif section.is_linked and section.tagged_signals.exists():
-            return BriefGroundingEngine._compute_from_signals(
-                section.tagged_signals.all(), result, evidence_threshold
-            )
         else:
             # Decision frame sections get "set" status if decision_question exists
             if section.section_type == 'decision_frame':
@@ -95,80 +82,78 @@ class BriefGroundingEngine:
 
     @staticmethod
     def _compute_from_inquiry(inquiry, result: Dict, evidence_threshold: str = 'medium') -> Dict:
-        """Compute grounding from an inquiry's evidence and signals."""
-        # Count evidence by direction
-        evidence_items = inquiry.evidence_items.all()
-        for evidence in evidence_items:
-            result['evidence_count'] += 1
-            if evidence.direction == 'supports':
-                result['supporting'] += 1
-            elif evidence.direction == 'contradicts':
-                result['contradicting'] += 1
-            else:
-                result['neutral'] += 1
-
-        # Count unvalidated assumptions
-        assumptions = Signal.objects.filter(
-            inquiry=inquiry,
-            type=SignalType.ASSUMPTION,
-            dismissed_at__isnull=True,
-        ).annotate(
-            has_supporting=Exists(
-                ProjectEvidence.objects.filter(supports_signals=OuterRef('pk'))
-            ),
-        )
-        result['unvalidated_assumptions'] = assumptions.filter(has_supporting=False).count()
-
-        # Count tensions (contradicting signals)
-        signals = inquiry.related_signals.filter(dismissed_at__isnull=True).annotate(
-            has_contradictions=Exists(
-                Signal.objects.filter(
-                    contradicted_by=OuterRef('pk'),
-                    dismissed_at__isnull=True,
+        """Compute grounding from graph evidence nodes and signals."""
+        # Count evidence by direction from graph Node(type=EVIDENCE) + Edges
+        try:
+            from apps.graph.models import Node, Edge, EdgeType
+            from apps.graph.services import GraphService
+            case = inquiry.case
+            if case and case.project:
+                visible_ids = GraphService._get_case_visible_nodes(case.id)
+                evidence_nodes = Node.objects.filter(
+                    id__in=visible_ids,
+                    node_type='evidence',
                 )
-            ),
-            has_contradicted_by=Exists(
-                Signal.objects.filter(
-                    contradicts=OuterRef('pk'),
-                    dismissed_at__isnull=True,
+                result['evidence_count'] = evidence_nodes.count()
+                result['supporting'] = Edge.objects.filter(
+                    source_node__in=evidence_nodes,
+                    edge_type=EdgeType.SUPPORTS,
+                ).count()
+                result['contradicting'] = Edge.objects.filter(
+                    source_node__in=evidence_nodes,
+                    edge_type=EdgeType.CONTRADICTS,
+                ).count()
+                result['neutral'] = max(
+                    0,
+                    result['evidence_count'] - result['supporting'] - result['contradicting'],
                 )
-            ),
-        )
-        tension_count = signals.filter(
-            models.Q(has_contradictions=True) | models.Q(has_contradicted_by=True)
-        ).count()
-        # Deduplicate (A contradicts B counts once, not twice)
-        result['tensions_count'] = tension_count // 2 if tension_count > 1 else tension_count
 
-        # Average confidence from evidence
-        if result['evidence_count'] > 0:
-            confidences = [e.strength for e in evidence_items if e.strength]
-            if confidences:
-                result['confidence_avg'] = round(sum(confidences) / len(confidences), 2)
+                # Average confidence from evidence nodes
+                if result['evidence_count'] > 0:
+                    confidences = list(
+                        evidence_nodes.filter(confidence__isnull=False)
+                        .values_list('confidence', flat=True)
+                    )
+                    if confidences:
+                        result['confidence_avg'] = round(
+                            sum(confidences) / len(confidences), 2
+                        )
+        except Exception:
+            pass
+
+        # Count unvalidated assumptions from the graph layer
+        # Scoped to case-visible nodes (case-owned + referenced project nodes)
+        try:
+            from apps.graph.models import Node
+            from apps.graph.services import GraphService
+            case = inquiry.case
+            if case and case.project:
+                visible_ids = GraphService._get_case_visible_nodes(case.id)
+                assumption_nodes = Node.objects.filter(
+                    id__in=visible_ids,
+                    node_type='assumption',
+                ).exclude(status__in=['confirmed', 'refuted'])
+                result['unvalidated_assumptions'] = assumption_nodes.count()
+        except Exception:
+            pass
+
+        # Count tensions from the graph layer
+        # Scoped to case-visible nodes
+        try:
+            from apps.graph.models import Node
+            from apps.graph.services import GraphService
+            case = inquiry.case
+            if case and case.project:
+                visible_ids = GraphService._get_case_visible_nodes(case.id)
+                tension_nodes = Node.objects.filter(
+                    id__in=visible_ids,
+                    node_type='tension',
+                )
+                result['tensions_count'] = tension_nodes.count()
+        except Exception:
+            pass
 
         # Determine status
-        result['status'] = BriefGroundingEngine._determine_status(result, evidence_threshold)
-        return result
-
-    @staticmethod
-    def _compute_from_signals(signals, result: Dict, evidence_threshold: str = 'medium') -> Dict:
-        """Compute grounding from tagged signals (custom sections)."""
-        for signal in signals:
-            # Check for evidence
-            supporting = signal.supported_by_evidence.count()
-            contradicting = signal.contradicted_by_evidence.count()
-            result['supporting'] += supporting
-            result['contradicting'] += contradicting
-            result['evidence_count'] += supporting + contradicting
-
-            # Check for unvalidated assumptions
-            if signal.type == SignalType.ASSUMPTION and not signal.supported_by_evidence.exists():
-                result['unvalidated_assumptions'] += 1
-
-            # Check for tensions
-            if signal.contradicts.exists() or signal.contradicted_by.exists():
-                result['tensions_count'] += 1
-
         result['status'] = BriefGroundingEngine._determine_status(result, evidence_threshold)
         return result
 
@@ -231,7 +216,7 @@ class BriefGroundingEngine:
         """
         annotations = []
 
-        if not section.inquiry and not section.tagged_signals.exists():
+        if not section.inquiry:
             return annotations
 
         inquiry = section.inquiry
@@ -239,7 +224,7 @@ class BriefGroundingEngine:
         if inquiry:
             # Use inquiry-scoped graph analysis for richer pattern detection
             try:
-                from apps.companion.graph_analyzer import GraphAnalyzer
+                from apps.graph.analyzer import GraphAnalyzer
                 analyzer = GraphAnalyzer()
                 patterns = analyzer.find_patterns_for_inquiry(inquiry.id)
                 annotations = BriefGroundingEngine._annotations_from_patterns(
@@ -254,70 +239,7 @@ class BriefGroundingEngine:
                     section, inquiry
                 )
 
-            # Check for low-credibility evidence (user ratings 1-2 stars)
-            try:
-                annotations.extend(
-                    BriefGroundingEngine._check_low_credibility(inquiry)
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Low-credibility check failed for inquiry {inquiry.id}: {e}"
-                )
-
         return annotations
-
-    @staticmethod
-    def _check_low_credibility(inquiry) -> List[Dict[str, Any]]:
-        """
-        Check if the majority of rated evidence for an inquiry has low
-        user credibility (1-2 stars).
-
-        Looks up user_credibility_rating from projects.Evidence via the
-        shared document chunk links on the inquiry's evidence items.
-
-        Returns a list with zero or one annotation dicts.
-        """
-        from apps.projects.models import Evidence as ProjectEvidence
-
-        # Collect all source chunk IDs from the inquiry's evidence items
-        evidence_items = inquiry.evidence_items.all()
-        chunk_ids = set()
-        for item in evidence_items:
-            chunk_ids.update(
-                item.source_chunks.values_list('id', flat=True)
-            )
-
-        if not chunk_ids:
-            return []
-
-        # Find project-level evidence with user ratings for those chunks
-        rated_evidence = ProjectEvidence.objects.filter(
-            chunk_id__in=chunk_ids,
-            user_credibility_rating__isnull=False,
-        ).values_list('user_credibility_rating', flat=True)
-
-        rated_list = list(rated_evidence)
-        if not rated_list:
-            return []
-
-        low_count = sum(1 for r in rated_list if r <= 2)
-        total_rated = len(rated_list)
-
-        # Majority means more than half of rated evidence is low
-        if low_count > total_rated / 2:
-            return [{
-                'type': AnnotationType.LOW_CREDIBILITY,
-                'description': (
-                    f'{low_count} of {total_rated} rated evidence item(s) '
-                    f'have low credibility (1-2 stars). '
-                    f'This section may rely on weak sources.'
-                ),
-                'priority': AnnotationPriority.IMPORTANT,
-                'signal_ids': [],
-                'inquiry_id': inquiry.id,
-            }]
-
-        return []
 
     @staticmethod
     def _annotations_from_patterns(
@@ -427,38 +349,22 @@ class BriefGroundingEngine:
         Fallback inline annotation computation (no GraphAnalyzer dependency).
 
         Used when inquiry-scoped graph analysis is unavailable.
+        Tensions, assumptions, and claims are now handled by the graph layer.
         """
         annotations = []
-        signals = inquiry.related_signals.filter(dismissed_at__isnull=True)
 
-        # Tensions
-        seen_pairs = set()
-        for signal in signals:
-            for contra in signal.contradicts.filter(dismissed_at__isnull=True):
-                pair = tuple(sorted([str(signal.id), str(contra.id)]))
-                if pair not in seen_pairs:
-                    seen_pairs.add(pair)
-                    annotations.append({
-                        'type': AnnotationType.TENSION,
-                        'description': f'"{signal.text[:60]}..." conflicts with "{contra.text[:60]}..."',
-                        'priority': AnnotationPriority.BLOCKING,
-                        'signal_ids': [signal.id, contra.id],
-                        'inquiry_id': inquiry.id,
-                    })
-
-        # Ungrounded assumptions
-        for assumption in signals.filter(type=SignalType.ASSUMPTION):
-            if not assumption.supported_by_evidence.exists():
-                annotations.append({
-                    'type': AnnotationType.UNGROUNDED,
-                    'description': f'Unvalidated assumption: "{assumption.text[:80]}..."',
-                    'priority': AnnotationPriority.IMPORTANT,
-                    'signal_ids': [assumption.id],
-                    'inquiry_id': inquiry.id,
-                })
-
-        # Evidence desert
-        evidence_count = inquiry.evidence_items.count()
+        # Evidence desert — count from graph evidence nodes
+        try:
+            from apps.graph.models import Node
+            from apps.graph.services import GraphService
+            case = inquiry.case
+            visible_ids = GraphService._get_case_visible_nodes(case.id) if case else []
+            evidence_count = Node.objects.filter(
+                id__in=visible_ids,
+                node_type='evidence',
+            ).count() if visible_ids else 0
+        except Exception:
+            evidence_count = 0
         if evidence_count < 2 and inquiry.status in ['open', 'investigating']:
             annotations.append({
                 'type': AnnotationType.EVIDENCE_DESERT,
@@ -468,69 +374,10 @@ class BriefGroundingEngine:
                 'inquiry_id': inquiry.id,
             })
 
-        # Well-grounded claims
-        for claim in signals.filter(type=SignalType.CLAIM):
-            supporting = claim.supported_by_evidence.count()
-            if supporting >= 2 and not claim.contradicted_by_evidence.exists():
-                annotations.append({
-                    'type': AnnotationType.WELL_GROUNDED,
-                    'description': f'Well-supported claim ({supporting} evidence): "{claim.text[:60]}..."',
-                    'priority': AnnotationPriority.INFO,
-                    'signal_ids': [claim.id],
-                    'inquiry_id': inquiry.id,
-                })
+        # Tensions and assumptions now come from graph nodes, handled by
+        # GraphAnalyzer._annotations_from_patterns (primary path).
 
         return annotations
-
-    @staticmethod
-    def derive_readiness_items(section: BriefSection) -> List[Dict[str, Any]]:
-        """
-        Convert grounding gaps into readiness checklist item data.
-
-        Returns list of dicts suitable for ReadinessChecklistItem creation:
-        {description, is_required, why_important, item_type, linked_inquiry_id}
-        """
-        items = []
-        grounding = section.grounding_data
-
-        if not grounding:
-            return items
-
-        inquiry = section.inquiry
-
-        # No evidence → investigation item
-        if grounding.get('evidence_count', 0) == 0 and inquiry:
-            items.append({
-                'description': f'Gather evidence for: {section.heading}',
-                'is_required': True,
-                'why_important': 'This section has no supporting evidence yet.',
-                'item_type': 'investigation',
-                'linked_inquiry_id': str(inquiry.id) if inquiry else None,
-            })
-
-        # Unvalidated assumptions → validation items
-        if grounding.get('unvalidated_assumptions', 0) > 0:
-            count = grounding['unvalidated_assumptions']
-            items.append({
-                'description': f'Validate {count} assumption(s) in: {section.heading}',
-                'is_required': True,
-                'why_important': f'{count} assumption(s) lack supporting evidence.',
-                'item_type': 'validation',
-                'linked_inquiry_id': str(inquiry.id) if inquiry else None,
-            })
-
-        # Tensions → resolution items
-        if grounding.get('tensions_count', 0) > 0:
-            count = grounding['tensions_count']
-            items.append({
-                'description': f'Resolve {count} tension(s) in: {section.heading}',
-                'is_required': True,
-                'why_important': f'{count} conflicting source(s) need resolution.',
-                'item_type': 'analysis',
-                'linked_inquiry_id': str(inquiry.id) if inquiry else None,
-            })
-
-        return items
 
     @classmethod
     def evolve_brief(cls, case_id) -> Dict[str, Any]:
@@ -572,7 +419,6 @@ class BriefGroundingEngine:
         brief = case.main_brief
         sections = BriefSection.objects.filter(brief=brief).select_related('inquiry').prefetch_related(
             'annotations',
-            'annotations__source_signals',
         )
 
         # Read per-case investigation preferences
@@ -627,11 +473,6 @@ class BriefGroundingEngine:
                         priority=ann_data['priority'],
                         source_inquiry_id=ann_data.get('inquiry_id'),
                     )
-                    # Link source signals
-                    if ann_data.get('signal_ids'):
-                        annotation.source_signals.set(
-                            Signal.objects.filter(id__in=ann_data['signal_ids'])
-                        )
                     new_annotations.append({
                         'id': str(annotation.id),
                         'type': annotation.annotation_type,
@@ -659,16 +500,11 @@ class BriefGroundingEngine:
         # 5. Update locked state for synthesis/recommendation sections
         _update_locked_sections(brief, sections)
 
-        # 6. Derive readiness checklist items from grounding gaps
-        readiness_changes = _sync_readiness_from_grounding(case, sections)
-
         logger.info(
             f"Brief evolved for case {case.id}: "
             f"{len(updated_sections)} sections updated, "
             f"{len(new_annotations)} new annotations, "
-            f"{len(resolved_annotations)} resolved, "
-            f"{readiness_changes.get('created', 0)} readiness items created, "
-            f"{readiness_changes.get('auto_completed', 0)} auto-completed"
+            f"{len(resolved_annotations)} resolved"
         )
 
         return {
@@ -678,8 +514,6 @@ class BriefGroundingEngine:
             'sections_updated': len(updated_sections),
             'annotations_created': len(new_annotations),
             'annotations_resolved': len(resolved_annotations),
-            'readiness_created': readiness_changes.get('created', 0),
-            'readiness_auto_completed': readiness_changes.get('auto_completed', 0),
         }
 
 
@@ -757,105 +591,3 @@ def _update_locked_sections(brief, sections):
             section.save(update_fields=['is_locked', 'lock_reason', 'updated_at'])
 
 
-def _sync_readiness_from_grounding(case, sections) -> Dict[str, int]:
-    """
-    Derive readiness checklist items from brief section grounding gaps.
-
-    Completes the three-way feedback loop:
-      Knowledge Graph → Brief Grounding → Readiness Checklist
-
-    Logic:
-    1. For each linked section, derive checklist items from grounding gaps.
-    2. Upsert: create new items if description doesn't already exist.
-    3. Auto-complete items whose gaps have been resolved (e.g., evidence
-       gathered, assumptions validated, tensions resolved).
-    4. Mark auto-completed items with a completion_note explaining why.
-
-    Returns:
-        Dict with 'created' and 'auto_completed' counts.
-    """
-    from apps.cases.models import ReadinessChecklistItem
-
-    created = 0
-    auto_completed = 0
-
-    # Get existing brief-derived checklist items (AI-generated ones linked to inquiries)
-    existing_items = ReadinessChecklistItem.objects.filter(
-        case=case,
-        created_by_ai=True,
-    ).select_related('linked_inquiry')
-
-    # Build lookup: (item_type, linked_inquiry_id) → item
-    existing_lookup = {}
-    for item in existing_items:
-        key = (item.item_type, str(item.linked_inquiry_id) if item.linked_inquiry_id else None)
-        existing_lookup[key] = item
-
-    # Track which items we derive this cycle (for auto-completion detection)
-    derived_keys = set()
-
-    # Calculate next order value
-    max_order = ReadinessChecklistItem.objects.filter(case=case).aggregate(
-        max_order=models.Max('order')
-    )['max_order'] or 0
-
-    for section in sections:
-        # Only derive from linked sections with grounding data
-        if not section.is_linked or not section.grounding_data:
-            continue
-
-        items_data = BriefGroundingEngine.derive_readiness_items(section)
-
-        for item_data in items_data:
-            inquiry_id_str = item_data.get('linked_inquiry_id')
-            key = (item_data['item_type'], inquiry_id_str)
-            derived_keys.add(key)
-
-            # Check if this item already exists
-            existing = existing_lookup.get(key)
-
-            if existing:
-                # Update description if it changed (grounding evolved)
-                if existing.description != item_data['description']:
-                    existing.description = item_data['description']
-                    existing.why_important = item_data.get('why_important', '')
-                    existing.save(update_fields=['description', 'why_important', 'updated_at'])
-            else:
-                # Create new checklist item
-                max_order += 1
-                ReadinessChecklistItem.objects.create(
-                    case=case,
-                    description=item_data['description'],
-                    is_required=item_data.get('is_required', True),
-                    why_important=item_data.get('why_important', ''),
-                    item_type=item_data.get('item_type', 'custom'),
-                    linked_inquiry_id=inquiry_id_str,
-                    order=max_order,
-                    created_by_ai=True,
-                )
-                created += 1
-
-    # Auto-complete items whose gaps no longer exist
-    # If an item was previously derived but is NOT in this cycle's derived set,
-    # its gap has been resolved — auto-complete it.
-    for key, item in existing_lookup.items():
-        if key not in derived_keys and not item.is_complete:
-            item.is_complete = True
-            item.completed_at = timezone.now()
-            item.completion_note = _auto_completion_reason(key[0])
-            item.save(update_fields=[
-                'is_complete', 'completed_at', 'completion_note', 'updated_at'
-            ])
-            auto_completed += 1
-
-    return {'created': created, 'auto_completed': auto_completed}
-
-
-def _auto_completion_reason(item_type: str) -> str:
-    """Human-readable reason for auto-completing a readiness item."""
-    reasons = {
-        'investigation': 'Evidence has been gathered — gap resolved by brief grounding.',
-        'validation': 'Assumption(s) now have supporting evidence.',
-        'analysis': 'Tension(s) have been resolved.',
-    }
-    return reasons.get(item_type, 'Gap resolved — auto-completed by brief evolution.')

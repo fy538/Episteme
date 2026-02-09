@@ -20,7 +20,7 @@ episteme:
       - Case law
       - Attorney opinions
     minimum_credibility: 0.85
-  artifact_template:
+  document_template:
     brief:
       sections:
         - Legal Summary

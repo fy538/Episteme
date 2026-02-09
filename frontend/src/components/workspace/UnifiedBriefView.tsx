@@ -29,17 +29,16 @@ import { WordDiff } from '@/components/editor/WordDiff';
 import { useBriefEditor } from '@/hooks/useBriefEditor';
 import { documentsAPI } from '@/lib/api/documents';
 import { inquiriesAPI } from '@/lib/api/inquiries';
-import { signalsAPI } from '@/lib/api/signals';
 import {
   GROUNDING_SUMMARY,
   getGroundingScoreColor,
   getGroundingScoreStrokeColor,
 } from '@/lib/constants/grounding';
-import type { Case, CaseDocument, Inquiry, GroundingStatus } from '@/lib/types/case';
+import type { Case, WorkingDocument, Inquiry, GroundingStatus } from '@/lib/types/case';
 
 interface UnifiedBriefViewProps {
   caseData: Case;
-  brief: CaseDocument | null;
+  brief: WorkingDocument | null;
   inquiries: Inquiry[];
   onStartInquiry: () => void;
   onOpenInquiry: (inquiryId: string) => void;
@@ -70,19 +69,6 @@ export function UnifiedBriefView({
   const [versionDiffData, setVersionDiffData] = useState<{ oldContent: string; newContent: string } | null>(null);
   const [loadingVersionDiff, setLoadingVersionDiff] = useState(false);
   const [briefToast, setBriefToast] = useState<string | null>(null);
-
-  // ── Mark as Assumption handler ─────────────────────────────────
-  const handleMarkAssumption = useCallback(async (text: string) => {
-    try {
-      await signalsAPI.markAssumption(text, caseData.id);
-      setBriefToast('Assumption marked');
-      setTimeout(() => setBriefToast(null), 3000);
-    } catch (error) {
-      console.error('Failed to mark assumption:', error);
-      setBriefToast('Failed to mark assumption');
-      setTimeout(() => setBriefToast(null), 3000);
-    }
-  }, [caseData.id]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────
   useEffect(() => {
@@ -354,7 +340,6 @@ export function UnifiedBriefView({
             onAcceptSuggestion={editor.acceptSuggestion}
             onRejectSuggestion={editor.rejectSuggestion}
             onCreateInquiry={handleCreateInquiryFromText}
-            onMarkAssumption={handleMarkAssumption}
           />
         </main>
       </div>

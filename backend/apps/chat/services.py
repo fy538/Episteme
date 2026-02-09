@@ -14,8 +14,7 @@ from .models import ChatThread, Message, MessageRole
 from apps.events.services import EventService
 from apps.events.models import EventType, ActorType
 from apps.common.ai_models import get_model
-from apps.signals.prompts import get_assistant_response_prompt
-from .card_builders import CardBuilder
+from apps.chat.prompts import get_assistant_response_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +141,12 @@ class ChatService:
         user_message_id: uuid.UUID
     ) -> Message:
         """
-        Generate assistant response to user message with memory integration.
-        
-        Phase 1: Retrieves relevant signals from memory and includes in context
-        
+        Generate assistant response to user message.
+
         Args:
             thread_id: Thread ID
             user_message_id: User message to respond to
-        
+
         Returns:
             Assistant Message
         """
@@ -167,19 +164,11 @@ class ChatService:
         # Get recent conversation context
         context_messages = ChatService._get_context_messages(thread)
         conversation_context = ChatService._format_conversation_context(context_messages)
-        
-        # NEW: Retrieve relevant signals from memory
-        relevant_signals = ChatService._retrieve_relevant_signals(
-            thread=thread,
-            user_message=user_message.content
-        )
-        
-        # Build prompt with memory context
-        from apps.signals.prompts import get_assistant_response_prompt_with_memory
-        prompt = get_assistant_response_prompt_with_memory(
+
+        # Build prompt
+        prompt = get_assistant_response_prompt(
             user_message=user_message.content,
             conversation_context=conversation_context,
-            signals=relevant_signals
         )
 
         # Get user's preferred model (from preferences or fallback to settings)
@@ -223,7 +212,6 @@ class ChatService:
             metadata={
                 'model': model_key,
                 'stub': False,
-                'signals_retrieved': len(relevant_signals)
             }
         )
 
@@ -235,38 +223,6 @@ class ChatService:
         )
         return list(reversed(recent))
 
-    @staticmethod
-    def _retrieve_relevant_signals(thread, user_message: str):
-        """
-        Retrieve relevant signals from memory for chat context.
-        
-        Uses scope-aware retrieval strategy:
-        - Default: case-level scope (thread + related threads in same case)
-        - Hot + warm tiers (recent + semantically relevant)
-        
-        Args:
-            thread: ChatThread object
-            user_message: User's message for semantic search
-            
-        Returns:
-            List of Signal objects
-        """
-        from apps.signals.memory_retrieval import MemoryRetrievalService, MemoryRetrievalStrategy
-        
-        # Detect appropriate retrieval strategy based on message
-        strategy = MemoryRetrievalService.detect_retrieval_strategy(
-            thread=thread,
-            user_message=user_message
-        )
-        
-        # Retrieve signals
-        signals = MemoryRetrievalService.retrieve_signals(
-            user_message=user_message,
-            strategy=strategy
-        )
-        
-        return signals
-    
     @staticmethod
     def _format_conversation_context(messages: Optional[List[Message]]) -> str:
         if not messages:
@@ -341,61 +297,3 @@ class ChatService:
         
         return message
     
-    @staticmethod
-    def create_signal_extraction_card(
-        thread_id: uuid.UUID,
-        signals: List
-    ) -> Message:
-        """
-        Create a signal extraction card message
-        
-        Args:
-            thread_id: Thread ID
-            signals: List of Signal objects
-            
-        Returns:
-            Created Message with signal card
-        """
-        card_data = CardBuilder.build_signal_extraction_card(signals)
-        
-        fallback_text = f"I detected {len(signals)} signals in our conversation: "
-        fallback_text += f"{sum(1 for s in signals if s.type == 'assumption')} assumptions, "
-        fallback_text += f"{sum(1 for s in signals if s.type == 'question')} questions, "
-        fallback_text += f"{sum(1 for s in signals if s.type == 'evidence')} pieces of evidence."
-        
-        return ChatService.create_rich_message(
-            thread_id=thread_id,
-            content_type='card_signal_extraction',
-            structured_content=card_data,
-            fallback_text=fallback_text,
-            metadata={'signal_count': len(signals)}
-        )
-    
-    @staticmethod
-    def create_assumption_validator_card(
-        thread_id: uuid.UUID,
-        assumptions: List,
-        research_results: Optional[dict] = None
-    ) -> Message:
-        """
-        Create an assumption validator card message
-        
-        Args:
-            thread_id: Thread ID
-            assumptions: List of assumption Signal objects
-            research_results: Optional research results
-            
-        Returns:
-            Created Message with assumption validator card
-        """
-        card_data = CardBuilder.build_assumption_validator_card(assumptions, research_results)
-        
-        fallback_text = f"Assumption validation results for {len(assumptions)} assumptions."
-        
-        return ChatService.create_rich_message(
-            thread_id=thread_id,
-            content_type='card_assumption_validator',
-            structured_content=card_data,
-            fallback_text=fallback_text,
-            metadata={'assumption_count': len(assumptions)}
-        )

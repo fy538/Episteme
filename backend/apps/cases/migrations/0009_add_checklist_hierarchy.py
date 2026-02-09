@@ -12,7 +12,6 @@ class Migration(migrations.Migration):
             "0008_rename_cases_readi_case_id_6c9c8a_idx_cases_readi_case_id_007e00_idx_and_more",
         ),
         ("inquiries", "0002_inquiry_blocked_by"),
-        ("signals", "0002_add_composite_indexes"),
     ]
 
     operations = [

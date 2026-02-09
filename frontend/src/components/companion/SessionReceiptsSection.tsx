@@ -3,9 +3,7 @@
  *
  * Shows a chronological list of what was achieved during the session:
  * - Case created
- * - Signals extracted
  * - Inquiry resolved
- * - Evidence added
  * - Research completed
  */
 
@@ -23,9 +21,7 @@ interface SessionReceiptsSectionProps {
 
 const RECEIPT_ICONS: Record<SessionReceiptType, string> = {
   case_created: '+',
-  signals_extracted: '#',
   inquiry_resolved: '!',
-  evidence_added: '*',
   research_completed: '?',
 };
 
@@ -46,7 +42,7 @@ function formatTimestamp(timestamp: string): string {
 
 // Get theme colors for receipt type
 function getReceiptTheme(type: SessionReceiptType) {
-  return theme.receipts[type] || theme.receipts.signals_extracted;
+  return theme.receipts[type] || theme.receipts.case_created;
 }
 
 export function SessionReceiptsSection({

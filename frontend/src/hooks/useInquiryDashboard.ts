@@ -1,5 +1,5 @@
 /**
- * React Query hooks for inquiry dashboard and evidence
+ * React Query hooks for inquiry dashboard
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inquiriesAPI } from '@/lib/api/inquiries';
@@ -12,16 +12,6 @@ export interface DashboardInquiry {
   status: string;
   created_at: string;
   updated_at: string;
-}
-
-/** Evidence item in summary */
-export interface EvidenceItem {
-  id: string;
-  text: string;
-  description?: string;
-  source?: string;
-  credibility?: number;
-  direction: 'supporting' | 'contradicting' | 'neutral';
 }
 
 export interface InquiryDashboardData {
@@ -46,38 +36,12 @@ export interface InquiryDashboardData {
   }>;
 }
 
-export interface EvidenceSummaryData {
-  supporting: EvidenceItem[];
-  contradicting: EvidenceItem[];
-  neutral: EvidenceItem[];
-  summary: {
-    total_evidence: number;
-    supporting_count: number;
-    contradicting_count: number;
-    neutral_count: number;
-    avg_credibility: number;
-    aggregate_confidence: number;
-    strength: 'strong' | 'moderate' | 'weak';
-    ready_to_resolve: boolean;
-    recommended_conclusion: string | null;
-  };
-}
-
 export function useInquiryDashboard(caseId: string | undefined) {
   return useQuery<InquiryDashboardData>({
     queryKey: ['inquiries', 'dashboard', caseId],
     queryFn: () => inquiriesAPI.getDashboard(caseId!),
     enabled: !!caseId,
     refetchInterval: 30000, // Refetch every 30s to show live updates
-  });
-}
-
-export function useEvidenceSummary(inquiryId: string | undefined) {
-  return useQuery<EvidenceSummaryData>({
-    queryKey: ['inquiries', inquiryId, 'evidence-summary'],
-    queryFn: () => inquiriesAPI.getEvidenceSummary(inquiryId!),
-    enabled: !!inquiryId,
-    refetchInterval: 15000, // Refetch every 15s as evidence is added
   });
 }
 

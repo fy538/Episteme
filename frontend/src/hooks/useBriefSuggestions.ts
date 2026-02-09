@@ -61,7 +61,6 @@ export function useBriefSuggestions({
             current_content: s.current_content ?? undefined,
             suggested_content: s.suggested_content,
             reason: s.reason,
-            linked_signal_id: s.linked_signal_id ?? undefined,
             confidence: s.confidence,
             status: 'pending' as const,
           })

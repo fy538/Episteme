@@ -74,22 +74,17 @@ class ProjectService:
             project_id: Project to update
         """
         project = Project.objects.get(id=project_id)
-        
-        # Count signals across all cases in project
-        from apps.signals.models import Signal
-        total_signals = Signal.objects.filter(case__project=project).count()
-        
+
         # Count cases
         total_cases = project.cases.count()
-        
+
         # Count documents
         total_documents = project.documents.count()
-        
-        project.total_signals = total_signals
+
         project.total_cases = total_cases
         project.total_documents = total_documents
         project.save(update_fields=[
-            'total_signals', 'total_cases', 'total_documents', 'updated_at',
+            'total_cases', 'total_documents', 'updated_at',
         ])
 
 
@@ -130,6 +125,7 @@ class DocumentService:
             user=user,
             project=project,
             case_id=case_id,
+            scope='case' if case_id else 'project',
             title=title,
             source_type=source_type,
             content_text=content_text,
@@ -153,7 +149,7 @@ class DocumentService:
         return document
     
     @staticmethod
-    def process_document(document: Document) -> Document:
+    def process_document(document: Document, on_progress=None) -> Document:
         """
         Process document with research-backed pipeline (2024 RAG standards).
 
@@ -169,19 +165,19 @@ class DocumentService:
 
         Args:
             document: Document to process
+            on_progress: Optional callback(stage, label, stage_index, counts)
+                for real-time progress reporting.
 
         Returns:
             Updated document
         """
         import logging as _logging
         from django.utils import timezone
-        from sentence_transformers import SentenceTransformer
-        from asgiref.sync import async_to_sync
-
         from apps.projects.document_processor import DocumentProcessor
         from apps.projects.recursive_chunker import RecursiveTokenChunker
-        from apps.projects.models import DocumentChunk, Evidence
+        from apps.projects.models import DocumentChunk
         from apps.common.embedding_service import get_embedding_service
+        from apps.common.vector_utils import generate_embeddings_batch
         from apps.common.token_utils import count_tokens
 
         _logger = _logging.getLogger(__name__)
@@ -190,6 +186,9 @@ class DocumentService:
             # 1. Extract text from file (I/O — outside transaction)
             document.processing_status = 'chunking'
             document.save(update_fields=['processing_status', 'updated_at'])
+
+            if on_progress:
+                on_progress('chunking', 'Chunking document...', 1)
 
             processor = DocumentProcessor()
 
@@ -215,99 +214,83 @@ class DocumentService:
                 metadata={'document_id': str(document.id)}
             )
 
-            # 3. Generate embeddings (ML inference — outside transaction)
-            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-            embedding_service = get_embedding_service('postgresql')
+            if on_progress:
+                on_progress('chunking', f'Created {len(chunks)} chunks', 1, {'chunks': len(chunks)})
 
-            # Pre-compute embeddings and token counts before DB writes
-            chunk_records = []
-            for i, chunk_data in enumerate(chunks):
-                embedding_vector = embedding_model.encode(
-                    chunk_data['text'],
-                    convert_to_numpy=True,
-                ).tolist()
-                token_count = count_tokens(chunk_data['text'])
-                chunk_records.append({
-                    'chunk_data': chunk_data,
-                    'embedding': embedding_vector,
-                    'token_count': token_count,
-                })
+            # 3. Generate embeddings (ML inference — outside transaction)
+            if on_progress:
+                on_progress('embedding', 'Generating embeddings...', 2, {'chunks': len(chunks)})
+
+            embedding_service = get_embedding_service()
+
+            # Batch-encode all chunks at once (single GPU/CPU pass)
+            import hashlib
+
+            texts = [cd['text'] for cd in chunks]
+
+            # Content-addressable dedup: compute hashes, skip existing
+            hashes = [hashlib.sha256(t.encode()).hexdigest() for t in texts]
+            existing_hashes = set(
+                DocumentChunk.objects.filter(
+                    document__project_id=document.project_id,
+                    content_hash__in=hashes,
+                ).values_list('content_hash', flat=True)
+            )
+
+            # Filter to only new chunks
+            new_indices = [
+                i for i, h in enumerate(hashes)
+                if h not in existing_hashes
+            ]
+            if len(new_indices) < len(chunks):
+                skipped = len(chunks) - len(new_indices)
+                _logger.info(
+                    'Dedup: skipping %d/%d duplicate chunks for doc %s',
+                    skipped, len(chunks), document.id,
+                )
+
+            new_texts = [texts[i] for i in new_indices]
+            new_chunks = [chunks[i] for i in new_indices]
+            new_hashes = [hashes[i] for i in new_indices]
+
+            embeddings = generate_embeddings_batch(new_texts) if new_texts else []
+            token_counts = [count_tokens(t) for t in new_texts]
+
+            chunk_records = [
+                {
+                    'chunk_data': cd,
+                    'embedding': emb,
+                    'token_count': tc,
+                    'content_hash': h,
+                }
+                for cd, emb, tc, h in zip(new_chunks, embeddings, token_counts, new_hashes)
+            ]
 
             # 4. Bulk-write chunks inside a narrow transaction
-            created_chunks = []
             with transaction.atomic():
-                for rec in chunk_records:
-                    cd = rec['chunk_data']
-                    chunk = DocumentChunk.objects.create(
+                chunk_objects = [
+                    DocumentChunk(
                         document=document,
-                        chunk_index=cd['chunk_index'],
-                        chunk_text=cd['text'],
+                        chunk_index=rec['chunk_data']['chunk_index'],
+                        chunk_text=rec['chunk_data']['text'],
                         token_count=rec['token_count'],
-                        span=cd.get('span', {}),
+                        span=rec['chunk_data'].get('span', {}),
                         embedding=rec['embedding'],
-                        chunking_strategy='recursive_token',
+                        content_hash=rec['content_hash'],
                     )
-                    created_chunks.append(chunk)
+                    for rec in chunk_records
+                ]
+                created_chunks = DocumentChunk.objects.bulk_create(chunk_objects)
 
-                # Link chunks (prev/next) for context expansion
-                for i, chunk in enumerate(created_chunks):
-                    if i > 0:
-                        chunk.prev_chunk_id = created_chunks[i - 1].id
-                    if i < len(created_chunks) - 1:
-                        chunk.next_chunk_id = created_chunks[i + 1].id
-                    chunk.save(update_fields=['prev_chunk_id', 'next_chunk_id', 'updated_at'])
+            # 5. Embeddings are persisted directly via bulk_create above.
+            # No external sync needed — pgvector VectorField stores inline.
 
-            # 5. Store in embedding service (external service — outside transaction)
-            for chunk in created_chunks:
-                embedding_service.store_chunk_embedding(
-                    chunk_id=chunk.id,
-                    embedding=chunk.embedding,
-                    metadata={
-                        'document_id': str(document.id),
-                        'chunk_index': chunk.chunk_index,
-                        'case_id': str(document.case_id) if document.case_id else None,
-                        'project_id': str(document.project_id),
-                    }
-                )
-
-            # 6. Extract Evidence from chunks (LLM calls — outside transaction)
-            from apps.projects.evidence_extractor import get_evidence_extractor
-
-            evidence_extractor = get_evidence_extractor()
-            total_evidence = evidence_extractor.extract_from_document(document)
-
-            # 7. Auto-reasoning (LLM calls — outside transaction)
-            try:
-                from apps.reasoning.auto_reasoning import get_auto_reasoning_pipeline
-
-                pipeline = get_auto_reasoning_pipeline()
-                evidence_items = Evidence.objects.filter(document=document)
-
-                for evidence in evidence_items:
-                    results = async_to_sync(pipeline.process_new_evidence)(evidence)
-
-                    if results['contradictions_detected']:
-                        _logger.info(
-                            "auto_reasoning_contradictions",
-                            extra={
-                                'document_id': str(document.id),
-                                'evidence_id': str(evidence.id),
-                                'count': len(results['contradictions_detected']),
-                            }
-                        )
-            except Exception:
-                _logger.exception(
-                    "auto_reasoning_failed",
-                    extra={'document_id': str(document.id)}
-                )
-
-            # 8. Update document status (narrow write)
+            # 6. Update document status (narrow write)
             document.chunk_count = len(created_chunks)
-            document.evidence_count = total_evidence
             document.indexed_at = timezone.now()
             document.processing_status = 'indexed'
             document.save(update_fields=[
-                'chunk_count', 'evidence_count', 'indexed_at',
+                'chunk_count', 'indexed_at',
                 'processing_status', 'updated_at',
             ])
 

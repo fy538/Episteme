@@ -13,7 +13,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 
 from apps.common.models import Organization
-from apps.skills.models import Skill, SkillVersion
+from apps.skills.models import Skill
 from apps.skills.parser import parse_skill_md, validate_skill_md
 
 
@@ -105,21 +105,14 @@ class Command(BaseCommand):
                     "domain": domain,
                     "applies_to_agents": applies_to,
                     "status": "active",
-                    "scope": "public",
                     "owner": user,
                     "created_by": user,
                     "episteme_config": episteme,
+                    "skill_md_content": content,
                 },
             )
 
             if created:
-                SkillVersion.objects.create(
-                    skill=skill,
-                    version=1,
-                    skill_md_content=content,
-                    created_by=user,
-                    changelog="Seeded from default template",
-                )
                 self.stdout.write(self.style.SUCCESS(f"  Created: {name}"))
                 created_count += 1
             else:

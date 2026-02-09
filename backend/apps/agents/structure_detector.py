@@ -14,7 +14,6 @@ from django.utils import timezone
 from datetime import timedelta
 
 from apps.chat.models import ChatThread
-from apps.signals.models import Signal
 from apps.common.llm_providers import get_llm_provider
 from apps.events.services import EventService
 from apps.events.models import EventType, ActorType
@@ -80,7 +79,7 @@ class StructureReadinessDetector:
     @staticmethod
     def check_fast_thresholds(
         thread: ChatThread,
-        recent_signals: List[Signal],
+        recent_signals: list,
         sensitivity: int = 3
     ) -> bool:
         """
@@ -119,7 +118,7 @@ class StructureReadinessDetector:
     @staticmethod
     async def analyze_structure_readiness(
         thread: ChatThread,
-        recent_signals: List[Signal],
+        recent_signals: list,
         sensitivity: int = 3,
         context_window: int = 10
     ) -> Dict:

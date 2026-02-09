@@ -18,13 +18,11 @@ urlpatterns = [
     path('api/events/', include('apps.events.urls')),
     path('api/chat/', include('apps.chat.urls')),
     path('api/cases/', include('apps.cases.urls')),
-    path('api/signals/', include('apps.signals.urls')),
     path('api/', include('apps.inquiries.urls')),  # Phase 2: inquiries
     path('api/', include('apps.projects.urls')),  # Phase 2: projects + documents + evidence
-    path('api/artifacts/', include('apps.artifacts.urls')),  # Phase 2.4: artifacts
+    path('api/working-documents/', include('apps.cases.document_urls')),  # Working documents
     path('api/', include('apps.skills.urls')),  # Skills system
-    path('api/companion/', include('apps.companion.urls')),  # Reasoning companion
-    path('api/', include('apps.reasoning.urls')),  # Knowledge graph and auto-reasoning
+    path('api/v2/', include('apps.graph.urls')),  # V2: Knowledge graph
 ]
 
 # Debug toolbar (only in development)

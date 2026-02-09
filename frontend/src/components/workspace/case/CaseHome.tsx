@@ -4,7 +4,7 @@
  * Three vertically stacked zones:
  *   1. StageHeader: title, position statement, stage progression dots
  *   2. InvestigationTimeline: windowed inquiry list with fade edges
- *   3. ContextPanel: stage-adaptive sections (signals, assumptions, criteria)
+ *   3. ContextPanel: stage-adaptive sections (assumptions, criteria)
  *
  * Fetches data via useCaseHome (aggregated getCaseHome endpoint).
  * Interactive: assumptions can be status-toggled, criteria toggled, items sent to chat.
@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { plansAPI } from '@/lib/api/plans';
 import { useCaseHome } from '@/hooks/useCaseHome';
 import { useOptimisticPlanUpdate } from '@/hooks/useOptimisticPlanUpdate';
-import type { CaseStage, CaseHomeInquiry, CaseHomeSignal, PlanAssumption, DecisionCriterion } from '@/lib/types/plan';
+import type { CaseStage, CaseHomeInquiry, PlanAssumption, DecisionCriterion } from '@/lib/types/plan';
 import { PremortemModal } from '@/components/cases/PremortemModal';
 import { WhatChangedMindCard } from '@/components/cases/WhatChangedMindCard';
 import { JudgmentSummaryCard } from '@/components/cases/JudgmentSummaryCard';
@@ -27,7 +27,7 @@ import { CheckCircleSmall, CircleSmall, SpinnerSmall, ChatBubbleIcon } from '@/c
 
 export interface ChatAboutPayload {
   text: string;
-  source_type: 'assumption' | 'criterion' | 'signal' | 'inquiry';
+  source_type: 'assumption' | 'criterion' | 'inquiry';
   source_id: string;
 }
 
@@ -150,7 +150,7 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
   // Empty state when no plan exists — doubles as onboarding for new cases
   if (!plan) {
     const hasInquiries = data.inquiries.length > 0;
-    const isFirstVisit = !hasInquiries && !(data.signals?.total_count);
+    const isFirstVisit = !hasInquiries;
 
     return (
       <div className={cn('max-w-3xl mx-auto py-8 px-6 space-y-8', className)}>
@@ -169,7 +169,7 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { step: '1', title: 'Chat about your decision', desc: 'Use the chat panel to explore your thinking. Episteme will extract assumptions and signals.' },
+                { step: '1', title: 'Chat about your decision', desc: 'Use the chat panel to explore your thinking. Episteme will help surface assumptions and questions.' },
                 { step: '2', title: 'Generate a plan', desc: 'Once you have context, generate an investigation plan to structure your inquiry.' },
                 { step: '3', title: 'Test & resolve', desc: 'Open inquiries, gather evidence, and track your assumptions until you\'re ready to decide.' },
               ].map(item => (
@@ -283,7 +283,6 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
         stageRationale={content?.stage_rationale ?? ''}
         assumptions={content?.assumptions ?? []}
         criteria={content?.decision_criteria ?? []}
-        signals={data.signals?.recent ?? []}
         assumptionSummary={assumptionSummary}
         criteriaProgress={criteriaProgress}
         onUpdateAssumption={handleUpdateAssumption}
@@ -530,7 +529,6 @@ function ContextPanel({
   stageRationale,
   assumptions,
   criteria,
-  signals,
   assumptionSummary,
   criteriaProgress,
   onUpdateAssumption,
@@ -545,7 +543,6 @@ function ContextPanel({
   stageRationale: string;
   assumptions: PlanAssumption[];
   criteria: DecisionCriterion[];
-  signals: CaseHomeSignal[];
   assumptionSummary: { untested: number; confirmed: number; challenged: number; refuted: number; total: number };
   criteriaProgress: { met: number; total: number };
   onUpdateAssumption?: (assumptionId: string, newStatus: string) => void;
@@ -560,7 +557,7 @@ function ContextPanel({
     <section className="space-y-6">
       {/* Stage-adaptive content */}
       {stage === 'exploring' && (
-        <ExploringContext signals={signals} onChatAbout={onChatAbout} />
+        <ExploringContext onChatAbout={onChatAbout} />
       )}
 
       {stage === 'investigating' && (
@@ -591,61 +588,17 @@ function ContextPanel({
 }
 
 function ExploringContext({
-  signals,
   onChatAbout,
 }: {
-  signals: CaseHomeSignal[];
   onChatAbout?: (payload: ChatAboutPayload) => void;
 }) {
   return (
     <>
       <div>
-        <SectionTitle>Emerging Signals</SectionTitle>
-        {signals.length === 0 ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Chat with your case to surface signals and insights.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {signals.map(signal => (
-              <div
-                key={signal.id}
-                className="group flex items-start gap-2 p-3 rounded-lg border border-neutral-200/80 dark:border-neutral-800/80 bg-white dark:bg-neutral-900/50"
-              >
-                <SignalTypeIcon type={signal.type} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-neutral-700 dark:text-neutral-300">
-                    {signal.text}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-neutral-400 dark:text-neutral-500 uppercase">
-                      {signal.type}
-                    </span>
-                    <span className={cn(
-                      'text-[10px] px-1.5 py-0.5 rounded-full',
-                      signal.temperature === 'hot'
-                        ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                        : signal.temperature === 'warm'
-                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'
-                    )}>
-                      {signal.temperature}
-                    </span>
-                  </div>
-                </div>
-                {onChatAbout && (
-                  <button
-                    onClick={() => onChatAbout({ text: `Let's explore this signal further: "${signal.text}"`, source_type: 'signal', source_id: signal.id })}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 shrink-0"
-                    title="Discuss in chat"
-                  >
-                    <ChatBubbleIcon className="w-4 h-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        <SectionTitle>Exploring</SectionTitle>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          Chat with your case to explore your thinking and surface assumptions.
+        </p>
       </div>
     </>
   );
@@ -1012,11 +965,4 @@ function MetricCard({ label, value, color }: { label: string; value: number; col
   );
 }
 
-function SignalTypeIcon({ type }: { type: string }) {
-  return (
-    <span className="w-5 h-5 rounded-full bg-accent-100 dark:bg-accent-900/30 flex items-center justify-center text-[10px] text-accent-600 dark:text-accent-400 shrink-0 mt-0.5">
-      {type === 'tension' ? '⚡' : type === 'blind_spot' ? '🔍' : type === 'evidence' ? '📎' : '💡'}
-    </span>
-  );
-}
 

@@ -20,19 +20,6 @@ export interface BaseCard {
   metadata: Record<string, any>;
 }
 
-export interface SignalExtractionCard extends BaseCard {
-  type: 'card_signal_extraction';
-  signals: Array<{
-    type: 'assumption' | 'question' | 'evidence' | 'claim';
-    items: Array<{
-      id: string;
-      text: string;
-      confidence: number;
-      status: string;
-    }>;
-  }>;
-}
-
 export interface AssumptionValidatorCard extends BaseCard {
   type: 'card_assumption_validator';
   assumptions: Array<{
@@ -85,25 +72,9 @@ export interface StructurePreviewCard extends BaseCard {
   }>;
 }
 
-export interface EvidenceMapCard extends BaseCard {
-  type: 'card_evidence_map';
-  nodes: Array<{
-    id: string;
-    type: 'claim' | 'evidence';
-    label: string;
-  }>;
-  edges: Array<{
-    from: string;
-    to: string;
-    type: 'supports' | 'contradicts';
-  }>;
-}
-
-export type RichCard = 
-  | SignalExtractionCard 
-  | AssumptionValidatorCard 
+export type RichCard =
+  | AssumptionValidatorCard
   | ActionPromptCard
   | ResearchStatusCard
   | CaseSuggestionCard
-  | StructurePreviewCard
-  | EvidenceMapCard;
+  | StructurePreviewCard;

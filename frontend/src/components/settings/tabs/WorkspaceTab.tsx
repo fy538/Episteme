@@ -1,5 +1,5 @@
 /**
- * Workspace Tab — Case view defaults and evidence preferences
+ * Workspace Tab — Case view defaults and auto-save preferences
  *
  * Uses SettingsCard grid for default view selection,
  * SettingsRow for inline controls.
@@ -9,7 +9,6 @@
 
 import * as React from 'react';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { SettingsGroup, SettingsRow, SettingsCard, SettingsCardGrid } from '../SettingsSection';
 import type { UserPreferences } from '@/lib/api/preferences';
 
@@ -91,25 +90,6 @@ export function WorkspaceTab({ preferences, onChange }: WorkspaceTabProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* Evidence Defaults */}
-      <SettingsGroup title="Evidence" description="Configure evidence quality thresholds" divider>
-        <SettingsRow
-          label="Credibility threshold"
-          description="Minimum star rating for resolution suggestions"
-        >
-          <Select
-            value={preferences.evidence_min_credibility || 3}
-            onChange={(e) => onChange({ evidence_min_credibility: parseInt(e.target.value) })}
-            className="w-40"
-          >
-            {[1, 2, 3, 4, 5].map((stars) => (
-              <option key={stars} value={stars}>
-                {'★'.repeat(stars)}{'☆'.repeat(5 - stars)} {stars} star{stars > 1 ? 's' : ''}
-              </option>
-            ))}
-          </Select>
-        </SettingsRow>
-      </SettingsGroup>
     </div>
   );
 }

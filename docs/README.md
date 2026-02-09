@@ -75,10 +75,12 @@ Business and product strategy.
 
 | Document | What it covers |
 |----------|---------------|
+| [Product Funnel](./strategy/PRODUCT_FUNNEL.md) | Three-layer product vision: Dump & Discover → Investigation → Decision Agent. The "journey is the product" framing. |
 | [User Personas](./strategy/USER_PERSONAS.md) | Three primary personas: consultant, tech lead, solo founder — jobs, pains, feature mapping |
-| [Competitive Positioning & Moat](./strategy/COMPETITIVE_POSITIONING.md) | Landscape analysis, moat layers, replication estimates |
+| [Competitive Positioning & Moat](./strategy/COMPETITIVE_POSITIONING.md) | Landscape analysis, moat layers, replication estimates, honest comparison vs. Claude/ChatGPT projects |
 | [Workflow & Value Map](./strategy/WORKFLOW_AND_VALUE_MAP.md) | Complete 4-stage journey, feature-to-value mapping, metacognitive stack |
-| [Category & Positioning](./strategy/CATEGORY_AND_POSITIONING.md) | Category options, positioning statement, messaging hierarchy, language guide |
+| [Category & Positioning](./strategy/CATEGORY_AND_POSITIONING.md) | Founder-first positioning, category options, messaging hierarchy, language guide |
+| [Context Modes & Output Skills](./strategy/CONTEXT_MODES_AND_OUTPUT_SKILLS.md) | Chat mode design across contexts, output skill pattern, mode × skill × scope interaction |
 | [Solo Founder AI Strategy](./strategy/SOLO_FOUNDER_AI_STRATEGY.md) | Cost-optimized model selection for solo operation |
 
 ## Research

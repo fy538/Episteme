@@ -26,7 +26,8 @@ class ResearchAgent:
         topic: str,
         case_context: str = "",
         inquiry_context: str = "",
-        sources: list = None
+        sources: list = None,
+        graph_context: str = "",
     ) -> dict:
         """
         Generate comprehensive research on a topic.
@@ -49,7 +50,7 @@ class ResearchAgent:
                 }
             }
         """
-        prompt = self._build_research_prompt(topic, case_context, inquiry_context, sources)
+        prompt = self._build_research_prompt(topic, case_context, inquiry_context, sources, graph_context)
         
         try:
             # Call LLM with high token limit for comprehensive research
@@ -98,23 +99,31 @@ Be thorough, rigorous, and balanced. Don't make up facts - focus on logical anal
         topic: str,
         case_context: str,
         inquiry_context: str,
-        sources: list
+        sources: list,
+        graph_context: str = "",
     ) -> str:
         """Build complete research prompt with context"""
-        
+
         context_section = ""
         if case_context:
             context_section += f"Case context: {case_context}\n\n"
         if inquiry_context:
             context_section += f"Inquiry context: {inquiry_context}\n\n"
-        
+        if graph_context:
+            context_section += (
+                "The case's current knowledge graph contains these claims, "
+                "evidence, assumptions, and tensions. Build on this existing "
+                "knowledge and avoid redundant research:\n\n"
+                f"{graph_context}\n\n"
+            )
+
         sources_section = ""
         if sources:
             sources_section = "Existing sources to consider:\n"
             for source in sources:
                 sources_section += f"- {source['title']} ({source.get('type', 'document')})\n"
             sources_section += "\n"
-        
+
         return f"""{context_section}{sources_section}Research topic: {topic}
 
 Provide comprehensive research including:

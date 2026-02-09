@@ -11,7 +11,7 @@
  * - Input pinned to bottom, matching content width
  *
  * Features: unified streaming, mode-aware header, inline action cards for case creation.
- * Companion content (thinking, action hints, signals) is rendered separately
+ * Companion content (thinking, action hints) is rendered separately
  * in CompanionPanel.
  *
  * Used by:
@@ -27,7 +27,6 @@ import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { ChatModeHeader } from '@/components/chat/ChatModeHeader';
 import { documentsAPI } from '@/lib/api/documents';
-import { evidenceAPI } from '@/lib/api/evidence';
 import { chatAPI } from '@/lib/api/chat';
 import { useState } from 'react';
 import { useChatPanelState } from '@/hooks/useChatPanelState';
@@ -114,28 +113,6 @@ export function ChatPanel({
     }
   }
 
-  async function handleCreateEvidence(content: string) {
-    // Create evidence as a user observation linked to the active inquiry
-    const inquiryId = mode?.mode === 'inquiry_focus' ? mode.inquiryId : undefined;
-    if (!inquiryId) {
-      setBriefToast('Focus on an inquiry to save evidence');
-      setTimeout(() => setBriefToast(null), 3000);
-      return;
-    }
-    try {
-      await evidenceAPI.createForInquiry({
-        inquiry_id: inquiryId,
-        evidence_text: content,
-        direction: 'neutral',
-      });
-      setBriefToast('Evidence saved to inquiry');
-      setTimeout(() => setBriefToast(null), 3000);
-    } catch (error) {
-      console.error('Failed to create evidence:', error);
-      setBriefToast('Failed to save evidence');
-      setTimeout(() => setBriefToast(null), 3000);
-    }
-  }
 
   // --- Inline card action handlers ---
 
@@ -280,7 +257,7 @@ export function ChatPanel({
               isStreaming={state.isStreaming}
               ttft={state.ttft}
               onAddToBrief={briefId ? handleAddToBrief : undefined}
-              onCreateEvidence={handleCreateEvidence}
+
               inlineCards={state.inlineCards}
               inlineCardActions={inlineCardActions}
             />
@@ -379,7 +356,6 @@ export function ChatPanel({
             isStreaming={state.isStreaming}
             ttft={state.ttft}
             onAddToBrief={briefId ? handleAddToBrief : undefined}
-            onCreateEvidence={handleCreateEvidence}
             inlineCards={state.inlineCards}
             inlineCardActions={inlineCardActions}
             variant="full"

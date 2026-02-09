@@ -2,12 +2,12 @@
 Serializers for case documents and citations.
 """
 from rest_framework import serializers
-from apps.cases.models import CaseDocument, DocumentCitation
+from apps.cases.models import WorkingDocument, DocumentCitation
 
 
-class CaseDocumentSerializer(serializers.ModelSerializer):
+class WorkingDocumentSerializer(serializers.ModelSerializer):
     """
-    Serializer for CaseDocument model.
+    Serializer for WorkingDocument model.
     
     Includes citation counts, edit permission checks, and assumption highlighting.
     """
@@ -18,7 +18,7 @@ class CaseDocumentSerializer(serializers.ModelSerializer):
     highlighted_assumptions = serializers.SerializerMethodField()
     
     class Meta:
-        model = CaseDocument
+        model = WorkingDocument
         fields = [
             'id',
             'case',
@@ -79,51 +79,49 @@ class CaseDocumentSerializer(serializers.ModelSerializer):
     def get_highlighted_assumptions(self, obj):
         """
         Extract and enrich assumptions from ai_structure for highlighting.
-        
+
         Returns assumptions with context about related inquiries and signals.
         """
         from apps.inquiries.models import Inquiry
-        from apps.signals.models import Signal
-        
+
         if not obj.ai_structure or 'assumptions' not in obj.ai_structure:
             return []
-        
+
         assumptions = obj.ai_structure.get('assumptions', [])
+        if not assumptions:
+            return []
+
+        # Batch-load all case inquiries once instead of per-assumption queries
+        case_inquiries = list(Inquiry.objects.filter(case=obj.case).only(
+            'id', 'title', 'status'
+        ))
+
         enriched = []
-        
         for assumption_text in assumptions:
-            # Check if there's a related inquiry
-            related_inquiry = Inquiry.objects.filter(
-                case=obj.case,
-                title__icontains=assumption_text[:40]  # Match on first 40 chars
-            ).first()
-            
-            # Count related signals
-            related_signals_count = Signal.objects.filter(
-                case=obj.case,
-                text__icontains=assumption_text[:30]  # Match on first 30 chars
-            ).count()
-            
+            prefix = assumption_text[:40].lower()
+            related_inquiry = next(
+                (inq for inq in case_inquiries if prefix in inq.title.lower()),
+                None,
+            )
             enriched.append({
                 'text': assumption_text,
                 'has_inquiry': related_inquiry is not None,
                 'inquiry_id': str(related_inquiry.id) if related_inquiry else None,
                 'inquiry_title': related_inquiry.title if related_inquiry else None,
                 'inquiry_status': related_inquiry.status if related_inquiry else None,
-                'related_signals_count': related_signals_count,
                 'validated': related_inquiry.status == 'RESOLVED' if related_inquiry else False
             })
-        
+
         return enriched
 
 
-class CaseDocumentListSerializer(serializers.ModelSerializer):
+class WorkingDocumentListSerializer(serializers.ModelSerializer):
     """Lighter serializer for listing documents"""
     
     inquiry_title = serializers.CharField(source='inquiry.title', read_only=True, allow_null=True)
     
     class Meta:
-        model = CaseDocument
+        model = WorkingDocument
         fields = [
             'id',
             'title',
@@ -137,11 +135,11 @@ class CaseDocumentListSerializer(serializers.ModelSerializer):
         ]
 
 
-class CaseDocumentCreateSerializer(serializers.ModelSerializer):
+class WorkingDocumentCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating documents"""
     
     class Meta:
-        model = CaseDocument
+        model = WorkingDocument
         fields = [
             'case',
             'inquiry',

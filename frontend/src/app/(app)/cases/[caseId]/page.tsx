@@ -1,8 +1,11 @@
 /**
- * Case workspace page — three-column layout
+ * Case workspace page — two-column layout
  *
- * Layout (with AppShell providing IconRail + SidebarPanel):
- *   [CaseStructureNav ~200px] [Main Content flex-1] [Chat + Companion ~380px]
+ * Layout (with AppShell providing SidebarPanel with tabs):
+ *   [Main Content flex-1] [Chat + Companion ~380px]
+ *
+ * The case structure nav (plan, inquiries, assumptions) is now rendered
+ * inside the SidebarPanel via CaseStructurePanelContent (drill-down pattern).
  *
  * The main content area defaults to CaseHome and switches between:
  *   - CaseHome (plan-driven dashboard)
@@ -12,15 +15,14 @@
  *   - ReadinessChecklist
  *
  * Chat is always visible in the right column.
- * State management extracted to useCaseWorkspace hook.
+ * State management shared via CaseWorkspaceProvider context.
  */
 
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { CaseStructureNav } from '@/components/workspace/CaseStructureNav';
 import { CaseHome } from '@/components/workspace/case/CaseHome';
 import { UnifiedBriefView } from '@/components/workspace/UnifiedBriefView';
 import { InquiryWorkspaceView } from '@/components/workspace/InquiryWorkspaceView';
@@ -29,17 +31,17 @@ import { ChatPanel } from '@/components/workspace/ChatPanel';
 import { CompanionPanel } from '@/components/companion';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { ExportDialog } from '@/components/workspace/ExportDialog';
-import { EvidenceIngestModal } from '@/components/evidence/EvidenceIngestModal';
 import { CommandPalette, useCommandPalette, type Command } from '@/components/ui/CommandPalette';
 import { DiffViewer } from '@/components/ui/DiffViewer';
 import { Button } from '@/components/ui/button';
 import { ReadinessChecklist } from '@/components/readiness';
+import { DocumentListView } from '@/components/documents/DocumentListView';
 import { useQueryClient } from '@tanstack/react-query';
 import { documentsAPI } from '@/lib/api/documents';
 import { plansAPI } from '@/lib/api/plans';
-import { artifactsAPI } from '@/lib/api/artifacts';
 import { casesAPI } from '@/lib/api/cases';
-import { useCaseWorkspace } from '@/hooks/useCaseWorkspace';
+import { useRequiredCaseWorkspace } from '@/components/workspace/CaseWorkspaceProvider';
+import { useNavigation } from '@/components/navigation/NavigationProvider';
 import { Skeleton, WorkspaceContentSkeleton } from '@/components/ui/skeleton';
 import { Tooltip } from '@/components/ui/tooltip';
 import { KeyboardShortcut, useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
@@ -55,13 +57,23 @@ export default function CaseWorkspacePage({
 }: {
   params: { caseId: string };
 }) {
-  const ws = useCaseWorkspace({ caseId: params.caseId });
+  const ws = useRequiredCaseWorkspace();
+  const nav = useNavigation();
   const queryClient = useQueryClient();
   const { isOpen: commandPaletteOpen, setIsOpen: setCommandPaletteOpen } = useCommandPalette();
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
   const [chatSource, setChatSource] = useState<{ source_type: string; source_id: string } | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
-  const [showEvidenceIngest, setShowEvidenceIngest] = useState(false);
+  const researchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up research timer on unmount
+  useEffect(() => {
+    return () => {
+      if (researchTimerRef.current) {
+        clearTimeout(researchTimerRef.current);
+      }
+    };
+  }, []);
 
   // Merge title update handler into stream callbacks (memoized to avoid re-renders)
   const streamCallbacksWithTitle = useMemo(() => ({
@@ -95,7 +107,7 @@ export default function CaseWorkspacePage({
     try {
       await plansAPI.acceptDiff(params.caseId, proposedContent, diffSummary, diffData);
       queryClient.invalidateQueries({ queryKey: ['case-home', params.caseId] });
-      ws.loadWorkspace(); // Refresh plan in CaseStructureNav
+      ws.loadWorkspace(); // Refresh plan in sidebar
     } catch (error) {
       console.error('Failed to accept plan diff:', error);
       throw error; // Rethrow so card can show error UI
@@ -115,10 +127,17 @@ export default function CaseWorkspacePage({
         transition: { duration: transitionDurations.fast, ease: easingCurves.easeOutCubic },
       };
 
-  // Keyboard shortcuts for chat panel, focus mode, and evidence ingestion
+  // Focus mode: collapse both global sidebar panel and chat panel
+  const toggleFocusMode = useCallback(() => {
+    const enterFocus = !nav.isPanelCollapsed || !ws.isChatCollapsed;
+    nav.setPanelCollapsed(enterFocus);
+    if (enterFocus && !ws.isChatCollapsed) ws.toggleChat();
+    if (!enterFocus && ws.isChatCollapsed) ws.toggleChat();
+  }, [nav, ws]);
+
+  // Keyboard shortcuts for chat panel and focus mode
   useKeyboardShortcut(['Cmd', '/'], () => ws.toggleChat(), { enabled: !ws.loading });
-  useKeyboardShortcut(['Cmd', '\\'], () => ws.toggleFocusMode(), { enabled: !ws.loading });
-  useKeyboardShortcut(['Cmd', 'Shift', 'E'], () => setShowEvidenceIngest(true), { enabled: !ws.loading });
+  useKeyboardShortcut(['Cmd', '\\'], () => toggleFocusMode(), { enabled: !ws.loading });
 
   if (ws.loading || !ws.caseData) {
     return (
@@ -130,14 +149,6 @@ export default function CaseWorkspacePage({
           <Skeleton className="h-3 w-32" />
         </div>
         <div className="flex flex-1 min-h-0">
-          {/* Skeleton nav */}
-          <aside className="w-[200px] border-r border-neutral-200/60 dark:border-neutral-800/60 shrink-0 p-3 space-y-3 bg-neutral-50/50 dark:bg-neutral-950/50">
-            <Skeleton className="h-5 w-24" />
-            <Skeleton className="h-3 w-16" />
-            <div className="mt-4 space-y-2">
-              {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-6 w-full rounded" />)}
-            </div>
-          </aside>
           {/* Skeleton main content */}
           <main className="flex-1 p-8">
             <WorkspaceContentSkeleton />
@@ -188,6 +199,13 @@ export default function CaseWorkspacePage({
       shortcut: 'Cmd+R',
     },
     {
+      id: 'view-documents',
+      label: 'View documents',
+      category: 'navigation',
+      keywords: ['documents', 'upload', 'files', 'pdf'],
+      action: () => ws.setViewMode('document'),
+    },
+    {
       id: 'view-research',
       label: 'View research dashboard',
       category: 'navigation',
@@ -201,14 +219,6 @@ export default function CaseWorkspacePage({
       keywords: ['create', 'inquiry', 'question', 'new'],
       action: () => ws.handleStartInquiry(),
       shortcut: 'Cmd+I',
-    },
-    {
-      id: 'add-evidence',
-      label: 'Add evidence',
-      category: 'actions',
-      keywords: ['evidence', 'add', 'ingest', 'paste', 'url', 'upload', 'import'],
-      action: () => setShowEvidenceIngest(true),
-      shortcut: 'Cmd+Shift+E',
     },
     {
       id: 'create-case',
@@ -258,10 +268,11 @@ export default function CaseWorkspacePage({
           startedAt: new Date().toISOString(),
         });
         try {
-          await artifactsAPI.generateResearch(params.caseId, topic);
+          await documentsAPI.generateResearch(params.caseId, topic);
           // Research runs async on backend — mark complete after a delay
           // (companion will show "running" until completed)
-          setTimeout(() => {
+          researchTimerRef.current = setTimeout(() => {
+            researchTimerRef.current = null;
             ws.completeBackgroundWork(workId);
             ws.addReceipt({
               id: `receipt-research-${Date.now()}`,
@@ -289,14 +300,6 @@ export default function CaseWorkspacePage({
       shortcut: 'Cmd+Shift+O',
     },
     {
-      id: 'toggle-nav',
-      label: 'Toggle structure nav',
-      category: 'navigation',
-      keywords: ['nav', 'sidebar', 'toggle', 'collapse'],
-      action: () => ws.toggleNav(),
-      shortcut: 'Cmd+B',
-    },
-    {
       id: 'toggle-chat',
       label: 'Toggle chat panel',
       category: 'navigation',
@@ -309,7 +312,7 @@ export default function CaseWorkspacePage({
       label: 'Toggle focus mode',
       category: 'navigation',
       keywords: ['focus', 'fullscreen', 'zen', 'distraction'],
-      action: () => ws.toggleFocusMode(),
+      action: () => toggleFocusMode(),
       shortcut: 'Cmd+\\',
     },
     {
@@ -360,7 +363,7 @@ export default function CaseWorkspacePage({
     inquiry: ws.activeInquiry?.title ?? 'Inquiry',
     'inquiry-dashboard': 'Research',
     readiness: 'Readiness',
-    document: 'Document',
+    document: 'Documents',
   };
   const currentViewLabel = VIEW_LABELS[ws.viewMode];
 
@@ -450,6 +453,18 @@ export default function CaseWorkspacePage({
           </motion.div>
         );
 
+      case 'document':
+        return (
+          <motion.div key="document" className="h-full" {...viewTransition}>
+            <DocumentListView
+              caseId={params.caseId}
+              projectId={ws.caseData!.project ?? ''}
+              documents={ws.documents}
+              onRefresh={ws.loadWorkspace}
+            />
+          </motion.div>
+        );
+
       case 'inquiry':
         return ws.activeInquiry ? (
           <motion.div key={`inquiry-${ws.activeInquiry.id}`} {...viewTransition}>
@@ -460,25 +475,6 @@ export default function CaseWorkspacePage({
               onRefresh={ws.loadWorkspace}
               briefId={ws.brief?.id}
               briefContent={ws.brief?.content_markdown || ''}
-              onResearchStarted={(workId, title) => {
-                ws.addBackgroundWork({
-                  id: workId,
-                  type: 'research',
-                  title,
-                  status: 'running',
-                  startedAt: new Date().toISOString(),
-                });
-              }}
-              onResearchCompleted={(workId) => {
-                ws.completeBackgroundWork(workId);
-                ws.addReceipt({
-                  id: `receipt-research-${Date.now()}`,
-                  type: 'research_completed',
-                  title: 'Research completed',
-                  timestamp: new Date().toISOString(),
-                  relatedCaseId: params.caseId,
-                });
-              }}
             />
           </motion.div>
         ) : null;
@@ -493,7 +489,6 @@ export default function CaseWorkspacePage({
     thinking: ws.companionState.thinking,
     mode: ws.chatMode.mode.mode,
     actionHints: ws.actionHints,
-    signals: ws.signals,
     status: ws.companionState.status,
     sessionReceipts: ws.companionState.sessionReceipts,
     caseState: ws.companionState.caseState,
@@ -504,8 +499,6 @@ export default function CaseWorkspacePage({
       switch (hint.type) {
         case 'suggest_inquiry':
           ws.handleStartInquiry();
-          break;
-        case 'suggest_evidence':
           break;
         case 'suggest_resolution':
           if (hint.data?.inquiryId) {
@@ -574,18 +567,6 @@ export default function CaseWorkspacePage({
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Nav toggle button (shown when collapsed) */}
-          {ws.isNavCollapsed && (
-            <Tooltip content={<span className="flex items-center gap-2">Show nav <KeyboardShortcut keys={['⌘', 'B']} /></span>} side="bottom">
-              <button
-                onClick={ws.toggleNav}
-                className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-              >
-                <ExpandIcon className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-          )}
-
           {/* Chat toggle button (shown when collapsed) */}
           {ws.isChatCollapsed && (
             <Tooltip content={<span className="flex items-center gap-2">Show chat <KeyboardShortcut keys={['⌘', '/']} /></span>} side="bottom">
@@ -609,35 +590,9 @@ export default function CaseWorkspacePage({
           </Tooltip>
         </div>
 
-        {/* Three-column workspace */}
+        {/* Two-column workspace (structure nav is in the SidebarPanel drill-down) */}
         <div className="flex flex-1 min-h-0">
-
-          {/* Left: Structure Nav */}
-          {!ws.isNavCollapsed && (
-            <aside className="w-[200px] border-r border-neutral-200/60 dark:border-neutral-800/60 shrink-0 overflow-hidden">
-              <CaseStructureNav
-                caseId={params.caseId}
-                caseTitle={ws.caseData.title}
-                plan={ws.plan}
-                inquiries={ws.inquiries}
-                viewMode={ws.viewMode}
-                activeInquiryId={ws.activeInquiryId}
-                onNavigate={(mode, inquiryId) => {
-                  if (inquiryId) {
-                    ws.handleOpenInquiry(inquiryId);
-                  } else {
-                    ws.setViewMode(mode);
-                  }
-                }}
-                isCollapsed={ws.isNavCollapsed}
-                onToggleCollapse={ws.toggleNav}
-                activeSkills={ws.caseData?.active_skills_summary}
-                onAddEvidence={() => setShowEvidenceIngest(true)}
-              />
-            </aside>
-          )}
-
-          {/* Center: Main Content */}
+          {/* Main Content */}
           <main className={cn(
             'flex-1 min-h-0',
             ws.viewMode === 'brief' ? 'overflow-hidden' : 'overflow-y-auto',
@@ -698,16 +653,6 @@ export default function CaseWorkspacePage({
         onClose={() => setShowExportDialog(false)}
       />
 
-      <EvidenceIngestModal
-        isOpen={showEvidenceIngest}
-        onClose={() => setShowEvidenceIngest(false)}
-        caseId={params.caseId}
-        projectId={ws.caseData?.project ?? ''}
-        onIngested={() => {
-          ws.loadWorkspace();
-        }}
-      />
-
       <CommandPalette
         commands={commands}
         isOpen={commandPaletteOpen}
@@ -739,15 +684,6 @@ function ChevronRight() {
   return (
     <svg className="w-3 h-3 text-neutral-300 dark:text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ExpandIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="13 17 18 12 13 7" strokeLinecap="round" strokeLinejoin="round" />
-      <polyline points="6 17 11 12 6 7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

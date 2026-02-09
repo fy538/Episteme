@@ -13,9 +13,6 @@ import type { Message as MessageType, InlineActionCard } from '@/lib/types/chat'
 import type { CardAction } from '@/lib/types/cards';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
-import { SignalHighlighter, type HighlightedSignal } from './SignalHighlighter';
-import { useSignalsForMessage, useDismissSignal } from '@/hooks/useSignals';
-import { useUserPreferences } from '@/hooks/usePreferences';
 import { CardRenderer } from './cards/CardRenderer';
 import { InlineActionCardRenderer, type InlineCardActions } from './cards/InlineActionCardRenderer';
 import { MessageListSkeleton } from '@/components/ui/skeleton';
@@ -25,14 +22,12 @@ import { useReducedMotion } from '@/hooks/useReducedMotion';
 function Message({
   message,
   onAddToBrief,
-  onCreateEvidence,
   onCardAction,
   index,
   variant = 'default',
 }: {
   message: MessageType;
   onAddToBrief?: (messageId: string, content: string) => void;
-  onCreateEvidence?: (content: string) => void;
   onCardAction?: (action: CardAction, messageId: string) => void;
   index: number;
   variant?: 'default' | 'full';
@@ -42,29 +37,6 @@ function Message({
   const isRichMessage = message.is_rich_content && message.structured_content;
   const showActions = message.role === 'assistant' && !isStreamingMsg && !isRichMessage && message.content.length > 20;
   const isFull = variant === 'full';
-
-  // Fetch signals for this message (hook at top level)
-  const { data: signals = [] } = useSignalsForMessage(
-    message.id,
-    message.role === 'assistant' && !isStreamingMsg
-  );
-
-  const { data: userPreferences } = useUserPreferences();
-  const dismissSignal = useDismissSignal();
-
-  // Check if signal highlighting is enabled
-  const highlightSignals =
-    message.role === 'assistant' &&
-    !isStreamingMsg &&
-    userPreferences &&
-    signals.length > 0 &&
-    (userPreferences.highlight_assumptions ||
-     userPreferences.highlight_questions ||
-     userPreferences.highlight_evidence);
-
-  const handleDismissSignal = (signalId: string) => {
-    dismissSignal.mutate(signalId);
-  };
 
   const handleCardAction = (action: CardAction) => {
     if (onCardAction) {
@@ -100,21 +72,6 @@ function Message({
                   <span className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                 </span>
               </div>
-            ) : highlightSignals ? (
-              <div className="text-[15px] leading-relaxed text-neutral-800 dark:text-neutral-200">
-                <SignalHighlighter
-                  content={message.content}
-                  signals={signals.map(s => ({
-                    id: s.id,
-                    text: s.text,
-                    type: s.type as any,
-                    start: s.span?.start || 0,
-                    end: s.span?.end || 0,
-                    confidence: s.confidence
-                  }))}
-                  onDismiss={handleDismissSignal}
-                />
-              </div>
             ) : (
               <div className="prose prose-sm max-w-none dark:prose-invert text-[15px] leading-relaxed text-neutral-800 dark:text-neutral-200 prose-p:text-[15px] prose-p:leading-relaxed prose-p:text-neutral-800 dark:prose-p:text-neutral-200 prose-headings:text-neutral-900 dark:prose-headings:text-neutral-100 prose-li:text-[15px] prose-code:text-[13px] prose-pre:text-[13px]">
                 <Streamdown
@@ -129,7 +86,7 @@ function Message({
             )}
 
             {/* Action buttons (show on hover) */}
-            {showActions && (onAddToBrief || onCreateEvidence) && (
+            {showActions && (
               <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex gap-2">
                 {onAddToBrief && (
                   <button
@@ -137,14 +94,6 @@ function Message({
                     className="text-xs px-2 py-1 text-neutral-500 hover:text-accent-600 hover:bg-accent-50 rounded transition-colors dark:text-neutral-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30"
                   >
                     Add to Brief
-                  </button>
-                )}
-                {onCreateEvidence && (
-                  <button
-                    onClick={() => onCreateEvidence(message.content)}
-                    className="text-xs px-2 py-1 text-neutral-500 hover:text-success-600 hover:bg-success-50 rounded transition-colors dark:text-neutral-400 dark:hover:text-success-400 dark:hover:bg-success-900/30"
-                  >
-                    Create Evidence
                   </button>
                 )}
                 <button
@@ -205,19 +154,6 @@ function Message({
               </span>
               <span>Thinking...</span>
             </div>
-          ) : highlightSignals ? (
-            <SignalHighlighter
-              content={message.content}
-              signals={signals.map(s => ({
-                id: s.id,
-                text: s.text,
-                type: s.type as any,
-                start: s.span?.start || 0,
-                end: s.span?.end || 0,
-                confidence: s.confidence
-              }))}
-              onDismiss={handleDismissSignal}
-            />
           ) : (
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <Streamdown
@@ -235,7 +171,7 @@ function Message({
         )}
 
         {/* Action buttons (show on hover) */}
-        {showActions && (onAddToBrief || onCreateEvidence) && (
+        {showActions && (
           <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex gap-2">
             {onAddToBrief && (
               <button
@@ -243,14 +179,6 @@ function Message({
                 className="text-xs px-2 py-1 bg-accent-50 text-accent-700 rounded hover:bg-accent-100 transition-colors dark:bg-accent-900 dark:text-accent-200"
               >
                 Add to Brief
-              </button>
-            )}
-            {onCreateEvidence && (
-              <button
-                onClick={() => onCreateEvidence(message.content)}
-                className="text-xs px-2 py-1 bg-success-50 text-success-700 rounded hover:bg-success-100 transition-colors dark:bg-success-900 dark:text-success-200"
-              >
-                Create Evidence
               </button>
             )}
             <button
@@ -293,7 +221,6 @@ export function MessageList({
   isStreaming,
   ttft,
   onAddToBrief,
-  onCreateEvidence,
   onCardAction,
   isLoading,
   inlineCards = [],
@@ -305,7 +232,6 @@ export function MessageList({
   isStreaming?: boolean;
   ttft?: number | null;
   onAddToBrief?: (messageId: string, content: string) => void;
-  onCreateEvidence?: (content: string) => void;
   onCardAction?: (action: CardAction, messageId: string) => void;
   isLoading?: boolean;
   inlineCards?: InlineActionCard[];
@@ -360,7 +286,6 @@ export function MessageList({
                 message={message}
                 index={index}
                 onAddToBrief={onAddToBrief}
-                onCreateEvidence={onCreateEvidence}
                 onCardAction={onCardAction}
                 variant="full"
               />
@@ -397,7 +322,6 @@ export function MessageList({
             message={message}
             index={index}
             onAddToBrief={onAddToBrief}
-            onCreateEvidence={onCreateEvidence}
             onCardAction={onCardAction}
             variant="default"
           />

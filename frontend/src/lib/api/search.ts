@@ -2,8 +2,6 @@
  * Unified Search API Client
  *
  * Provides semantic search across all content types:
- * - Signals (assumptions, questions, constraints)
- * - Evidence
  * - Inquiries
  * - Cases
  * - Documents
@@ -11,7 +9,7 @@
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
-export type SearchResultType = 'signal' | 'evidence' | 'inquiry' | 'case' | 'document';
+export type SearchResultType = 'inquiry' | 'case' | 'document';
 
 export interface SearchResult {
   id: string;
@@ -22,13 +20,10 @@ export interface SearchResult {
   case_id: string | null;
   case_title: string | null;
   metadata: {
-    signal_type?: string;
     confidence?: number;
     has_evidence?: boolean;
     status?: string;
     stakes?: string;
-    evidence_type?: string;
-    credibility?: number;
     document_type?: string;
     chunk_preview?: string;
     priority?: string;
@@ -97,10 +92,6 @@ export async function getRecentItems(context?: SearchContext): Promise<UnifiedSe
  */
 export function getResultTypeIcon(type: SearchResultType): string {
   switch (type) {
-    case 'signal':
-      return '💭';
-    case 'evidence':
-      return '📊';
     case 'inquiry':
       return '🔬';
     case 'case':
@@ -117,10 +108,6 @@ export function getResultTypeIcon(type: SearchResultType): string {
  */
 export function getResultTypeLabel(type: SearchResultType): string {
   switch (type) {
-    case 'signal':
-      return 'Signal';
-    case 'evidence':
-      return 'Evidence';
     case 'inquiry':
       return 'Inquiry';
     case 'case':
@@ -147,16 +134,6 @@ export function getResultPath(result: SearchResult): string {
       return result.case_id
         ? `/cases/${result.case_id}/documents/${result.id}`
         : `/`;
-    case 'signal':
-      return result.case_id
-        ? `/cases/${result.case_id}?signal=${result.id}`
-        : `/`;
-    case 'evidence':
-      const docId = result.metadata.document_id;
-      if (result.case_id && docId) {
-        return `/cases/${result.case_id}/documents/${docId}?evidence=${result.id}`;
-      }
-      return result.case_id ? `/cases/${result.case_id}` : `/`;
     default:
       return '/';
   }

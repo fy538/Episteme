@@ -48,10 +48,8 @@ export interface CreateMessageRequest {
  * Types of inline action cards that appear after messages
  */
 export type InlineCardType =
-  | 'signals_collapsed'
   | 'case_creation_prompt'
   | 'case_preview'
-  | 'evidence_suggestion'
   | 'inquiry_resolution'
   | 'research_results'
   | 'inquiry_focus_prompt'
@@ -70,18 +68,9 @@ export interface InlineActionCard {
 }
 
 /**
- * Data payload for signals collapsed card
- */
-export interface SignalsCollapsedData {
-  signals: Array<{ text: string; type: string }>;
-  totalCount: number;
-}
-
-/**
  * Data payload for case creation prompt card
  */
 export interface CaseCreationPromptData {
-  signalCount: number;
   suggestedTitle?: string;
   keyQuestions?: string[];
   /** AI-generated reason for suggesting case creation */
@@ -107,24 +96,11 @@ export interface CasePreviewData {
 }
 
 /**
- * Data payload for evidence suggestion card
- */
-export interface EvidenceSuggestionData {
-  evidenceText: string;
-  suggestedInquiryId?: string;
-  suggestedInquiryTitle?: string;
-  direction: 'supporting' | 'contradicting' | 'neutral';
-  /** AI-generated reason for suggesting evidence */
-  aiReason?: string;
-}
-
-/**
  * Data payload for inquiry resolution prompt card
  */
 export interface InquiryResolutionPromptData {
   inquiryId: string;
   inquiryTitle: string;
-  evidenceCount: number;
   suggestedConclusion?: string;
   /** AI-generated reason for suggesting resolution */
   aiReason?: string;
@@ -159,7 +135,6 @@ export interface InquiryFocusPromptData {
 export type ActionHintType =
   | 'suggest_case'
   | 'suggest_inquiry'
-  | 'suggest_evidence'
   | 'suggest_resolution'
   | 'suggest_plan_diff';
 
@@ -177,7 +152,6 @@ export interface ActionHint {
  */
 export interface SuggestCaseHintData {
   suggested_title?: string;
-  signal_count?: number;
 }
 
 /**
@@ -186,15 +160,6 @@ export interface SuggestCaseHintData {
 export interface SuggestInquiryHintData {
   question: string;
   topic?: string;
-}
-
-/**
- * Data payload for suggest_evidence action hint
- */
-export interface SuggestEvidenceHintData {
-  text: string;
-  direction: 'supporting' | 'contradicting' | 'neutral';
-  inquiry_id?: string;
 }
 
 /**

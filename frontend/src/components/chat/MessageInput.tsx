@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { UI } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
-type ChatMode = 'casual' | 'case' | 'inquiry_focus';
+type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph';
 
 interface MessageInputProps {
   onSend: (content: string) => void;
@@ -40,6 +40,7 @@ const MODE_LABELS: Record<ChatMode, string> = {
   casual: 'Chat',
   case: 'Case',
   inquiry_focus: 'Inquiry',
+  graph: 'Graph',
 };
 
 // Get context-aware placeholder text

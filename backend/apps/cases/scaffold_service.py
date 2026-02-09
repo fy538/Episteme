@@ -13,10 +13,10 @@ from typing import Optional
 from django.contrib.auth.models import User
 from django.db import transaction
 
-from apps.cases.models import Case, CaseDocument, CaseStatus, StakesLevel, DocumentType, EditFriction
+from apps.cases.models import Case, WorkingDocument, CaseStatus, StakesLevel, DocumentType, EditFriction
 from apps.cases.brief_models import BriefSection, SectionType, SectionCreator, GroundingStatus
 from apps.cases.services import CaseService
-from apps.cases.document_service import CaseDocumentService
+from apps.cases.document_service import WorkingDocumentService
 from apps.cases.scaffold_schemas import ScaffoldExtraction
 from apps.common.llm_providers import get_llm_provider
 from apps.events.services import EventService
@@ -166,7 +166,7 @@ class CaseScaffoldService:
         """
         with transaction.atomic():
             # Create case
-            case, brief = CaseDocumentService.create_case_with_brief(
+            case, brief = WorkingDocumentService.create_case_with_brief(
                 user=user,
                 title=title,
                 project_id=project_id,
@@ -295,7 +295,6 @@ class CaseScaffoldService:
         Create the full case from extracted structure.
         """
         from apps.inquiries.models import ElevationReason
-        from apps.signals.models import Signal, SignalType, SignalSourceType
         from apps.events.models import Event
 
         # Map stakes
@@ -326,7 +325,7 @@ class CaseScaffoldService:
         # 2. Create inquiries
         inquiries = []
         for uncertainty in extraction.key_uncertainties:
-            inquiry, _ = CaseDocumentService.create_inquiry_with_brief(
+            inquiry, _ = WorkingDocumentService.create_inquiry_with_brief(
                 case=case,
                 title=uncertainty.title,
                 user=user,
@@ -367,32 +366,20 @@ class CaseScaffoldService:
             )
             sections.append(section)
 
-        # 5. Create signals for assumptions
-        signals = []
-        # Get or create event for signal extraction
-        event = EventService.append(
-            event_type=EventType.SIGNAL_EXTRACTED,
-            payload={
-                'source': 'scaffolding',
-                'count': len(extraction.assumptions),
-            },
-            actor_type=ActorType.SYSTEM,
-            case_id=case.id,
-            thread_id=thread_id,
-        )
-
-        for assumption_text in extraction.assumptions:
-            signal = Signal.objects.create(
-                event=event,
-                source_type=SignalSourceType.ANALYSIS,
-                type=SignalType.ASSUMPTION,
-                text=assumption_text,
-                normalized_text=assumption_text.lower().strip(),
-                confidence=0.7,
-                case=case,
-                thread_id=thread_id,
-            )
-            signals.append(signal)
+        # 5. Create graph nodes for assumptions (no longer Signal objects)
+        signals = []  # kept for backward compat with return value
+        if extraction.assumptions:
+            try:
+                from apps.graph.models import Node
+                for assumption_text in extraction.assumptions:
+                    Node.objects.create(
+                        project=case.project,
+                        node_type='assumption',
+                        content=assumption_text,
+                        status='untested',
+                    )
+            except Exception as e:
+                logger.warning(f"Could not create assumption graph nodes: {e}")
 
         # 6. Bootstrap investigation plan
         try:

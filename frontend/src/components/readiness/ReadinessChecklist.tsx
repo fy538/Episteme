@@ -23,7 +23,7 @@ export interface ReadinessChecklistItemData {
   created_by_ai: boolean;
   completion_note: string;
   linked_inquiry: string | null;
-  linked_assumption_signal: string | null;
+  linked_assumption: string | null;
   order: number;
   // Phase 2: Hierarchical fields
   parent: string | null;

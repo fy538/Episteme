@@ -6,7 +6,4 @@ class CasesConfig(AppConfig):
     name = 'apps.cases'
 
     def ready(self):
-        # Register Django signal handlers for brief evolution triggers.
-        # These listen for Signal/Evidence/Inquiry changes and schedule
-        # async brief grounding recomputation via Celery.
-        import apps.cases.brief_signals  # noqa: F401
+        pass

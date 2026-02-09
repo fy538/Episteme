@@ -4,8 +4,7 @@
  * State management for ChatPanel in the case workspace.
  *
  * Delegates streaming to useStreamingChat and adds:
- * - Signals state (loaded once, updated via stream)
- * - UI state (collapsed, signals expanded)
+ * - UI state (collapsed)
  * - Inline action cards (driven by LLM action hints)
  * - Case creation flow state
  *
@@ -13,9 +12,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { signalsAPI } from '@/lib/api/signals';
 import { useStreamingChat } from './useStreamingChat';
-import type { Signal } from '@/lib/types/signal';
 import type { ActionHint, InlineActionCard } from '@/lib/types/chat';
 import type { ModeContext } from '@/lib/types/companion';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
@@ -43,13 +40,11 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
   // Track the latest assistant message ID so we can anchor cards to it
   const latestAssistantMessageIdRef = useRef<string | null>(null);
 
-  // Accumulate signals during a single stream so we can create an inline card on completion
-  // Uses a Map keyed by signal ID to deduplicate across multiple onSignals callbacks
-  const pendingSignalsRef = useRef<Map<string, { text: string; type: string }>>(new Map());
-
   // --- Core streaming (delegated) ---
+  // Skip initial message load for brand-new threads (hero input handoff)
   const streaming = useStreamingChat({
     threadId,
+    skipInitialLoad: !!initialMessage,
     context: mode ? {
       mode: mode.mode,
       caseId: mode.caseId,
@@ -58,40 +53,10 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
     } : undefined,
     streamCallbacks: {
       ...streamCallbacks,
-      // Intercept signals to merge into local state + accumulate for inline card
-      onSignals: (newSignals) => {
-        setSignals(prev => {
-          const existingIds = new Set(prev.map(s => s.id));
-          const unique = newSignals.filter(s => !existingIds.has(s.id));
-          return unique.length > 0 ? [...prev, ...unique] : prev;
-        });
-        // Accumulate for inline card creation on message complete (deduplicated by ID)
-        for (const sig of newSignals) {
-          if (!pendingSignalsRef.current.has(sig.id)) {
-            pendingSignalsRef.current.set(sig.id, { text: sig.text, type: sig.type });
-          }
-        }
-        // Also forward to parent
-        streamCallbacks?.onSignals?.(newSignals);
-      },
-      // Track latest assistant message + create signals inline card
+      // Track latest assistant message
       onMessageComplete: (messageId) => {
         if (messageId) {
           latestAssistantMessageIdRef.current = messageId;
-
-          // Create signals_collapsed inline card if signals were extracted during this stream
-          const pending = Array.from(pendingSignalsRef.current.values());
-          if (pending.length > 0) {
-            const newCard: InlineActionCard = {
-              id: `signals-${messageId}`,
-              type: 'signals_collapsed',
-              afterMessageId: messageId,
-              data: { signals: pending, totalCount: pending.length },
-              createdAt: new Date().toISOString(),
-            };
-            setInlineCards(prev => [...prev, newCard]);
-            pendingSignalsRef.current = new Map();
-          }
         }
         streamCallbacks?.onMessageComplete?.(messageId);
       },
@@ -111,7 +76,7 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
             data: {
               aiReason: caseHint.reason,
               suggestedTitle: (caseHint.data as Record<string, unknown>).suggested_title,
-              signalCount: (caseHint.data as Record<string, unknown>).signal_count || 0,
+              questionCount: (caseHint.data as Record<string, unknown>).question_count || 0,
             },
             createdAt: new Date().toISOString(),
           };
@@ -139,12 +104,8 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
     },
   });
 
-  // --- Signals state ---
-  const [signals, setSignals] = useState<Signal[]>([]);
-
   // --- UI state ---
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [signalsExpanded, setSignalsExpanded] = useState(false);
 
   // --- Card actions ---
   const dismissCard = useCallback((cardId: string) => {
@@ -159,52 +120,23 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
     setInlineCards(prev => [...prev, card]);
   }, []);
 
-  // Load signals once on thread change
-  useEffect(() => {
-    async function loadSignals() {
-      try {
-        const sigs = await signalsAPI.getByThread(threadId);
-        setSignals(sigs);
-      } catch (err) {
-        console.error('Failed to load signals:', err);
-      }
-    }
-    loadSignals();
-  }, [threadId]);
-
   // Auto-send initial message (Home hero input → chat handoff)
   //
-  // Race condition fix: On mount, isLoading starts false (before the
-  // loadMessages effect runs), then goes true→false as messages load.
-  // We must wait for loading to *complete* (the true→false transition),
-  // not fire on the initial pre-load false — otherwise sendMessage races
-  // with loadMessages and the loaded [] overwrites optimistic messages.
+  // When skipInitialLoad is true (brand-new thread), isLoading stays false
+  // so we send immediately on first effect run. When loading does happen
+  // (existing thread), we wait for isLoading to become false.
   const initialMessageSentRef = useRef(false);
-  const hasStartedLoadingRef = useRef(false);
 
   useEffect(() => {
-    if (streaming.isLoading) {
-      hasStartedLoadingRef.current = true;
-    }
+    if (!initialMessage || initialMessageSentRef.current || streaming.isLoading) return;
 
-    if (
-      initialMessage &&
-      !initialMessageSentRef.current &&
-      !streaming.isLoading &&
-      hasStartedLoadingRef.current
-    ) {
-      initialMessageSentRef.current = true;
-      const timer = setTimeout(() => {
-        streaming.sendMessage(initialMessage);
-        onInitialMessageSent?.();
-      }, 50);
-      return () => clearTimeout(timer);
-    }
+    initialMessageSentRef.current = true;
+    streaming.sendMessage(initialMessage);
+    onInitialMessageSent?.();
   }, [initialMessage, streaming.isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Wrap sendMessage to clear pending signals before each new message
+  // Wrap sendMessage for consistent interface
   const sendMessage = useCallback(async (content: string) => {
-    pendingSignalsRef.current = new Map();
     return streaming.sendMessage(content);
   }, [streaming.sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -212,11 +144,6 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
     // Core streaming state (spread from useStreamingChat, with wrapped sendMessage)
     ...streaming,
     sendMessage,
-
-    // Signals
-    signals,
-    signalsExpanded,
-    setSignalsExpanded,
 
     // UI
     isCollapsed,

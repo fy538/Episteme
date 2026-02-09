@@ -77,12 +77,14 @@ class ResearchContext:
     signals: list[dict] = field(default_factory=list)
     evidence: list[dict] = field(default_factory=list)
     conversation_context: str = ""
+    graph_context: str = ""
 
     def to_dict(self) -> dict:
         return {
             "case_title": self.case_title,
             "case_position": self.case_position,
             "conversation_context": self.conversation_context,
+            "graph_context": self.graph_context,
         }
 
 

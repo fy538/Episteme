@@ -24,28 +24,6 @@ import { getActionHintIcon, getActionHintLabel } from '@/lib/utils/action-hints'
 import type { CompanionSectionId } from '@/lib/utils/companion-ranking';
 import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState } from '@/lib/types/companion';
 import type { ActionHint } from '@/lib/types/chat';
-import type { Signal } from '@/lib/types/signal';
-
-// Human-readable labels for signal types
-const SIGNAL_TYPE_LABELS: Record<string, string> = {
-  DecisionIntent: 'Decision',
-  Claim: 'Claim',
-  Goal: 'Goal',
-  Constraint: 'Constraint',
-  Assumption: 'Assumption',
-  Question: 'Question',
-  EvidenceMention: 'Evidence',
-};
-
-function getSignalLabel(signal: Signal): string {
-  // Prefer signal_type (backend label) if set, otherwise map the enum type
-  if (signal.signal_type) return signal.signal_type;
-  return SIGNAL_TYPE_LABELS[signal.type] || signal.type;
-}
-
-function getSignalContent(signal: Signal): string {
-  return signal.content || signal.text;
-}
 
 interface CompanionPanelProps {
   // Core state
@@ -55,7 +33,6 @@ interface CompanionPanelProps {
 
   // Section data
   actionHints?: ActionHint[];
-  signals?: Signal[];
   status?: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts?: SessionReceipt[];
   caseState?: CaseState;
@@ -79,6 +56,7 @@ const MODE_DOTS: Record<ChatMode, string> = {
   casual: 'bg-cyan-400',
   case: 'bg-amber-400',
   inquiry_focus: 'bg-purple-400',
+  graph: 'bg-teal-400',
 };
 
 export function CompanionPanel({
@@ -86,7 +64,6 @@ export function CompanionPanel({
   mode,
   position,
   actionHints = [],
-  signals = [],
   status = { inProgress: [], justCompleted: [] },
   sessionReceipts = [],
   caseState,
@@ -167,7 +144,7 @@ export function CompanionPanel({
             {mode === 'case' ? (
               caseState
                 ? `${caseState.caseName} · ${caseState.inquiries.open} open inquiries, ${caseState.assumptions.unvalidated} untested assumptions`
-                : 'Chat about your decision to surface signals'
+                : 'Chat about your decision to explore your thinking'
             ) : mode === 'inquiry_focus'
               ? 'Chat about this inquiry to surface insights'
               : 'Send a message to see your reasoning structure'}
@@ -189,7 +166,6 @@ export function CompanionPanel({
               thinking={sectionId === 'thinking' ? thinking : undefined}
               mode={sectionId === 'thinking' ? mode : undefined}
               actionHints={sectionId === 'action_hints' ? actionHints : undefined}
-              signals={sectionId === 'signals' ? signals : undefined}
               status={sectionId === 'status' ? status : undefined}
               sessionReceipts={sectionId === 'receipts' ? sessionReceipts : undefined}
               caseState={sectionId === 'case_state' ? caseState : undefined}
@@ -227,7 +203,6 @@ interface SectionRendererProps {
   thinking?: { content: string; isStreaming: boolean };
   mode?: ChatMode;
   actionHints?: ActionHint[];
-  signals?: Signal[];
   status?: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts?: SessionReceipt[];
   caseState?: CaseState;
@@ -244,7 +219,6 @@ const SectionRenderer = memo(function SectionRenderer({
   thinking,
   mode,
   actionHints,
-  signals,
   status,
   sessionReceipts,
   caseState,
@@ -296,52 +270,6 @@ const SectionRenderer = memo(function SectionRenderer({
                 <span>{getActionHintLabel(hint.type, hint.data)}</span>
               </button>
             ))}
-          </div>
-        </section>
-      ) : null;
-
-    case 'signals':
-      return signals && signals.length > 0 ? (
-        <section className={cn('border-b', theme.thinking.border)} role="region" aria-label={`${signals.length} signals extracted`}>
-          <div className={cn(
-            'px-3 py-2 flex items-center gap-2',
-            isTerminalTheme && 'font-mono'
-          )}>
-            <span className={cn('text-xs', theme.thinking.text)} aria-hidden="true">{'>'}</span>
-            <span className={cn('text-xs tracking-wider font-medium uppercase', theme.thinking.text)}>
-              SIGNALS
-            </span>
-            <span className={cn('text-xs', theme.thinking.textMuted)}>
-              ({signals.length})
-            </span>
-          </div>
-          <div className={cn(
-            'px-3 pb-3 space-y-1.5',
-            !expanded && 'max-h-20 overflow-hidden'
-          )}>
-            {signals.slice(0, expanded ? undefined : 3).map(signal => (
-              <div
-                key={signal.id}
-                className={cn(
-                  'text-xs p-1.5 border',
-                  theme.thinking.border,
-                  theme.thinking.bg,
-                  isTerminalTheme && 'font-mono'
-                )}
-              >
-                <span className={cn('font-medium', theme.thinking.text)}>
-                  {getSignalLabel(signal)}:
-                </span>
-                <span className={cn('ml-1', theme.thinking.textMuted)}>
-                  {getSignalContent(signal)}
-                </span>
-              </div>
-            ))}
-            {!expanded && signals.length > 3 && (
-              <div className={cn('text-xs', theme.thinking.textSubtle)}>
-                +{signals.length - 3} more
-              </div>
-            )}
           </div>
         </section>
       ) : null;

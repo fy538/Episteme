@@ -5,7 +5,6 @@ Detects markers like <response>, </response>, etc. and routes content appropriat
 Handles markers split across token boundaries.
 """
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
@@ -16,8 +15,8 @@ class Section(Enum):
     NONE = "none"
     RESPONSE = "response"
     REFLECTION = "reflection"
-    SIGNALS = "signals"
     ACTION_HINTS = "action_hints"
+    GRAPH_EDITS = "graph_edits"
 
 
 @dataclass
@@ -35,7 +34,6 @@ class SectionedStreamParser:
     Handles the unified response format:
     <response>...</response>
     <reflection>...</reflection>
-    <signals>[...]</signals>
 
     Features:
     - Detects XML-style markers even when split across chunks
@@ -47,8 +45,8 @@ class SectionedStreamParser:
     MARKERS = [
         '<response>', '</response>',
         '<reflection>', '</reflection>',
-        '<signals>', '</signals>',
-        '<action_hints>', '</action_hints>'
+        '<action_hints>', '</action_hints>',
+        '<graph_edits>', '</graph_edits>',
     ]
 
     # Maximum marker length for buffer safety
@@ -57,8 +55,8 @@ class SectionedStreamParser:
     def __init__(self):
         self.current_section = Section.NONE
         self.buffer = ""
-        self.signals_buffer = ""
         self.action_hints_buffer = ""
+        self.graph_edits_buffer = ""
 
     def parse(self, chunk: str) -> List[ParsedChunk]:
         """
@@ -115,10 +113,10 @@ class SectionedStreamParser:
                 self.current_section = self._get_section(section_name)
 
                 # Reset buffers on new JSON sections
-                if self.current_section == Section.SIGNALS:
-                    self.signals_buffer = ""
-                elif self.current_section == Section.ACTION_HINTS:
+                if self.current_section == Section.ACTION_HINTS:
                     self.action_hints_buffer = ""
+                elif self.current_section == Section.GRAPH_EDITS:
+                    self.graph_edits_buffer = ""
 
             # Remove processed portion from buffer
             self.buffer = self.buffer[end:]
@@ -189,19 +187,19 @@ class SectionedStreamParser:
             return Section.RESPONSE
         elif name == 'reflection':
             return Section.REFLECTION
-        elif name == 'signals':
-            return Section.SIGNALS
         elif name == 'action_hints':
             return Section.ACTION_HINTS
+        elif name == 'graph_edits':
+            return Section.GRAPH_EDITS
         return Section.NONE
 
     def _create_chunk(self, content: str) -> ParsedChunk:
         """Create a ParsedChunk for current section"""
         # For JSON sections, accumulate in buffer
-        if self.current_section == Section.SIGNALS:
-            self.signals_buffer += content
-        elif self.current_section == Section.ACTION_HINTS:
+        if self.current_section == Section.ACTION_HINTS:
             self.action_hints_buffer += content
+        elif self.current_section == Section.GRAPH_EDITS:
+            self.graph_edits_buffer += content
 
         return ParsedChunk(
             section=self.current_section,
@@ -209,13 +207,13 @@ class SectionedStreamParser:
             is_complete=False
         )
 
-    def get_signals_buffer(self) -> str:
-        """Get accumulated signals content for JSON parsing"""
-        return self.signals_buffer
-
     def get_action_hints_buffer(self) -> str:
         """Get accumulated action hints content for JSON parsing"""
         return self.action_hints_buffer
+
+    def get_graph_edits_buffer(self) -> str:
+        """Get accumulated graph edits content for JSON parsing"""
+        return self.graph_edits_buffer
 
     def flush(self) -> List[ParsedChunk]:
         """
@@ -224,7 +222,6 @@ class SectionedStreamParser:
         """
         results = []
         if self.buffer:
-            # Use _create_chunk to properly update signals_buffer if in SIGNALS section
             results.append(self._create_chunk(self.buffer))
             self.buffer = ""
         return results

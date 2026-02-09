@@ -4,9 +4,7 @@ Skill preview service
 Analyzes a case to preview what skill would be created from it.
 """
 from typing import Dict, List, Any
-from collections import Counter
 from apps.cases.models import Case
-from apps.signals.models import Signal
 
 
 class SkillPreviewService:
@@ -41,63 +39,54 @@ class SkillPreviewService:
             'stats': {}
         }
         
-        # Extract signal type patterns
-        signals = case.signals.all()
-        signal_type_counts = Counter(s.type for s in signals)
+        # Signal model has been removed. Signal type patterns are no longer available.
+        # TODO: Extract patterns from graph nodes instead.
         
-        for signal_type, count in signal_type_counts.most_common():
-            if count >= 2:  # Only include types used 2+ times
-                signal_examples = signals.filter(type=signal_type)[:2]
-                preview['signal_types'].append({
-                    'name': signal_type,
-                    'count': count,
-                    'examples': [s.text for s in signal_examples]
-                })
-        
-        # Extract evidence patterns
+        # Extract evidence patterns from graph nodes
         try:
-            from apps.projects.models import Evidence
-            evidence = Evidence.objects.filter(document__case=case)
-            
-            if evidence.exists():
-                avg_credibility = evidence.aggregate(
-                    models.Avg('extraction_confidence')
-                )['extraction_confidence__avg'] or 0.0
-                
+            from apps.graph.models import Node, NodeType
+            from django.db.models import Avg
+            evidence_nodes = Node.objects.filter(
+                project=case.project,
+                node_type=NodeType.EVIDENCE,
+            )
+
+            if evidence_nodes.exists():
+                avg_confidence = evidence_nodes.aggregate(
+                    Avg('confidence')
+                )['confidence__avg'] or 0.0
+
                 preview['evidence_patterns'] = {
-                    'total_evidence': evidence.count(),
-                    'avg_credibility': round(avg_credibility, 2),
-                    'common_sources': []  # Could extract from citations
+                    'total_evidence': evidence_nodes.count(),
+                    'avg_credibility': round(avg_confidence, 2),
+                    'common_sources': []  # Could extract from node.properties
                 }
         except Exception:
-            # Evidence app might not be available yet
             preview['evidence_patterns'] = {
                 'total_evidence': 0,
                 'avg_credibility': 0.0,
                 'common_sources': []
             }
         
-        # Generate workflow template from artifacts
+        # Generate workflow template from working documents
         try:
-            from apps.artifacts.models import Artifact
-            artifacts = case.artifacts.all()
-            
+            from apps.cases.models import WorkingDocument
+            documents = case.working_documents.all()
+
             workflow_steps = []
-            if artifacts.filter(type='research').exists():
+            if documents.filter(document_type='research').exists():
                 workflow_steps.append("1. Conduct research")
-            if artifacts.filter(type='critique').exists():
-                workflow_steps.append("2. Challenge assumptions")
-            if artifacts.filter(type='brief').exists():
-                workflow_steps.append("3. Generate decision brief")
-            
+            if documents.filter(document_type='case_brief').exists():
+                workflow_steps.append("2. Generate decision brief")
+
             if workflow_steps:
                 preview['workflow_template'] = '\n'.join(workflow_steps)
             else:
                 preview['workflow_template'] = (
-                    "1. Identify key signals\n"
+                    "1. Identify key claims\n"
                     "2. Gather evidence\n"
                     "3. Analyze and synthesize\n"
-                    "4. Generate artifacts"
+                    "4. Generate documents"
                 )
         except Exception:
             preview['workflow_template'] = (
@@ -128,9 +117,6 @@ class SkillPreviewService:
         
         # Stats
         preview['stats'] = {
-            'total_signals': signals.count(),
-            'unique_signal_types': len(signal_type_counts),
-            'confirmed_signals': signals.filter(status='confirmed').count(),
             'total_artifacts': 0
         }
         
@@ -152,11 +138,6 @@ class SkillPreviewService:
         Returns:
             (can_create, reason)
         """
-        signals = case.signals.all()
-        
-        if signals.count() < 3:
-            return False, "Need at least 3 signals to create a skill"
-        
         if not case.position or len(case.position) < 20:
             return False, "Case needs a position/thesis"
         

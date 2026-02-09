@@ -3,10 +3,13 @@ Agent orchestration service
 
 Manages agent execution with progress tracking and inline chat integration.
 """
+import logging
 import uuid as uuid_module
 from typing import Dict, Any, List, Optional
 from django.utils import timezone
 from asgiref.sync import sync_to_async
+
+logger = logging.getLogger(__name__)
 
 from apps.chat.models import ChatThread, Message
 from apps.chat.services import ChatService
@@ -68,7 +71,7 @@ class AgentOrchestrator:
         )
         
         placeholder = await ChatService.create_assistant_message(
-            thread=thread,
+            thread_id=thread.id,
             content=placeholder_content,
             metadata={
                 'type': 'agent_placeholder',
@@ -114,16 +117,25 @@ class AgentOrchestrator:
             'placeholder_message_id': str(placeholder.id),
         }
 
+        # Inject case-scoped graph context so agents are graph-aware
+        try:
+            from apps.graph.serialization import GraphSerializationService
+            project_id = await sync_to_async(lambda: case.project_id)()
+            graph_context, _ = await sync_to_async(
+                GraphSerializationService.serialize_for_llm
+            )(project_id, case_id=case.id)
+            if graph_context and 'No knowledge graph nodes yet' not in graph_context:
+                task_kwargs['graph_context'] = graph_context
+        except Exception:
+            pass  # Best-effort — agents work without graph context
+
         # Agent-specific param mapping
         if agent_type == 'research':
             task_kwargs['topic'] = params.get('topic', case.position)
         elif agent_type == 'critique':
             target_signal_id = params.get('target_signal_id')
             if not target_signal_id:
-                first_signal = await case.signals.afirst()
-                target_signal_id = str(first_signal.id) if first_signal else None
-            if not target_signal_id:
-                raise ValueError("No signal available for critique agent")
+                raise ValueError("target_signal_id is required for critique agent")
             task_kwargs['target_signal_id'] = target_signal_id
 
         task = descriptor.entry_point.delay(**task_kwargs)
@@ -223,22 +235,25 @@ class AgentOrchestrator:
                 await placeholder.asave()
                 
             except Message.DoesNotExist:
-                pass
-    
+                logger.warning(
+                    "placeholder_message_not_found",
+                    extra={"placeholder_message_id": placeholder_message_id},
+                )
+
     @staticmethod
     async def complete_agent(
         correlation_id: str,
-        artifact_id: str,
+        document_id: str,
         placeholder_message_id: str,
         blocks: List[Dict],
         generation_time_ms: int
     ):
         """
         Mark agent as complete and inject results into chat
-        
+
         Args:
             correlation_id: Workflow correlation ID
-            artifact_id: ID of created artifact
+            document_id: ID of created WorkingDocument
             placeholder_message_id: Placeholder message to replace
             blocks: Generated content blocks
             generation_time_ms: Time taken
@@ -247,7 +262,7 @@ class AgentOrchestrator:
         await sync_to_async(EventService.append)(
             event_type='AGENT_COMPLETED',
             payload={
-                'artifact_id': artifact_id,
+                'document_id': document_id,
                 'blocks_count': len(blocks),
                 'generation_time_ms': generation_time_ms,
                 'completed_at': timezone.now().isoformat()
@@ -255,38 +270,44 @@ class AgentOrchestrator:
             actor_type=ActorType.SYSTEM,
             correlation_id=correlation_id
         )
-        
+
         # Replace placeholder with results
         try:
             placeholder = await Message.objects.aget(id=placeholder_message_id)
-            
+
             # Build result content
             result_content = AgentOrchestrator._build_result_content(
-                artifact_id=artifact_id,
+                document_id=document_id,
                 blocks=blocks,
                 generation_time_ms=generation_time_ms
             )
-            
+
             placeholder.content = result_content
             placeholder.metadata['status'] = 'completed'
             placeholder.metadata['completed_at'] = timezone.now().isoformat()
-            placeholder.metadata['artifact_id'] = artifact_id
-            
+            placeholder.metadata['document_id'] = document_id
+
             await placeholder.asave()
-            
+
         except Message.DoesNotExist:
-            pass
-    
+            logger.warning(
+                "placeholder_message_not_found_on_complete",
+                extra={
+                    "placeholder_message_id": placeholder_message_id,
+                    "document_id": document_id,
+                },
+            )
+
     @staticmethod
     def _build_result_content(
-        artifact_id: str,
+        document_id: str,
         blocks: List[Dict],
         generation_time_ms: int
     ) -> str:
         """Build content for completed agent result"""
-        
+
         content = "✓ **Agent Complete**\n\n"
-        
+
         # Add summary of blocks
         headings = [b for b in blocks if b.get('type') == 'heading']
         if headings:
@@ -296,14 +317,14 @@ class AgentOrchestrator:
             if len(headings) > 5:
                 content += f"- ...and {len(headings) - 5} more\n"
             content += "\n"
-        
+
         # Add time
         time_seconds = generation_time_ms / 1000
         content += f"**Generated in**: {time_seconds:.1f}s\n\n"
-        
-        # Add link to artifact
-        content += f"[View full artifact](/artifacts/{artifact_id})\n\n"
-        
+
+        # Add link to document
+        content += f"[View full document](/working-documents/{document_id})\n\n"
+
         # Add first block as preview
         if blocks:
             first_content_block = next(
@@ -315,5 +336,5 @@ class AgentOrchestrator:
                 if len(first_content_block.get('content', '')) > 200:
                     preview += "..."
                 content += f"**Preview**:\n\n{preview}\n"
-        
+
         return content

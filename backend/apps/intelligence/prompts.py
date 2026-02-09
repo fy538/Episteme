@@ -4,18 +4,15 @@ Unified Prompt Builder for Intelligence Engine
 Builds prompts that generate sectioned output:
 - <response> - Main chat response
 - <reflection> - Meta-cognitive reflection
-- <signals> - Signal extraction (conditional)
 """
 
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 from dataclasses import dataclass
 
 
 @dataclass
 class UnifiedPromptConfig:
     """Configuration for unified prompt generation"""
-    include_signals: bool = True
-    signal_types: List[str] = None
     topic: str = ""
     patterns: Dict = None
 
@@ -53,39 +50,6 @@ Focus on ONE key insight:
 - A pattern you notice
 Be direct and specific. No fluff.
 </reflection>"""
-
-    # Add signals section if extraction is enabled
-    if config.include_signals:
-        signal_types = config.signal_types or ["Assumption", "Question", "Constraint", "Goal", "Claim"]
-        types_list = ", ".join(signal_types)
-
-        signals_section = f"""
-
-<signals>
-Extract epistemic signals from the USER's message as a JSON array.
-Signal types to extract: {types_list}
-
-Each signal should have:
-- "type": One of [{types_list}]
-- "text": The extracted statement (normalized to standalone)
-- "confidence": 0.0-1.0 (how certain is the extraction)
-
-Example:
-[
-  {{"type": "Assumption", "text": "Users prefer speed over accuracy", "confidence": 0.85}},
-  {{"type": "Question", "text": "What's the current system latency?", "confidence": 0.95}}
-]
-
-Return empty array [] if no clear signals found.
-</signals>"""
-        base += signals_section
-    else:
-        # Even without extraction, include empty signals tag for consistent parsing
-        base += """
-
-<signals>
-[]
-</signals>"""
 
     # Add action hints section
     base += """
@@ -208,16 +172,6 @@ Brief observation about the user's decision framing (1-2 sentences).
 Note what's clear vs. what gaps remain for scaffolding.
 </reflection>
 
-<signals>
-Extract signals from the user's message. Focus on:
-- Assumptions they're making about the situation
-- Questions or uncertainties they express
-- Constraints they mention
-- Goals or success criteria
-
-Return as JSON array. Return [] if the message is too brief.
-</signals>
-
 <action_hints>
 []
 </action_hints>"""
@@ -283,7 +237,7 @@ Return as JSON array. Return [] if the message is too brief.
 def build_unified_user_prompt(
     user_message: str,
     conversation_context: str = "",
-    signals_context: Optional[List[Dict]] = None
+    retrieval_context: str = "",
 ) -> str:
     """
     Build the user portion of the unified prompt.
@@ -291,7 +245,7 @@ def build_unified_user_prompt(
     Args:
         user_message: The user's current message
         conversation_context: Formatted previous conversation
-        signals_context: Existing signals for context (optional)
+        retrieval_context: RAG-retrieved document chunks
 
     Returns:
         User prompt string
@@ -302,34 +256,11 @@ def build_unified_user_prompt(
     if conversation_context:
         parts.append(f"Previous conversation:\n{conversation_context}")
 
-    # Add signals context if available
-    if signals_context:
-        signals_text = _format_signals_context(signals_context)
-        if signals_text:
-            parts.append(f"Existing signals from this conversation:\n{signals_text}")
+    # Add retrieved document context for grounding
+    if retrieval_context:
+        parts.append(f"Relevant documents (cite when using):\n{retrieval_context}")
 
     # Add the current message
     parts.append(f"User's latest message:\n{user_message}")
 
     return "\n\n".join(parts)
-
-
-def _format_signals_context(signals: List[Dict]) -> str:
-    """Format existing signals into context string"""
-    if not signals:
-        return ""
-
-    # Group by type
-    by_type = {}
-    for signal in signals[:10]:  # Limit to 10 most relevant
-        sig_type = signal.get('type', 'Unknown')
-        if sig_type not in by_type:
-            by_type[sig_type] = []
-        by_type[sig_type].append(signal)
-
-    parts = []
-    for sig_type, sigs in by_type.items():
-        type_signals = [f"  - {s['text']}" for s in sigs[:3]]  # Max 3 per type
-        parts.append(f"{sig_type}s:\n" + "\n".join(type_signals))
-
-    return "\n".join(parts)

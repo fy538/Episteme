@@ -22,7 +22,6 @@ from apps.cases.brief_models import (
 
 class BriefAnnotationSerializer(serializers.ModelSerializer):
     """Read-only serializer for annotations."""
-    source_signal_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = BriefAnnotation
@@ -31,7 +30,6 @@ class BriefAnnotationSerializer(serializers.ModelSerializer):
             'annotation_type',
             'description',
             'priority',
-            'source_signal_ids',
             'source_inquiry',
             'created_at',
             'dismissed_at',
@@ -39,9 +37,6 @@ class BriefAnnotationSerializer(serializers.ModelSerializer):
             'resolved_by',
         ]
         read_only_fields = fields
-
-    def get_source_signal_ids(self, obj):
-        return [str(s.id) for s in obj.source_signals.all()]
 
 
 class BriefSectionSerializer(serializers.ModelSerializer):

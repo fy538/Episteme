@@ -2,15 +2,13 @@
  * Global Keyboard Shortcuts Hook
  * Centralized keyboard shortcut management
  *
- * Navigation rail shortcuts:
- *   Cmd+1 → Chat (conversations)
- *   Cmd+2 → Cases
+ * Shortcuts:
  *   Cmd+B → Toggle sidebar panel
+ *   Cmd+Shift+? → Show keyboard help
  */
 
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useKeyboardShortcut } from '@/components/ui/keyboard-shortcut';
 
 interface UseGlobalKeyboardOptions {
@@ -18,17 +16,6 @@ interface UseGlobalKeyboardOptions {
 }
 
 export function useGlobalKeyboardShortcuts(options?: UseGlobalKeyboardOptions) {
-  const router = useRouter();
-
-  // Rail navigation shortcuts (2 sections)
-  useKeyboardShortcut(['Cmd', '1'], () => {
-    router.push('/chat');
-  });
-
-  useKeyboardShortcut(['Cmd', '2'], () => {
-    router.push('/cases');
-  });
-
   // Toggle sidebar panel
   useKeyboardShortcut(['Cmd', 'B'], () => {
     options?.onTogglePanel?.();
@@ -46,16 +33,6 @@ export const GLOBAL_SHORTCUTS = [
   {
     keys: ['⌘', 'K'],
     description: 'Command palette',
-    category: 'Navigation',
-  },
-  {
-    keys: ['⌘', '1'],
-    description: 'Go to Chat',
-    category: 'Navigation',
-  },
-  {
-    keys: ['⌘', '2'],
-    description: 'Go to Cases',
     category: 'Navigation',
   },
   {

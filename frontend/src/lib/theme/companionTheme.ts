@@ -74,9 +74,7 @@ const terminalTheme = {
   // Session receipt types
   receipts: {
     case_created: { text: 'text-amber-400', icon: 'text-amber-500' },
-    signals_extracted: { text: 'text-cyan-400', icon: 'text-cyan-500' },
     inquiry_resolved: { text: 'text-green-400', icon: 'text-green-500' },
-    evidence_added: { text: 'text-purple-400', icon: 'text-purple-500' },
     research_completed: { text: 'text-blue-400', icon: 'text-blue-500' },
   },
 
@@ -159,9 +157,7 @@ const professionalTheme = {
   // Session receipt types
   receipts: {
     case_created: { text: 'text-warning-600 dark:text-warning-400', icon: 'text-warning-500' },
-    signals_extracted: { text: 'text-accent-600 dark:text-accent-400', icon: 'text-accent-500' },
     inquiry_resolved: { text: 'text-success-600 dark:text-success-400', icon: 'text-success-500' },
-    evidence_added: { text: 'text-primary-600 dark:text-primary-400', icon: 'text-primary-500' },
     research_completed: { text: 'text-info-600 dark:text-info-400', icon: 'text-info-500' },
   },
 

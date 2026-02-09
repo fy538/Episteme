@@ -24,7 +24,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
             'system_prompt_extension': str,  # Additional content for system prompt
             'custom_signal_types': list,     # Custom signal type definitions
             'evidence_standards': dict,      # Evidence credibility standards
-            'artifact_template': dict,       # Artifact structure template
+            'document_template': dict,       # Document structure template
             'research_config': ResearchConfig | None,  # Parsed research config (if any)
         }
     """
@@ -32,7 +32,7 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
         'system_prompt_extension': '',
         'custom_signal_types': [],
         'evidence_standards': {},
-        'artifact_template': None,
+        'document_template': None,
         'research_config': None,
     }
 
@@ -71,9 +71,11 @@ def build_skill_context(skills: List[Skill], agent_type: str) -> Dict[str, Any]:
             # Merge evidence standards (later skills override earlier ones)
             context['evidence_standards'].update(episteme['evidence_standards'])
 
-        # Artifact template (last skill wins)
-        if 'artifact_template' in episteme:
-            context['artifact_template'] = episteme['artifact_template']
+        # Document template (last skill wins; accepts old 'artifact_template' key too)
+        if 'document_template' in episteme:
+            context['document_template'] = episteme['document_template']
+        elif 'artifact_template' in episteme:
+            context['document_template'] = episteme['artifact_template']
 
         # Research config (merge across skills — last skill wins for each section)
         if 'research_config' in episteme:
@@ -144,10 +146,10 @@ def format_system_prompt_with_skills(
         if 'requires_citation' in standards:
             enhanced_prompt += f"\nAll claims must be cited: {standards['requires_citation']}\n"
     
-    # Add artifact template if any
-    if skill_context['artifact_template']:
-        enhanced_prompt += "\n\n# Artifact Structure Template\n"
-        template = skill_context['artifact_template']
+    # Add document template if any
+    if skill_context['document_template']:
+        enhanced_prompt += "\n\n# Document Structure Template\n"
+        template = skill_context['document_template']
         
         # Handle different template formats
         if isinstance(template, dict):
@@ -166,7 +168,7 @@ def format_system_prompt_with_skills(
 
 def extract_brief_sections_from_skill(skill: Skill) -> list[dict] | None:
     """
-    Extract brief section definitions from a skill's artifact_template.
+    Extract brief section definitions from a skill's document_template.
 
     Supports two formats:
     1. Simple string list: ["Legal Summary", "Risk Assessment"]
@@ -174,11 +176,11 @@ def extract_brief_sections_from_skill(skill: Skill) -> list[dict] | None:
 
     Returns:
         List of section dicts with {heading, type, is_locked, lock_reason},
-        or None if no artifact_template or no brief sections defined.
+        or None if no document_template or no brief sections defined.
     """
     from apps.cases.brief_models import SectionType
 
-    template = skill.episteme_config.get('artifact_template', {})
+    template = skill.episteme_config.get('document_template') or skill.episteme_config.get('artifact_template', {})
     if not isinstance(template, dict):
         return None
 

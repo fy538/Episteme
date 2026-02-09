@@ -207,13 +207,32 @@ def build_evidence_suggestion_prompt(case, inquiry) -> str:
 
 **Current Evidence:**
 """
-    # Add existing evidence
-    evidence_items = inquiry.evidence_items.all()[:10]
-    if evidence_items:
-        for e in evidence_items:
-            direction = "+" if e.direction == 'supports' else "-" if e.direction == 'contradicts' else "○"
-            prompt += f"\n{direction} {e.evidence_text[:100]}..."
-    else:
+    # Add existing evidence from graph nodes
+    try:
+        from apps.graph.models import Node, Edge, EdgeType
+        case = inquiry.case
+        if case and case.project:
+            evidence_nodes = Node.objects.filter(
+                project=case.project,
+                node_type='evidence',
+            )[:10]
+            if evidence_nodes:
+                for ev_node in evidence_nodes:
+                    # Determine direction from edges
+                    has_support = Edge.objects.filter(
+                        source_node=ev_node, edge_type=EdgeType.SUPPORTS
+                    ).exists()
+                    has_contradict = Edge.objects.filter(
+                        source_node=ev_node, edge_type=EdgeType.CONTRADICTS
+                    ).exists()
+                    direction = "+" if has_support else "-" if has_contradict else "○"
+                    content = (ev_node.content or '')[:100]
+                    prompt += f"\n{direction} {content}..."
+            else:
+                prompt += "\nNo evidence gathered yet."
+        else:
+            prompt += "\nNo evidence gathered yet."
+    except Exception:
         prompt += "\nNo evidence gathered yet."
 
     prompt += """

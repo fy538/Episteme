@@ -16,7 +16,7 @@ import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { casesAPI } from '@/lib/api/cases';
 import { documentsAPI } from '@/lib/api/documents';
 import { inquiriesAPI } from '@/lib/api/inquiries';
-import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
+import type { Case, WorkingDocument, Inquiry } from '@/lib/types/case';
 
 export default function BriefPage() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function BriefPage() {
   const caseId = params.caseId as string;
 
   const [caseData, setCaseData] = useState<Case | null>(null);
-  const [briefDoc, setBriefDoc] = useState<CaseDocument | null>(null);
+  const [briefDoc, setBriefDoc] = useState<WorkingDocument | null>(null);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

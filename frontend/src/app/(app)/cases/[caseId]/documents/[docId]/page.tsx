@@ -12,7 +12,7 @@ import { BriefEditor } from '@/components/editor/BriefEditor';
 import { AIDocumentViewer } from '@/components/editor/AIDocumentViewer';
 import { documentsAPI } from '@/lib/api/documents';
 import { casesAPI } from '@/lib/api/cases';
-import type { CaseDocument, Case } from '@/lib/types/case';
+import type { WorkingDocument, Case } from '@/lib/types/case';
 
 export default function DocumentPage({
   params,
@@ -20,7 +20,7 @@ export default function DocumentPage({
   params: { caseId: string; docId: string };
 }) {
   const router = useRouter();
-  const [document, setDocument] = useState<CaseDocument | null>(null);
+  const [document, setDocument] = useState<WorkingDocument | null>(null);
   const [caseData, setCaseData] = useState<Case | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

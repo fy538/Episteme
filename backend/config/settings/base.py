@@ -39,15 +39,13 @@ INSTALLED_APPS = [
     'apps.events',
     'apps.chat',
     'apps.cases',
-    'apps.signals',
     'apps.inquiries',  # Phase 2
     'apps.agents',  # Phase 2B
     'apps.projects',  # Phase 2
-    'apps.artifacts',  # Phase 2.4
+    'apps.artifacts',  # Deprecated — kept for deletion migration only, remove after migrating
     'apps.skills',  # Skills system
-    'apps.companion',  # Reasoning companion
-    'apps.reasoning',  # Auto-reasoning and knowledge graph
     'apps.intelligence',  # Unified analysis engine
+    'apps.graph',  # Knowledge graph (Node/Edge/GraphDelta)
 ]
 
 MIDDLEWARE = [
@@ -160,13 +158,9 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 # Celery Beat Schedule (periodic tasks)
 from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
-    'consolidate-signals-daily': {
-        'task': 'apps.signals.tasks.schedule_signal_consolidation',
-        'schedule': crontab(hour=3, minute=0),  # 3 AM daily
-    },
-    'update-signal-temperatures-daily': {
-        'task': 'apps.signals.tasks.update_signal_temperatures',
-        'schedule': crontab(hour=4, minute=0),  # 4 AM daily
+    'regenerate-stale-summaries': {
+        'task': 'apps.graph.tasks.regenerate_stale_summaries',
+        'schedule': crontab(hour=3, minute=0),
     },
 }
 
@@ -235,19 +229,13 @@ AI_MODELS = {
     'chat': env('AI_MODEL_CHAT', default='anthropic:claude-haiku-4-5'),  # Default chat model
     'reasoning': env('AI_MODEL_REASONING', default='openai:gpt-4o-mini'),
     'fast': env('AI_MODEL_FAST', default='anthropic:claude-haiku-4-5'),
-    'extraction': env('AI_MODEL_EXTRACTION', default='openai:gpt-4o-mini'),
+    'extraction': env('AI_MODEL_EXTRACTION', default='anthropic:claude-haiku-4-5'),
 }
 
-# Embedding Backend (Phase 2/3)
+# Embedding Backend
 EMBEDDING_BACKEND = env('EMBEDDING_BACKEND', default='postgresql')
-# Options:
-#   'postgresql' (default) - JSON column, linear scan, good for <100K chunks
-#   'pgvector' - Vector column with HNSW index, 28x faster, requires pgvector extension
-#   'pinecone' (legacy) - External vector DB, for backward compatibility
-
-# Pinecone (legacy - for backward compatibility during migration)
-PINECONE_API_KEY = env('PINECONE_API_KEY', default='')
-PINECONE_ENVIRONMENT = env('PINECONE_ENVIRONMENT', default='us-east-1')
+# sentence-transformers model for embeddings (384-dim, same dims for L6/L12)
+EMBEDDING_MODEL = env('EMBEDDING_MODEL', default='all-MiniLM-L12-v2')
 
 # Document Processing (Phase 2)
 MAX_UPLOAD_SIZE = env.int('MAX_UPLOAD_SIZE', default=10485760)  # 10MB

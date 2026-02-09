@@ -46,13 +46,12 @@ PyPDF2==3.0.1
 python-docx==1.1.0
 beautifulsoup4>=4.12.0  # HTML parsing for URL evidence ingestion
 
-# Vector DB
-# pgvector - recommended for new deployments (28x faster, no external deps)
+# Vector DB (pgvector — native PostgreSQL, HNSW indexes)
 pgvector>=0.2.4
 
-# Pinecone - DEPRECATED, for backward compatibility only
-# Remove after migrating to pgvector: python manage.py migrate_to_pgvector --all
-pinecone>=3.0.0
+# Graph clustering (Leiden community detection)
+python-igraph>=0.11.6
+leidenalg>=0.10.2
 
 # Google ADK (Phase 2.4 - AI agents)
 google-adk==0.5.0

@@ -31,7 +31,7 @@ interface SpotlightSearchProps {
   contextCaseName?: string;
 }
 
-const RESULT_TYPES: SearchResultType[] = ['signal', 'evidence', 'inquiry', 'case', 'document'];
+const RESULT_TYPES: SearchResultType[] = ['inquiry', 'case', 'document'];
 
 // Quick actions for empty state
 interface QuickAction {

@@ -26,8 +26,6 @@ class DocumentType(models.TextChoices):
     CASE_BRIEF = 'case_brief', 'Case Brief'
     INQUIRY_BRIEF = 'inquiry_brief', 'Inquiry Brief'
     RESEARCH = 'research', 'Research Report'
-    DEBATE = 'debate', 'AI Debate'
-    CRITIQUE = 'critique', 'AI Critique'
     SOURCE = 'source', 'Source Document'
     NOTES = 'notes', 'Notes'
 
@@ -108,25 +106,7 @@ class Case(UUIDModel, TimestampedModel):
         help_text="User's answer to 'What would change your mind?'"
     )
 
-    # "What would change your mind" resurface response
-    what_changed_mind_response = models.CharField(
-        max_length=50,
-        blank=True,
-        choices=[
-            ('updated_view', 'Yes, and I updated my view'),
-            ('proceeding_anyway', 'Yes, but I\'m proceeding anyway'),
-            ('not_materialized', 'No, none of this materialized'),
-        ],
-        help_text="User's response when their earlier 'what would change your mind' is resurfaced"
-    )
-    what_changed_mind_response_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When the user responded to the resurface prompt"
-    )
-
     # Premortem — "Imagine this decision failed. What's the most likely reason?"
-    # Prompted when case enters synthesizing stage
     premortem_text = models.TextField(
         blank=True,
         help_text="User's premortem: imagined reason for future failure"
@@ -151,7 +131,7 @@ class Case(UUIDModel, TimestampedModel):
     
     # Main brief (Phase 2A)
     main_brief = models.ForeignKey(
-        'CaseDocument',
+        'WorkingDocument',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -243,53 +223,22 @@ class Case(UUIDModel, TimestampedModel):
         return self.title
 
 
-class WorkingView(UUIDModel):
-    """
-    Materialized snapshot of a case's current state (Phase 1)
-    
-    This is a denormalized view for fast rendering and "what changed" diffs.
-    """
-    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name='working_views')
-    
-    # Snapshot of the case state
-    summary_json = models.JSONField(help_text="Materialized case state with signals")
-    
-    # Provenance
-    based_on_event_id = models.UUIDField(
-        help_text="Last event included in this snapshot"
-    )
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['case', '-created_at']),
-            models.Index(fields=['based_on_event_id']),
-        ]
-    
-    def __str__(self):
-        return f"WorkingView for {self.case.title} at {self.created_at}"
-
-
-class CaseDocument(UUIDModel, TimestampedModel):
+class WorkingDocument(UUIDModel, TimestampedModel):
     """
     Documents within a case - flexible multi-document system.
-    
+
     Supports multiple document types:
     - Briefs (user writes synthesis - low edit friction)
     - Research (AI generates - high edit friction, annotate only)
-    - Debates (AI personas - high friction)
-    - Critiques (AI challenges - high friction)
     - Sources (uploaded PDFs - read-only)
     - Notes (user freeform - low friction)
-    
+
     Documents can cite each other via markdown links: [[doc-name#section]]
     """
     case = models.ForeignKey(
         Case,
         on_delete=models.CASCADE,
-        related_name='case_documents'
+        related_name='working_documents'
     )
     
     inquiry = models.ForeignKey(
@@ -325,7 +274,7 @@ class CaseDocument(UUIDModel, TimestampedModel):
     # Flexible AI structure (schema varies by document_type)
     ai_structure = models.JSONField(
         default=dict,
-        help_text="Extracted structure - research has findings, debates have positions, etc."
+        help_text="Extracted structure - e.g. research has findings"
     )
     
     # If AI-generated
@@ -337,7 +286,7 @@ class CaseDocument(UUIDModel, TimestampedModel):
     agent_type = models.CharField(
         max_length=50,
         blank=True,
-        help_text="Type of agent that generated this (research, debate, critique)"
+        help_text="Type of agent that generated this (e.g. research)"
     )
     
     generation_prompt = models.TextField(
@@ -355,7 +304,7 @@ class CaseDocument(UUIDModel, TimestampedModel):
     created_by = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='created_case_documents'
+        related_name='created_working_documents'
     )
     
     class Meta:
@@ -371,15 +320,15 @@ class CaseDocument(UUIDModel, TimestampedModel):
         return f"{self.document_type}: {self.title}"
 
 
-class CaseDocumentVersion(UUIDModel):
+class WorkingDocumentVersion(UUIDModel):
     """
-    Version snapshot for CaseDocument content.
+    Version snapshot for WorkingDocument content.
 
     Created automatically before AI overwrites (suggestions, agentic tasks)
     and optionally on manual saves. Enables rollback and AI attribution.
     """
     document = models.ForeignKey(
-        CaseDocument,
+        WorkingDocument,
         on_delete=models.CASCADE,
         related_name='versions'
     )
@@ -430,17 +379,25 @@ class CaseDocumentVersion(UUIDModel):
     @classmethod
     def create_snapshot(cls, document, created_by, diff_summary='', task_description=''):
         """Create a version snapshot of the current document content."""
-        latest = cls.objects.filter(document=document).order_by('-version').first()
-        next_version = (latest.version + 1) if latest else 1
+        from django.db import transaction
 
-        return cls.objects.create(
-            document=document,
-            version=next_version,
-            content_markdown=document.content_markdown,
-            diff_summary=diff_summary,
-            created_by=created_by,
-            task_description=task_description,
-        )
+        with transaction.atomic():
+            latest = (
+                cls.objects.select_for_update()
+                .filter(document=document)
+                .order_by('-version')
+                .first()
+            )
+            next_version = (latest.version + 1) if latest else 1
+
+            return cls.objects.create(
+                document=document,
+                version=next_version,
+                content_markdown=document.content_markdown,
+                diff_summary=diff_summary,
+                created_by=created_by,
+                task_description=task_description,
+            )
 
 
 class InvestigationPlan(UUIDModel, TimestampedModel):
@@ -497,7 +454,7 @@ class PlanVersion(UUIDModel):
     phases, assumptions, decision criteria. Each AI-proposed or
     user-confirmed change creates a new version.
 
-    Follows the CaseDocumentVersion pattern (create_snapshot classmethod).
+    Follows the WorkingDocumentVersion pattern (create_snapshot classmethod).
     """
     plan = models.ForeignKey(
         InvestigationPlan,
@@ -576,18 +533,26 @@ class PlanVersion(UUIDModel):
 
     @classmethod
     def create_snapshot(cls, plan, content, created_by, diff_summary='', diff_data=None):
-        """Create a new version snapshot. Mirrors CaseDocumentVersion.create_snapshot."""
-        latest = cls.objects.filter(plan=plan).order_by('-version_number').first()
-        next_version = (latest.version_number + 1) if latest else 1
+        """Create a new version snapshot. Mirrors WorkingDocumentVersion.create_snapshot."""
+        from django.db import transaction
 
-        version = cls.objects.create(
-            plan=plan,
-            version_number=next_version,
-            content=content,
-            created_by=created_by,
-            diff_summary=diff_summary,
-            diff_data=diff_data,
-        )
+        with transaction.atomic():
+            latest = (
+                cls.objects.select_for_update()
+                .filter(plan=plan)
+                .order_by('-version_number')
+                .first()
+            )
+            next_version = (latest.version_number + 1) if latest else 1
+
+            version = cls.objects.create(
+                plan=plan,
+                version_number=next_version,
+                content=content,
+                created_by=created_by,
+                diff_summary=diff_summary,
+                diff_data=diff_data,
+            )
 
         # Update the plan's current version pointer
         plan.current_version = next_version
@@ -604,13 +569,13 @@ class DocumentCitation(UUIDModel, TimestampedModel):
     Enables bidirectional navigation and tracks document connections.
     """
     from_document = models.ForeignKey(
-        CaseDocument,
+        WorkingDocument,
         on_delete=models.CASCADE,
         related_name='outgoing_citations'
     )
-    
+
     to_document = models.ForeignKey(
-        CaseDocument,
+        WorkingDocument,
         on_delete=models.CASCADE,
         related_name='incoming_citations'
     )
@@ -644,136 +609,6 @@ class DocumentCitation(UUIDModel, TimestampedModel):
         return f"{self.from_document.title} → {self.to_document.title}"
 
 
-class ReadinessChecklistItem(UUIDModel, TimestampedModel):
-    """
-    User-defined readiness criteria for a case.
-
-    The user defines what "ready to decide" means for them.
-    System provides defaults but user can customize.
-    """
-    case = models.ForeignKey(
-        Case,
-        on_delete=models.CASCADE,
-        related_name='readiness_checklist'
-    )
-
-    description = models.TextField(
-        help_text="What needs to be true/done before deciding"
-    )
-
-    is_required = models.BooleanField(
-        default=True,
-        help_text="Whether this item must be complete to be 'ready'"
-    )
-
-    is_complete = models.BooleanField(
-        default=False,
-        help_text="User marks this complete when satisfied"
-    )
-
-    completed_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When this item was marked complete"
-    )
-
-    # Optional links to related items
-    linked_inquiry = models.ForeignKey(
-        'inquiries.Inquiry',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='readiness_items',
-        help_text="Inquiry that validates this criterion"
-    )
-
-    linked_assumption_signal = models.ForeignKey(
-        'signals.Signal',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='readiness_items',
-        help_text="Assumption signal related to this criterion"
-    )
-
-    order = models.IntegerField(
-        default=0,
-        help_text="Display order"
-    )
-
-    # AI-generated context
-    why_important = models.TextField(
-        blank=True,
-        help_text="AI explanation of why this item matters for the decision"
-    )
-
-    created_by_ai = models.BooleanField(
-        default=False,
-        help_text="Whether this item was AI-generated"
-    )
-
-    # Auto-completion tracking
-    completion_note = models.TextField(
-        blank=True,
-        help_text="Note about how/why this was completed (especially for auto-completion)"
-    )
-
-    # Phase 2: Hierarchical structure
-    parent = models.ForeignKey(
-        'self',
-        null=True,
-        blank=True,
-        on_delete=models.CASCADE,
-        related_name='children',
-        help_text="Parent item (for nested/dependent items)"
-    )
-
-    item_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('validation', 'Validate Assumption'),
-            ('investigation', 'Complete Investigation'),
-            ('analysis', 'Perform Analysis'),
-            ('stakeholder', 'Stakeholder Input'),
-            ('alternative', 'Evaluate Alternative'),
-            ('criteria', 'Define Criteria'),
-            ('custom', 'Custom'),
-        ],
-        default='custom',
-        help_text="Type of readiness item"
-    )
-
-    # Phase 2: Blocking dependencies
-    # Note: blocks relationship means "this item blocks other items from being completed"
-    # Use item.blocks.all() to get items this blocks
-    # Use item.blocked_by.all() to get items blocking this one
-    blocks = models.ManyToManyField(
-        'self',
-        symmetrical=False,
-        related_name='blocked_by',
-        blank=True,
-        help_text="Items that cannot be completed until this one is done"
-    )
-
-    # Must be defined after all fields
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Store original completion state for signal detection
-        self._original_is_complete = self.is_complete if self.pk else False
-
-    class Meta:
-        ordering = ['parent__order', 'order', 'id']  # Parents first, then children
-        indexes = [
-            models.Index(fields=['case', 'order']),
-            models.Index(fields=['case', 'parent']),
-            models.Index(fields=['item_type']),
-        ]
-
-    def __str__(self):
-        status = '✓' if self.is_complete else '○'
-        return f"{status} {self.description[:50]}"
-
-
 class CaseActiveSkill(models.Model):
     """
     Through model for Case.active_skills with ordering and provenance.
@@ -790,13 +625,6 @@ class CaseActiveSkill(models.Model):
         help_text="Priority order (lower = higher priority)"
     )
     activated_at = models.DateTimeField(auto_now_add=True)
-    activated_from_pack = models.ForeignKey(
-        'skills.SkillPack',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        help_text="Pack that caused this activation (for provenance)"
-    )
 
     class Meta:
         db_table = 'case_active_skills'
@@ -805,13 +633,3 @@ class CaseActiveSkill(models.Model):
 
     def __str__(self):
         return f"{self.case.title[:30]} <- {self.skill.name} (order={self.order})"
-
-
-# Default checklist items for new cases
-DEFAULT_READINESS_CHECKLIST = [
-    {"description": "Decision question is clearly defined", "is_required": True},
-    {"description": "I've considered at least one alternative", "is_required": True},
-    {"description": "Key assumptions are identified", "is_required": True},
-    {"description": "Critical assumptions are validated or risk accepted", "is_required": False},
-    {"description": "I understand what would change my mind", "is_required": False},
-]

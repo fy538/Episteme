@@ -9,7 +9,6 @@ export function getActionHintIcon(type: string): string {
   switch (type) {
     case 'suggest_case': return '📋';
     case 'suggest_inquiry': return '🔍';
-    case 'suggest_evidence': return '📎';
     case 'suggest_resolution': return '✅';
     default: return '💡';
   }
@@ -21,8 +20,6 @@ export function getActionHintLabel(type: string, data: Record<string, unknown>):
       return (data.suggested_title as string) || 'Create case';
     case 'suggest_inquiry':
       return (data.suggested_title as string) || 'Start inquiry';
-    case 'suggest_evidence':
-      return 'Add evidence';
     case 'suggest_resolution':
       return 'Resolve inquiry';
     default:

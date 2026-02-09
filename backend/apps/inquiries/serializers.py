@@ -3,13 +3,31 @@ Serializers for Inquiry models
 """
 from rest_framework import serializers
 
-from apps.inquiries.models import Inquiry, Evidence, Objection
+from apps.inquiries.models import Inquiry, InquiryHistory, Objection
+
+
+class InquiryHistorySerializer(serializers.ModelSerializer):
+    """Serializer for InquiryHistory model"""
+
+    inquiry_title = serializers.CharField(source='inquiry.title', read_only=True)
+
+    class Meta:
+        model = InquiryHistory
+        fields = [
+            'id',
+            'inquiry',
+            'inquiry_title',
+            'confidence',
+            'trigger_event',
+            'reason',
+            'timestamp'
+        ]
+        read_only_fields = ['id', 'timestamp']
 
 
 class InquirySerializer(serializers.ModelSerializer):
     """Serializer for Inquiry model"""
 
-    related_signals_count = serializers.SerializerMethodField()
     is_active = serializers.BooleanField(read_only=True)
     is_resolved = serializers.BooleanField(read_only=True)
     blocked_by = serializers.PrimaryKeyRelatedField(
@@ -36,7 +54,6 @@ class InquirySerializer(serializers.ModelSerializer):
             'sequence_index',
             'created_at',
             'updated_at',
-            'related_signals_count',
             'is_active',
             'is_resolved',
             # Dependency fields
@@ -45,13 +62,6 @@ class InquirySerializer(serializers.ModelSerializer):
             'blocks',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'sequence_index']
-
-    def get_related_signals_count(self, obj):
-        """Count of signals — uses prefetched cache when available"""
-        try:
-            return len(obj.related_signals.all())
-        except AttributeError:
-            return 0
 
     def get_blocked_by_titles(self, obj):
         """Get titles of blocking inquiries — uses prefetched cache"""
@@ -64,8 +74,6 @@ class InquirySerializer(serializers.ModelSerializer):
 class InquiryListSerializer(serializers.ModelSerializer):
     """Lighter serializer for listing inquiries"""
 
-    related_signals_count = serializers.SerializerMethodField()
-
     class Meta:
         model = Inquiry
         fields = [
@@ -76,14 +84,7 @@ class InquiryListSerializer(serializers.ModelSerializer):
             'elevation_reason',
             'created_at',
             'resolved_at',
-            'related_signals_count',
         ]
-
-    def get_related_signals_count(self, obj):
-        try:
-            return len(obj.related_signals.all())
-        except AttributeError:
-            return 0
 
 
 class InquiryCreateSerializer(serializers.ModelSerializer):
@@ -106,102 +107,6 @@ class InquiryCreateSerializer(serializers.ModelSerializer):
         validated_data['sequence_index'] = (last_inquiry.sequence_index + 1) if last_inquiry else 0
         
         return super().create(validated_data)
-
-
-class EvidenceSerializer(serializers.ModelSerializer):
-    """Serializer for Evidence model"""
-
-    document_title = serializers.CharField(
-        source='source_document.title', read_only=True, default=None,
-    )
-    chunk_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Evidence
-        fields = [
-            'id',
-            'inquiry',
-            'evidence_type',
-            'source_document',
-            'document_title',
-            'evidence_text',
-            'direction',
-            'strength',
-            'credibility',
-            'verified',
-            'notes',
-            'created_by',
-            'created_at',
-            'chunk_count',
-        ]
-        read_only_fields = ['id', 'created_at', 'created_by']
-
-    def get_chunk_count(self, obj):
-        """Count of chunks cited — uses prefetched cache when available"""
-        try:
-            return len(obj.source_chunks.all())
-        except AttributeError:
-            return 0
-
-
-class EvidenceCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating evidence"""
-    
-    chunk_ids = serializers.ListField(
-        child=serializers.UUIDField(),
-        required=False,
-        write_only=True,
-        help_text="List of chunk IDs to cite"
-    )
-    
-    class Meta:
-        model = Evidence
-        fields = [
-            'inquiry',
-            'evidence_type',
-            'source_document',
-            'chunk_ids',
-            'evidence_text',
-            'direction',
-            'strength',
-            'credibility',
-            'verified',
-            'notes',
-        ]
-    
-    def create(self, validated_data):
-        chunk_ids = validated_data.pop('chunk_ids', [])
-
-        # Add created_by from context
-        validated_data['created_by'] = self.context['request'].user
-
-        evidence = Evidence.objects.create(**validated_data)
-
-        # Link chunks
-        if chunk_ids:
-            from apps.projects.models import DocumentChunk
-            chunks = DocumentChunk.objects.filter(id__in=chunk_ids)
-            evidence.source_chunks.set(chunks)
-
-        # Emit provenance event
-        from apps.events.services import EventService
-        from apps.events.models import EventType, ActorType
-        inquiry = evidence.inquiry
-        EventService.append(
-            event_type=EventType.EVIDENCE_ADDED,
-            payload={
-                'evidence_id': str(evidence.id),
-                'inquiry_id': str(inquiry.id),
-                'inquiry_title': inquiry.title,
-                'direction': evidence.direction,
-                'source_summary': (evidence.evidence_text or '')[:100],
-            },
-            actor_type=ActorType.USER,
-            actor_id=self.context['request'].user.id,
-            case_id=inquiry.case_id,
-        )
-
-        return evidence
 
 
 class ObjectionSerializer(serializers.ModelSerializer):

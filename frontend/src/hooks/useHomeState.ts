@@ -48,9 +48,9 @@ export function useHomeState() {
       // Create a new thread
       const thread = await chatAPI.createThread();
 
-      // Store the initial message in sessionStorage for the chat page to pick up
+      // Store the initial message with threadId so the consumer can verify the match
       if (typeof window !== 'undefined') {
-        sessionStorage.setItem('episteme_initial_message', content);
+        sessionStorage.setItem('episteme_initial_message', JSON.stringify({ threadId: thread.id, content }));
       }
 
       // Navigate to the conversation page

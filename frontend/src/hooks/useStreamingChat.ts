@@ -17,7 +17,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { chatAPI } from '@/lib/api/chat';
 import { TIMEOUT } from '@/lib/constants';
 import type { Message } from '@/lib/types/chat';
-import type { Signal } from '@/lib/types/signal';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
 
 const TTFT_TIMEOUT_MS = TIMEOUT.TTFT;
@@ -27,8 +26,10 @@ export interface UseStreamingChatOptions {
   threadId: string;
   /** Mode context forwarded to backend for system prompt selection and metadata */
   context?: { mode?: string; caseId?: string; inquiryId?: string; source_type?: string; source_id?: string };
-  /** Callbacks for reflection, signals, action hints forwarded to parent */
+  /** Callbacks for reflection, action hints forwarded to parent */
   streamCallbacks?: StreamingCallbacks;
+  /** Skip loading existing messages on mount (for brand-new threads with initial message handoff) */
+  skipInitialLoad?: boolean;
 }
 
 export interface UseStreamingChatReturn {
@@ -50,6 +51,7 @@ export function useStreamingChat({
   threadId,
   context,
   streamCallbacks,
+  skipInitialLoad,
 }: UseStreamingChatOptions): UseStreamingChatReturn {
   // --- Chat state ---
   const [messages, setMessages] = useState<Message[]>([]);
@@ -87,8 +89,9 @@ export function useStreamingChat({
     }
   }, []);
 
-  // Load messages on thread change
+  // Load messages on thread change (skip for brand-new threads with initial message handoff)
   useEffect(() => {
+    if (skipInitialLoad) return;
     async function loadMessages() {
       setIsLoading(true);
       try {
@@ -103,7 +106,7 @@ export function useStreamingChat({
       }
     }
     loadMessages();
-  }, [threadId]);
+  }, [threadId, skipInitialLoad]);
 
   // Send message with unified streaming
   const sendMessage = useCallback(async (content: string) => {
@@ -201,11 +204,11 @@ export function useStreamingChat({
             onReflectionComplete: (reflectionContent) => {
               streamCallbacksRef.current?.onReflectionComplete?.(reflectionContent);
             },
-            onSignals: (signals) => {
-              streamCallbacksRef.current?.onSignals?.(signals as Signal[]);
-            },
             onActionHints: (hints) => {
               streamCallbacksRef.current?.onActionHints?.(hints);
+            },
+            onGraphEdits: (summary) => {
+              streamCallbacksRef.current?.onGraphEdits?.(summary);
             },
             onTitleUpdate: (title) => {
               streamCallbacksRef.current?.onTitleUpdate?.(title);

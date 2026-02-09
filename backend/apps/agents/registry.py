@@ -97,35 +97,18 @@ def register_default_agents() -> None:
     """
     registry = AgentRegistry()
 
-    # Research agent (v2 loop)
+    # Research agent (v2 loop → WorkingDocument)
     registry.register(AgentDescriptor(
         name="research",
         description="Multi-step research loop: Plan → Search → Extract → Evaluate → Synthesize",
-        entry_point=_lazy_task("apps.artifacts.workflows.generate_research_artifact_v2"),
-        accepts_params=["topic", "case_id", "user_id", "correlation_id", "placeholder_message_id"],
+        entry_point=_lazy_task("apps.agents.research_workflow.generate_research_document"),
+        accepts_params=["topic", "case_id", "user_id", "correlation_id", "placeholder_message_id", "graph_context"],
         required_params=["case_id", "user_id"],
         can_be_sub_agent=True,
     ))
 
-    # Critique agent
-    registry.register(AgentDescriptor(
-        name="critique",
-        description="Red-team analysis of a signal or position",
-        entry_point=_lazy_task("apps.artifacts.workflows.generate_critique_artifact"),
-        accepts_params=["case_id", "target_signal_id", "user_id", "correlation_id", "placeholder_message_id"],
-        required_params=["case_id", "user_id"],
-        can_be_sub_agent=True,
-    ))
-
-    # Brief agent
-    registry.register(AgentDescriptor(
-        name="brief",
-        description="Decision brief summarizing case position and evidence",
-        entry_point=_lazy_task("apps.artifacts.workflows.generate_brief_artifact"),
-        accepts_params=["case_id", "user_id", "correlation_id", "placeholder_message_id"],
-        required_params=["case_id", "user_id"],
-        can_be_sub_agent=False,  # Briefs are top-level only
-    ))
+    # Critique agent — REMOVED (feature cut)
+    # Brief agent — REMOVED (briefs are now generated via WorkingDocument system)
 
     logger.info("default_agents_registered", extra={"count": len(registry.list())})
 

@@ -133,6 +133,16 @@ def build_plan_prompt(
     if context.get("conversation_context"):
         case_context += f"Recent conversation:\n{context['conversation_context']}\n"
 
+    # Knowledge graph context
+    graph_section = ""
+    if context.get("graph_context"):
+        graph_section = (
+            "## Existing Knowledge Graph\n"
+            "The case already contains these claims, evidence, assumptions, and tensions. "
+            "Build on this existing knowledge and avoid redundant research:\n\n"
+            f"{context['graph_context']}\n"
+        )
+
     prompt = f"""## Research Question
 {question}
 
@@ -141,6 +151,7 @@ def build_plan_prompt(
 
 {f"## Available Sources{chr(10)}{source_context}" if source_context else ""}
 {f"## Context{chr(10)}{case_context}" if case_context else ""}
+{graph_section}
 
 ## Your Task
 Decompose this research question into 2-5 specific sub-queries that a search engine can answer.

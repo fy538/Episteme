@@ -2,7 +2,6 @@
 Chat views
 """
 import json
-import time
 import logging
 import asyncio
 from asgiref.sync import sync_to_async
@@ -28,7 +27,7 @@ from .serializers import (
 )
 from .services import ChatService
 from tasks.workflows import assistant_response_workflow
-from apps.signals.prompts import get_assistant_response_prompt
+from apps.chat.prompts import get_assistant_response_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -429,215 +428,6 @@ Return ONLY valid JSON:
             )
     
     @action(detail=True, methods=['post'])
-    def validate_assumptions(self, request, pk=None):
-        """
-        Validate assumptions from a card action.
-        
-        POST /api/chat/threads/{id}/validate_assumptions/
-        Body: {"assumption_ids": ["uuid1", "uuid2"]}
-        
-        Triggers research to validate assumptions.
-        """
-        from apps.signals.models import Signal
-        
-        thread = self.get_object()
-        assumption_ids = request.data.get('assumption_ids', [])
-        
-        if not assumption_ids:
-            return Response(
-                {'error': 'assumption_ids required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get assumptions
-        assumptions = Signal.objects.filter(
-            id__in=assumption_ids,
-            thread=thread,
-            type='assumption'
-        )
-        
-        if not assumptions.exists():
-            return Response(
-                {'error': 'No valid assumptions found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Create assumption validator card
-        message = ChatService.create_assumption_validator_card(
-            thread_id=thread.id,
-            assumptions=list(assumptions)
-        )
-        
-        return Response({
-            'status': 'validation_started',
-            'message_id': str(message.id),
-            'assumption_count': len(assumptions)
-        })
-    
-    @action(detail=True, methods=['post'])
-    def organize_questions(self, request, pk=None):
-        """
-        Organize questions into an inquiry.
-
-        POST /api/chat/threads/{id}/organize_questions/
-        Body: {
-            "question_ids": ["uuid1", "uuid2"],
-            "title": "Optional custom title"
-        }
-
-        Returns the created inquiry.
-        """
-        from apps.signals.models import Signal
-        from apps.inquiries.services import InquiryService
-        from apps.inquiries.models import ElevationReason
-        from apps.inquiries.serializers import InquirySerializer
-        from apps.companion.receipts import SessionReceiptService
-
-        thread = self.get_object()
-        question_ids = request.data.get('question_ids', [])
-        custom_title = request.data.get('title')
-
-        if not question_ids:
-            return Response(
-                {'error': 'question_ids required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Check if thread has a case
-        if not thread.primary_case:
-            return Response(
-                {'error': 'Thread must be linked to a case before organizing questions into inquiries'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        case = thread.primary_case
-
-        # Get questions - accept both 'question' and 'Question' types
-        questions = list(Signal.objects.filter(
-            id__in=question_ids,
-            thread=thread,
-            type__iexact='question'
-        ))
-
-        if not questions:
-            return Response(
-                {'error': 'No valid questions found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Determine inquiry title
-        if custom_title:
-            title = custom_title
-        elif len(questions) == 1:
-            title = questions[0].text
-        else:
-            # Use first question as title, note the others in description
-            title = questions[0].text
-
-        # Build description from multiple questions
-        if len(questions) > 1:
-            description = "Combined from questions:\n" + "\n".join(
-                f"- {q.text}" for q in questions
-            )
-        else:
-            description = ""
-
-        # Create inquiry + link signals atomically
-        with transaction.atomic():
-            inquiry = InquiryService.create_inquiry(
-                case=case,
-                title=title,
-                elevation_reason=ElevationReason.USER_CREATED,
-                description=description,
-                source='organize_questions',
-                user=request.user,
-                origin_signal_id=questions[0].id if questions else None,
-            )
-
-            # Link all question signals to the inquiry
-            from apps.signals.models import Signal
-            Signal.objects.filter(
-                id__in=[q.id for q in questions]
-            ).update(inquiry=inquiry)
-
-        # Record session receipt
-        SessionReceiptService.record(
-            thread_id=thread.id,
-            receipt_type='inquiry_created',
-            title=f'Inquiry created: {title[:50]}{"..." if len(title) > 50 else ""}',
-            detail=f'Organized from {len(questions)} question{"s" if len(questions) != 1 else ""}',
-            related_case_id=case.id,
-            related_inquiry_id=inquiry.id,
-        )
-
-        return Response({
-            'status': 'inquiry_created',
-            'inquiry': InquirySerializer(inquiry).data,
-            'question_count': len(questions),
-        })
-    
-    @action(detail=True, methods=['post'])
-    def dismiss_suggestion(self, request, pk=None):
-        """
-        Dismiss a suggestion/intervention.
-
-        POST /api/chat/threads/{id}/dismiss_suggestion/
-        Body: {"type": "organize_questions"}
-        """
-        from .interventions import InterventionService
-
-        thread = self.get_object()
-        suggestion_type = request.data.get('type')
-
-        if not suggestion_type:
-            return Response(
-                {'error': 'type required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Mark suggestion as dismissed
-        InterventionService.dismiss_suggestion(thread, suggestion_type)
-
-        return Response({
-            'status': 'dismissed',
-            'type': suggestion_type
-        })
-
-    @action(detail=True, methods=['get'])
-    def session_receipts(self, request, pk=None):
-        """
-        Get session receipts for this thread.
-
-        GET /api/chat/threads/{id}/session_receipts/
-
-        Query params:
-        - session_only: true (default) to get current session only (last 4 hours)
-        - limit: max number of receipts (default 50)
-
-        Returns: List of session receipts for the companion panel
-        """
-        from apps.companion.receipts import SessionReceiptService
-        from apps.companion.serializers import SessionReceiptSerializer
-
-        thread = self.get_object()
-        session_only = request.query_params.get('session_only', 'true').lower() == 'true'
-        limit = int(request.query_params.get('limit', '50'))
-
-        if session_only:
-            receipts = SessionReceiptService.get_session_receipts(
-                thread_id=thread.id,
-                limit=limit
-            )
-        else:
-            receipts = SessionReceiptService.get_all_thread_receipts(
-                thread_id=thread.id,
-                limit=limit
-            )
-
-        serializer = SessionReceiptSerializer(receipts, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'])
     async def create_case_from_analysis(self, request, pk=None):
         """
         Create case from conversation analysis with pre-filled content.
@@ -646,7 +436,7 @@ Return ONLY valid JSON:
         Body: {analysis, correlation_id, user_edits}
         """
         from apps.cases.services import CaseService
-        from apps.cases.serializers import CaseSerializer, CaseDocumentSerializer, InvestigationPlanSerializer
+        from apps.cases.serializers import CaseSerializer, WorkingDocumentSerializer, InvestigationPlanSerializer
         from apps.inquiries.serializers import InquirySerializer
         import uuid as uuid_module
 
@@ -682,7 +472,7 @@ Return ONLY valid JSON:
 
         return Response({
             'case': await sync_to_async(lambda: CaseSerializer(case).data)(),
-            'brief': await sync_to_async(lambda: CaseDocumentSerializer(brief).data)(),
+            'brief': await sync_to_async(lambda: WorkingDocumentSerializer(brief).data)(),
             'inquiries': await sync_to_async(lambda: InquirySerializer(inquiries, many=True).data)(),
             'plan': await sync_to_async(lambda: InvestigationPlanSerializer(plan).data)(),
             'correlation_id': str(correlation_id)
@@ -693,7 +483,7 @@ Return ONLY valid JSON:
 @require_POST
 async def unified_stream(request, thread_id):
     """
-    Unified streaming endpoint for chat response + reflection + signals + action hints.
+    Unified streaming endpoint for chat response + reflection + action hints.
 
     Uses the UnifiedAnalysisEngine to generate a single LLM response with
     sectioned output that streams to the client.
@@ -708,7 +498,6 @@ async def unified_stream(request, thread_id):
     - reflection_chunk: Reflection tokens
     - response_complete: Full response
     - reflection_complete: Full reflection
-    - signals: Extracted signals array
     - action_hints: AI-suggested actions
     - done: Completion with IDs
     - error: Error message
@@ -781,12 +570,25 @@ async def unified_stream(request, thread_id):
             for m in reversed(messages)
         ])
 
+        # Retrieve relevant document chunks for RAG context
+        retrieval_context = ""
+        if thread.project_id:
+            try:
+                from apps.chat.retrieval import retrieve_document_context
+                retrieval_context = await sync_to_async(retrieve_document_context)(
+                    query=content,
+                    project_id=thread.project_id,
+                    case_id=getattr(thread, 'primary_case_id', None),
+                    user=user,
+                )
+            except Exception as e:
+                logger.warning(f"RAG retrieval failed: {e}")
+
         # Track content for post-processing
         response_content = ""
         reflection_content = ""
-        signals_json = ""
         action_hints_json = ""
-        extraction_enabled = True
+        graph_edits_json = ""
 
         # Check if thread is in scaffolding mode or if frontend sent mode context
         thread_metadata = thread.metadata or {}
@@ -869,6 +671,33 @@ async def unified_stream(request, thread_id):
                     )
             except Exception as e:
                 logger.warning(f"Could not load plan for stage context: {e}")
+        elif mode_context.get('mode') == 'graph' and thread.project_id:
+            # Graph mode: inject serialized graph context for orientation
+            # Case-aware: when thread is linked to a case, use case-composed graph
+            try:
+                from apps.graph.serialization import GraphSerializationService
+                from apps.graph.services import GraphService
+                from apps.intelligence.graph_prompts import build_graph_aware_system_prompt
+
+                _case_id = thread.primary_case_id
+                graph_context, _ = await sync_to_async(
+                    GraphSerializationService.serialize_for_llm
+                )(thread.project_id, case_id=_case_id)
+                if _case_id:
+                    graph_health = await sync_to_async(
+                        GraphService.compute_case_graph_health
+                    )(_case_id)
+                else:
+                    graph_health = await sync_to_async(
+                        GraphService.compute_graph_health
+                    )(thread.project_id)
+
+                system_prompt_override = build_graph_aware_system_prompt(
+                    graph_context=graph_context,
+                    graph_health=graph_health,
+                )
+            except Exception as e:
+                logger.warning(f"Could not build graph-aware prompt: {e}")
 
         try:
             async for event in engine.analyze_simple(
@@ -876,6 +705,7 @@ async def unified_stream(request, thread_id):
                 user_message=content,
                 conversation_context=conversation_context,
                 system_prompt_override=system_prompt_override,
+                retrieval_context=retrieval_context,
             ):
                 if event.type == StreamEventType.RESPONSE_CHUNK:
                     response_content += event.data
@@ -897,18 +727,17 @@ async def unified_stream(request, thread_id):
                     payload = json.dumps({"content": event.data})
                     yield f"event: reflection_complete\ndata: {payload}\n\n"
 
-                elif event.type == StreamEventType.SIGNALS_COMPLETE:
-                    signals = event.data.get('signals', [])
-                    signals_json = event.data.get('raw', '[]')
-                    extraction_enabled = event.data.get('extraction_enabled', True)
-                    payload = json.dumps({"signals": signals})
-                    yield f"event: signals\ndata: {payload}\n\n"
-
                 elif event.type == StreamEventType.ACTION_HINTS_COMPLETE:
                     action_hints = event.data.get('action_hints', [])
                     action_hints_json = event.data.get('raw', '[]')
                     payload = json.dumps({"action_hints": action_hints})
                     yield f"event: action_hints\ndata: {payload}\n\n"
+
+                elif event.type == StreamEventType.GRAPH_EDITS_COMPLETE:
+                    graph_edits = event.data.get('graph_edits', [])
+                    graph_edits_json = event.data.get('raw', '[]')
+                    payload = json.dumps({"graph_edits": graph_edits})
+                    yield f"event: graph_edits\ndata: {payload}\n\n"
 
                 elif event.type == StreamEventType.ERROR:
                     error_msg = event.data.get('error', 'Unknown error')
@@ -916,20 +745,45 @@ async def unified_stream(request, thread_id):
                     yield f"event: error\ndata: {payload}\n\n"
 
                 elif event.type == StreamEventType.DONE:
-                    extraction_enabled = event.data.get('extraction_enabled', True)
                     # Don't yield done yet - we need to save first
+                    pass
 
-            # Post-process: save message, reflection, signals
+            # Post-process: save message
             result = await UnifiedAnalysisHandler.handle_completion(
                 thread=thread,
                 user=user,
                 response_content=response_content,
                 reflection_content=reflection_content,
-                signals_json=signals_json,
                 model_key='chat',
-                extraction_was_enabled=extraction_enabled,
                 correlation_id=correlation_id
             )
+
+            # Apply graph edits if present
+            graph_edit_summary = None
+            if graph_edits_json and graph_edits_json.strip() not in ('', '[]'):
+                try:
+                    from apps.graph.edit_handler import GraphEditHandler
+                    edits = json.loads(graph_edits_json)
+                    if isinstance(edits, list) and edits and thread.project_id:
+                        message_id = result.get('message_id')
+                        graph_edit_summary = await sync_to_async(
+                            GraphEditHandler.apply_edits
+                        )(
+                            project_id=thread.project_id,
+                            edits=edits,
+                            source_message_id=message_id,
+                            user=user,
+                            case_id=thread.primary_case_id,
+                        )
+                        logger.info(
+                            "graph_edits_applied_from_chat",
+                            extra={
+                                'thread_id': str(thread.id),
+                                **graph_edit_summary,
+                            },
+                        )
+                except Exception as e:
+                    logger.exception("Failed to apply graph edits from chat")
 
             # --- Title generation: await parallel task or check for refresh ---
             if title_task is not None:
@@ -991,12 +845,14 @@ async def unified_stream(request, thread_id):
                         )
 
             # Now yield done event with IDs
-            done_payload = json.dumps({
+            done_data = {
                 "message_id": result.get('message_id'),
                 "reflection_id": result.get('reflection_id'),
-                "signals_count": result.get('signals_count', 0),
-                "action_hints_count": len(json.loads(action_hints_json or '[]'))
-            })
+                "action_hints_count": len(json.loads(action_hints_json or '[]')),
+            }
+            if graph_edit_summary:
+                done_data["graph_edits_applied"] = graph_edit_summary
+            done_payload = json.dumps(done_data)
             yield f"event: done\ndata: {done_payload}\n\n"
 
         except Exception as e:

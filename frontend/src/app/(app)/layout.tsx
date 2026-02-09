@@ -2,7 +2,7 @@
  * Authenticated App Layout
  *
  * Wraps all authenticated routes with the unified navigation shell.
- * Provides NavigationProvider context, AppShell (IconRail + SidebarPanel),
+ * Provides NavigationProvider context, AppShell (SidebarPanel with tabs),
  * centralized auth gate, and a catch-all ErrorBoundary.
  *
  * The shell renders immediately (zero data deps). Children render only
@@ -14,6 +14,7 @@
 'use client';
 
 import { NavigationProvider } from '@/components/navigation/NavigationProvider';
+import { CaseWorkspaceProvider } from '@/components/workspace/CaseWorkspaceProvider';
 import { AppShell } from '@/components/navigation/AppShell';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { useAuth } from '@/hooks/useAuth';
@@ -24,15 +25,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <NavigationProvider>
-      <AppShell>
-        {isReady ? (
-          <ErrorBoundary>{children}</ErrorBoundary>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <Spinner size="lg" className="text-accent-600" />
-          </div>
-        )}
-      </AppShell>
+      <CaseWorkspaceProvider>
+        <AppShell>
+          {isReady ? (
+            <ErrorBoundary>{children}</ErrorBoundary>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <Spinner size="lg" className="text-accent-600" />
+            </div>
+          )}
+        </AppShell>
+      </CaseWorkspaceProvider>
     </NavigationProvider>
   );
 }

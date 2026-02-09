@@ -10,7 +10,6 @@ class Migration(migrations.Migration):
     dependencies = [
         ('cases', '0011_remove_deprecated_confidence_field'),
         ('inquiries', '0003_add_embedding_field'),
-        ('signals', '0002_add_composite_indexes'),
     ]
 
     operations = [
@@ -35,7 +34,6 @@ class Migration(migrations.Migration):
                 ('brief', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='brief_sections', to='cases.casedocument')),
                 ('inquiry', models.ForeignKey(blank=True, help_text='Links this section to an inquiry for grounding computation', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='brief_sections', to='inquiries.inquiry')),
                 ('parent_section', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='subsections', to='cases.briefsection')),
-                ('tagged_signals', models.ManyToManyField(blank=True, related_name='tagged_in_sections', to='signals.signal')),
             ],
             options={
                 'ordering': ['order'],
@@ -54,7 +52,6 @@ class Migration(migrations.Migration):
                 ('resolved_at', models.DateTimeField(blank=True, help_text='When this annotation was resolved', null=True)),
                 ('resolved_by', models.CharField(blank=True, help_text='user, system, or agent', max_length=50)),
                 ('source_inquiry', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='brief_annotations', to='inquiries.inquiry')),
-                ('source_signals', models.ManyToManyField(blank=True, related_name='brief_annotations', to='signals.signal')),
                 ('section', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='annotations', to='cases.briefsection')),
             ],
             options={

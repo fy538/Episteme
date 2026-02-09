@@ -4,7 +4,6 @@ Unified Analysis Engine
 Core engine for single-call unified analysis:
 - Chat response
 - Meta-cognitive reflection
-- Signal extraction
 
 Uses sectioned streaming to route content to appropriate destinations.
 """
@@ -22,8 +21,6 @@ from .prompts import (
     build_unified_user_prompt,
     UnifiedPromptConfig
 )
-from .extraction_rules import ExtractionRulesEngine
-
 logger = logging.getLogger(__name__)
 
 
@@ -33,8 +30,8 @@ class StreamEventType(Enum):
     REFLECTION_CHUNK = "reflection_chunk"
     RESPONSE_COMPLETE = "response_complete"
     REFLECTION_COMPLETE = "reflection_complete"
-    SIGNALS_COMPLETE = "signals_complete"
     ACTION_HINTS_COMPLETE = "action_hints_complete"
+    GRAPH_EDITS_COMPLETE = "graph_edits_complete"
     ERROR = "error"
     DONE = "done"
 
@@ -53,13 +50,11 @@ class UnifiedAnalysisContext:
     thread: Any  # ChatThread
     user_message: str
     conversation_context: str = ""
-    existing_signals: List[Dict] = None
+    retrieval_context: str = ""
     patterns: Dict = None
     message_count: int = 0
 
     def __post_init__(self):
-        if self.existing_signals is None:
-            self.existing_signals = []
         if self.patterns is None:
             self.patterns = {}
 
@@ -68,7 +63,7 @@ class UnifiedAnalysisEngine:
     """
     Engine for unified LLM analysis.
 
-    Combines chat response, reflection, and signal extraction
+    Combines chat response and reflection
     into a single streaming LLM call with sectioned output.
 
     Usage:
@@ -78,8 +73,6 @@ class UnifiedAnalysisEngine:
                 yield_to_chat_ui(event.data)
             elif event.type == StreamEventType.REFLECTION_CHUNK:
                 yield_to_companion_ui(event.data)
-            elif event.type == StreamEventType.SIGNALS_COMPLETE:
-                save_signals(event.data)
     """
 
     def __init__(self, model_key: str = 'chat'):
@@ -103,37 +96,18 @@ class UnifiedAnalysisEngine:
     async def analyze(
         self,
         context: UnifiedAnalysisContext,
-        force_extraction: bool = False
     ) -> AsyncIterator[StreamEvent]:
         """
         Perform unified analysis with sectioned streaming.
 
         Args:
             context: Analysis context
-            force_extraction: Force signal extraction regardless of rules
 
         Yields:
             StreamEvent objects for each section
         """
-        # Determine if we should extract signals
-        extraction_rules = None
-        should_extract = force_extraction
-
-        if not force_extraction:
-            extraction_state = ExtractionRulesEngine.get_thread_extraction_state(context.thread)
-            extraction_rules = ExtractionRulesEngine.should_extract(
-                thread=context.thread,
-                message_content=context.user_message,
-                message_count=context.message_count,
-                **extraction_state
-            )
-            should_extract = extraction_rules.should_extract
-            logger.info(f"Extraction decision: {should_extract} ({extraction_rules.reason})")
-
         # Build prompts
         prompt_config = UnifiedPromptConfig(
-            include_signals=should_extract,
-            signal_types=extraction_rules.include_types if extraction_rules else None,
             topic=context.thread.title if context.thread.title != "New Chat" else "",
             patterns=context.patterns
         )
@@ -142,7 +116,7 @@ class UnifiedAnalysisEngine:
         user_prompt = build_unified_user_prompt(
             user_message=context.user_message,
             conversation_context=context.conversation_context,
-            signals_context=context.existing_signals
+            retrieval_context=context.retrieval_context,
         )
 
         # Initialize parser
@@ -151,13 +125,12 @@ class UnifiedAnalysisEngine:
         # Accumulators for full content
         response_content = ""
         reflection_content = ""
-        # Note: signals_content is accumulated by parser.signals_buffer
 
         # Track section completion
         response_complete = False
         reflection_complete = False
-        signals_complete = False
         action_hints_complete = False
+        graph_edits_complete = False
 
         try:
             # Stream from LLM
@@ -202,37 +175,6 @@ class UnifiedAnalysisEngine:
                                 section=Section.REFLECTION
                             )
 
-                    elif parsed.section == Section.SIGNALS:
-                        if parsed.is_complete:
-                            signals_complete = True
-                            # Get full signals buffer (parser accumulates this)
-                            signals_buffer = parser.get_signals_buffer()
-                            # Parse and emit
-                            try:
-                                signals_data = json.loads(signals_buffer) if signals_buffer.strip() else []
-                                yield StreamEvent(
-                                    type=StreamEventType.SIGNALS_COMPLETE,
-                                    data={
-                                        'signals': signals_data,
-                                        'raw': signals_buffer,
-                                        'extraction_enabled': should_extract
-                                    },
-                                    section=Section.SIGNALS
-                                )
-                            except json.JSONDecodeError as e:
-                                logger.warning(f"Failed to parse signals JSON: {e}")
-                                yield StreamEvent(
-                                    type=StreamEventType.SIGNALS_COMPLETE,
-                                    data={
-                                        'signals': [],
-                                        'raw': signals_buffer,
-                                        'extraction_enabled': should_extract,
-                                        'error': str(e)
-                                    },
-                                    section=Section.SIGNALS
-                                )
-                        # Note: parser._create_chunk() already accumulates signals content
-
                     elif parsed.section == Section.ACTION_HINTS:
                         if parsed.is_complete:
                             action_hints_complete = True
@@ -261,6 +203,32 @@ class UnifiedAnalysisEngine:
                                     section=Section.ACTION_HINTS
                                 )
                         # Note: parser._create_chunk() already accumulates action hints content
+
+                    elif parsed.section == Section.GRAPH_EDITS:
+                        if parsed.is_complete:
+                            graph_edits_complete = True
+                            edits_buffer = parser.get_graph_edits_buffer()
+                            try:
+                                edits_data = json.loads(edits_buffer) if edits_buffer.strip() else []
+                                yield StreamEvent(
+                                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
+                                    data={
+                                        'graph_edits': edits_data,
+                                        'raw': edits_buffer
+                                    },
+                                    section=Section.GRAPH_EDITS
+                                )
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse graph edits JSON: {e}")
+                                yield StreamEvent(
+                                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
+                                    data={
+                                        'graph_edits': [],
+                                        'raw': edits_buffer,
+                                        'error': str(e)
+                                    },
+                                    section=Section.GRAPH_EDITS
+                                )
 
             # Flush any remaining content
             remaining = parser.flush()
@@ -295,23 +263,6 @@ class UnifiedAnalysisEngine:
                     section=Section.REFLECTION
                 )
 
-            if not signals_complete:
-                signals_buffer = parser.get_signals_buffer()
-                try:
-                    signals_data = json.loads(signals_buffer) if signals_buffer.strip() else []
-                except json.JSONDecodeError:
-                    signals_data = []
-
-                yield StreamEvent(
-                    type=StreamEventType.SIGNALS_COMPLETE,
-                    data={
-                        'signals': signals_data,
-                        'raw': signals_buffer,
-                        'extraction_enabled': should_extract
-                    },
-                    section=Section.SIGNALS
-                )
-
             if not action_hints_complete:
                 hints_buffer = parser.get_action_hints_buffer()
                 try:
@@ -328,16 +279,30 @@ class UnifiedAnalysisEngine:
                     section=Section.ACTION_HINTS
                 )
 
+            if not graph_edits_complete:
+                edits_buffer = parser.get_graph_edits_buffer()
+                try:
+                    edits_data = json.loads(edits_buffer) if edits_buffer.strip() else []
+                except json.JSONDecodeError:
+                    edits_data = []
+
+                yield StreamEvent(
+                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
+                    data={
+                        'graph_edits': edits_data,
+                        'raw': edits_buffer
+                    },
+                    section=Section.GRAPH_EDITS
+                )
+
             # Final done event with all content
             yield StreamEvent(
                 type=StreamEventType.DONE,
                 data={
                     'response': response_content,
                     'reflection': reflection_content,
-                    'signals_raw': parser.get_signals_buffer(),
                     'action_hints_raw': parser.get_action_hints_buffer(),
-                    'extraction_enabled': should_extract,
-                    'extraction_reason': extraction_rules.reason if extraction_rules else 'forced'
+                    'graph_edits_raw': parser.get_graph_edits_buffer(),
                 }
             )
 
@@ -355,6 +320,7 @@ class UnifiedAnalysisEngine:
         user_message: str,
         conversation_context: str = "",
         system_prompt_override: str = None,
+        retrieval_context: str = "",
     ) -> AsyncIterator[StreamEvent]:
         """
         Simplified analyze interface.
@@ -364,32 +330,23 @@ class UnifiedAnalysisEngine:
             user_message: User's message content
             conversation_context: Formatted conversation history
             system_prompt_override: Optional custom system prompt (e.g. for scaffolding mode)
+            retrieval_context: RAG-retrieved document chunks for grounding
 
         Yields:
             StreamEvent objects
         """
         from asgiref.sync import sync_to_async
         from apps.chat.models import Message
-        from apps.signals.models import Signal
 
         # Get message count
         message_count = await sync_to_async(
             Message.objects.filter(thread=thread).count
         )()
 
-        # Get existing signals for context
-        existing_signals = await sync_to_async(list)(
-            Signal.objects.filter(
-                thread=thread,
-                dismissed_at__isnull=True
-            ).order_by('-created_at')[:10]
-            .values('type', 'text', 'confidence')
-        )
-
         # Get patterns if companion graph analyzer is available
         patterns = {}
         try:
-            from apps.companion.graph_analyzer import GraphAnalyzer
+            from apps.graph.analyzer import GraphAnalyzer
             analyzer = GraphAnalyzer()
             patterns = await sync_to_async(analyzer.find_patterns)(thread.id)
         except Exception as e:
@@ -399,9 +356,9 @@ class UnifiedAnalysisEngine:
             thread=thread,
             user_message=user_message,
             conversation_context=conversation_context,
-            existing_signals=existing_signals,
+            retrieval_context=retrieval_context,
             patterns=patterns,
-            message_count=message_count
+            message_count=message_count,
         )
 
         if system_prompt_override:
@@ -427,7 +384,7 @@ class UnifiedAnalysisEngine:
         user_prompt = build_unified_user_prompt(
             user_message=context.user_message,
             conversation_context=context.conversation_context,
-            signals_context=context.existing_signals,
+            retrieval_context=context.retrieval_context,
         )
 
         parser = SectionedStreamParser()
@@ -435,8 +392,8 @@ class UnifiedAnalysisEngine:
         reflection_content = ""
         response_complete = False
         reflection_complete = False
-        signals_complete = False
         action_hints_complete = False
+        graph_edits_complete = False
 
         try:
             async for chunk in self.provider.stream_chat(
@@ -477,23 +434,6 @@ class UnifiedAnalysisEngine:
                                 data=parsed.content,
                                 section=Section.REFLECTION,
                             )
-                    elif parsed.section == Section.SIGNALS:
-                        if parsed.is_complete:
-                            signals_complete = True
-                            try:
-                                import json as json_mod
-                                signals = json_mod.loads(parser.signals_buffer or '[]')
-                            except Exception:
-                                signals = []
-                            yield StreamEvent(
-                                type=StreamEventType.SIGNALS_COMPLETE,
-                                data={
-                                    'signals': signals,
-                                    'raw': parser.signals_buffer or '[]',
-                                    'extraction_enabled': True,
-                                },
-                                section=Section.SIGNALS,
-                            )
                     elif parsed.section == Section.ACTION_HINTS:
                         if parsed.is_complete:
                             action_hints_complete = True
@@ -509,6 +449,22 @@ class UnifiedAnalysisEngine:
                                     'raw': parser.action_hints_buffer or '[]',
                                 },
                                 section=Section.ACTION_HINTS,
+                            )
+                    elif parsed.section == Section.GRAPH_EDITS:
+                        if parsed.is_complete:
+                            graph_edits_complete = True
+                            try:
+                                import json as json_mod
+                                edits = json_mod.loads(parser.graph_edits_buffer or '[]')
+                            except Exception:
+                                edits = []
+                            yield StreamEvent(
+                                type=StreamEventType.GRAPH_EDITS_COMPLETE,
+                                data={
+                                    'graph_edits': edits,
+                                    'raw': parser.graph_edits_buffer or '[]',
+                                },
+                                section=Section.GRAPH_EDITS,
                             )
 
             # Flush any remaining content from the parser
@@ -544,23 +500,6 @@ class UnifiedAnalysisEngine:
                     section=Section.REFLECTION,
                 )
 
-            if not signals_complete:
-                signals_buffer = parser.get_signals_buffer()
-                try:
-                    import json as json_mod
-                    signals_data = json_mod.loads(signals_buffer) if signals_buffer.strip() else []
-                except (json_mod.JSONDecodeError, Exception):
-                    signals_data = []
-                yield StreamEvent(
-                    type=StreamEventType.SIGNALS_COMPLETE,
-                    data={
-                        'signals': signals_data,
-                        'raw': signals_buffer,
-                        'extraction_enabled': True,
-                    },
-                    section=Section.SIGNALS,
-                )
-
             if not action_hints_complete:
                 hints_buffer = parser.get_action_hints_buffer()
                 try:
@@ -577,15 +516,30 @@ class UnifiedAnalysisEngine:
                     section=Section.ACTION_HINTS,
                 )
 
+            if not graph_edits_complete:
+                edits_buffer = parser.get_graph_edits_buffer()
+                try:
+                    import json as json_mod
+                    edits_data = json_mod.loads(edits_buffer) if edits_buffer.strip() else []
+                except (json_mod.JSONDecodeError, Exception):
+                    edits_data = []
+                yield StreamEvent(
+                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
+                    data={
+                        'graph_edits': edits_data,
+                        'raw': edits_buffer,
+                    },
+                    section=Section.GRAPH_EDITS,
+                )
+
             # Final done event with all content
             yield StreamEvent(
                 type=StreamEventType.DONE,
                 data={
                     'response': response_content,
                     'reflection': reflection_content,
-                    'signals_raw': parser.get_signals_buffer(),
                     'action_hints_raw': parser.get_action_hints_buffer(),
-                    'extraction_enabled': True,
+                    'graph_edits_raw': parser.get_graph_edits_buffer(),
                 },
             )
 

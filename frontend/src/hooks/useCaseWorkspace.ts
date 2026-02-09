@@ -17,16 +17,17 @@ import { projectsAPI } from '@/lib/api/projects';
 import { plansAPI } from '@/lib/api/plans';
 import { useChatMode } from '@/hooks/useChatMode';
 import { useCompanionState } from '@/hooks/useCompanionState';
-import type { Case, CaseDocument, Inquiry } from '@/lib/types/case';
+import type { Case, WorkingDocument, Inquiry } from '@/lib/types/case';
 import type { Project } from '@/lib/types/project';
 import type { CompanionState } from '@/lib/types/companion';
 import type { InvestigationPlan, PlanAssumption } from '@/lib/types/plan';
 import type { ReadinessChecklistItemData, ChecklistProgress } from '@/components/readiness';
+import type { UploadedDocument } from '@/lib/types/document';
 
 export type ViewMode = 'home' | 'brief' | 'inquiry' | 'inquiry-dashboard' | 'readiness' | 'document';
 
 interface UseCaseWorkspaceOptions {
-  caseId: string;
+  caseId: string | null;
 }
 
 export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
@@ -34,8 +35,9 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
 
   // --- Data state ---
   const [caseData, setCase] = useState<Case | null>(null);
-  const [brief, setBrief] = useState<CaseDocument | null>(null);
+  const [brief, setBrief] = useState<WorkingDocument | null>(null);
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [plan, setPlan] = useState<InvestigationPlan | null>(null);
   const [allCases, setAllCases] = useState<Case[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -46,14 +48,6 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [activeInquiryId, setActiveInquiryId] = useState<string | null>(null);
-
-  // --- Nav collapse state (persisted) ---
-  const [isNavCollapsed, setIsNavCollapsed] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('episteme_case_nav_collapsed') === 'true';
-    }
-    return false;
-  });
 
   // --- Chat panel collapse state (persisted) ---
   const [isChatCollapsed, setIsChatCollapsed] = useState(() => {
@@ -82,27 +76,9 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     initialCaseName: caseData?.title,
   });
 
-  // Track signal count to auto-generate receipts
-  const prevSignalCountRef = useRef(0);
-
   // --- Companion state (unified hook) ---
   const companion = useCompanionState({
     mode: chatMode.mode.mode,
-    onMessageComplete: () => {
-      // Auto-receipt when new signals were extracted during this message
-      const newCount = companion.signals.length;
-      if (newCount > prevSignalCountRef.current) {
-        const delta = newCount - prevSignalCountRef.current;
-        companion.addReceipt({
-          id: `receipt-signals-${Date.now()}`,
-          type: 'signals_extracted',
-          title: `${delta} signal${delta > 1 ? 's' : ''} extracted`,
-          timestamp: new Date().toISOString(),
-          relatedCaseId: caseId,
-        });
-        prevSignalCountRef.current = newCount;
-      }
-    },
   });
 
   // Sync case state into companion whenever case data, inquiries, or plan change
@@ -145,20 +121,49 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     caseState: companion.caseState,
   };
 
+  // Track the active caseId to guard against stale responses
+  const activeCaseIdRef = useRef(caseId);
+  activeCaseIdRef.current = caseId;
+
   // Load workspace data
   const loadWorkspace = useCallback(async () => {
+    if (!caseId) {
+      setLoading(false);
+      setCase(null);
+      setBrief(null);
+      setInquiries([]);
+      setDocuments([]);
+      setPlan(null);
+      setAllCases([]);
+      setProjects([]);
+      setThreadId('');
+      return;
+    }
+
+    // Clear stale data immediately so sidebar shows skeleton, not old case
+    setCase(null);
+    setBrief(null);
+    setInquiries([]);
+    setDocuments([]);
+    setPlan(null);
+    setViewMode('home');
+    setActiveInquiryId(null);
     setLoading(true);
+
     try {
-      const [caseResp, inqs, docs, allCasesResp] = await Promise.all([
+      const [caseResp, inqs, docs, uploadedDocs] = await Promise.all([
         casesAPI.getCase(caseId),
         inquiriesAPI.getByCase(caseId),
         documentsAPI.getByCase(caseId),
-        casesAPI.listCases(),
+        documentsAPI.listUploadedDocuments({ caseId }),
       ]);
+
+      // Guard: if caseId changed while we were fetching, discard results
+      if (activeCaseIdRef.current !== caseId) return;
 
       setCase(caseResp);
       setInquiries(inqs);
-      setAllCases(allCasesResp);
+      setDocuments(uploadedDocs);
 
       // Find main brief
       const mainBrief = docs.find(d => d.id === caseResp.main_brief);
@@ -169,40 +174,44 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
         setThreadId(caseResp.linked_thread);
       } else {
         const thread = await chatAPI.createThread(null, { title: `Chat: ${caseResp.title}` });
+        if (activeCaseIdRef.current !== caseId) return;
         setThreadId(thread.id);
         await chatAPI.updateThread(thread.id, { primary_case: caseResp.id });
         await casesAPI.updateCase(caseResp.id, { linked_thread: thread.id });
       }
 
+      if (activeCaseIdRef.current !== caseId) return;
+
       // Load plan (may not exist for new cases)
       try {
         const planResp = await plansAPI.getPlan(caseId);
-        setPlan(planResp);
+        if (activeCaseIdRef.current === caseId) setPlan(planResp);
       } catch (error) {
         // Plan may not exist yet — that's fine
-        setPlan(null);
+        if (activeCaseIdRef.current === caseId) setPlan(null);
       }
 
       // Load projects
       try {
         const projectsResp = await projectsAPI.listProjects();
-        setProjects(projectsResp);
+        if (activeCaseIdRef.current === caseId) setProjects(projectsResp);
       } catch (error) {
         console.error('Failed to load projects:', error);
-        setProjects([]);
+        if (activeCaseIdRef.current === caseId) setProjects([]);
       }
 
       // Load readiness checklist
-      await loadChecklist();
+      if (activeCaseIdRef.current === caseId) await loadChecklist();
     } catch (error) {
       console.error('Failed to load workspace:', error);
     } finally {
-      setLoading(false);
+      if (activeCaseIdRef.current === caseId) setLoading(false);
     }
   }, [caseId]);
 
   // Load checklist
   const loadChecklist = useCallback(async () => {
+    if (!caseId) return;
     try {
       const response = await fetch(`/api/cases/${caseId}/readiness-checklist/`);
       if (!response.ok) throw new Error('Failed to load checklist');
@@ -236,7 +245,7 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
   }, [router]);
 
   const handleStartInquiry = useCallback(async () => {
-    if (!caseData) return;
+    if (!caseId || !caseData) return;
 
     try {
       const inquiry = await inquiriesAPI.create({
@@ -278,16 +287,6 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     companion.clearReflection();
   }, [chatMode, companion]);
 
-  const toggleNav = useCallback(() => {
-    setIsNavCollapsed(prev => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('episteme_case_nav_collapsed', String(next));
-      }
-      return next;
-    });
-  }, []);
-
   const toggleChat = useCallback(() => {
     setIsChatCollapsed(prev => {
       const next = !prev;
@@ -297,19 +296,6 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
       return next;
     });
   }, []);
-
-  // Focus mode: collapse both nav and chat, or expand both
-  const isFocusMode = isNavCollapsed && isChatCollapsed;
-
-  const toggleFocusMode = useCallback(() => {
-    const enterFocus = !isNavCollapsed || !isChatCollapsed;
-    setIsNavCollapsed(enterFocus);
-    setIsChatCollapsed(enterFocus);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('episteme_case_nav_collapsed', String(enterFocus));
-      localStorage.setItem('episteme_chat_collapsed', String(enterFocus));
-    }
-  }, [isNavCollapsed, isChatCollapsed]);
 
   const handleViewBrief = useCallback(() => {
     setViewMode('brief');
@@ -332,6 +318,7 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     caseData,
     brief,
     inquiries,
+    documents,
     plan,
     allCases,
     projects,
@@ -345,12 +332,8 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     setViewMode,
     activeInquiryId,
     activeInquiry,
-    isNavCollapsed,
-    toggleNav,
     isChatCollapsed,
     toggleChat,
-    isFocusMode,
-    toggleFocusMode,
 
     // Integration
     integrationPreview,
@@ -365,7 +348,6 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     companionState,
     streamCallbacks: companion.streamCallbacks,
     actionHints: companion.actionHints,
-    signals: companion.signals,
     companionPosition: companion.companionPosition,
     setCompanionPosition: companion.setCompanionPosition,
     toggleCompanion: companion.toggleCompanion,

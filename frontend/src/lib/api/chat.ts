@@ -4,6 +4,7 @@
 
 import { apiClient } from './client';
 import type { ChatThread, Message } from '../types/chat';
+import type { GraphEditSummary } from '../types/graph';
 
 export const chatAPI = {
   async createThread(projectId?: string | null, metadata?: Record<string, any>): Promise<ChatThread> {
@@ -47,13 +48,6 @@ export const chatAPI = {
     assumptions: string[];
     constraints: Array<{ type: string; description: string }>;
     success_criteria: Array<{ criterion: string; measurable?: string }>;
-    signals_summary: {
-      assumptions: number;
-      questions: number;
-      claims: number;
-      constraints: number;
-      goals: number;
-    };
     confidence: number;
     correlation_id: string;
     message_count: number;
@@ -84,7 +78,7 @@ export const chatAPI = {
   },
 
   /**
-   * Send message with unified streaming (response + reflection + signals + action hints)
+   * Send message with unified streaming (response + reflection + action hints)
    */
   async sendUnifiedStream(
     threadId: string,
@@ -94,10 +88,10 @@ export const chatAPI = {
       onReflectionChunk?: (delta: string) => void;
       onResponseComplete?: (content: string) => void;
       onReflectionComplete?: (content: string) => void;
-      onSignals?: (signals: any[]) => void;
       onActionHints?: (hints: any[]) => void;
+      onGraphEdits?: (summary: GraphEditSummary) => void;
       onTitleUpdate?: (title: string) => void;
-      onDone?: (result: { messageId?: string; reflectionId?: string; signalsCount?: number; actionHintsCount?: number }) => void;
+      onDone?: (result: { messageId?: string; reflectionId?: string; actionHintsCount?: number; graphEditsApplied?: boolean }) => void;
       onError?: (error: string) => void;
     },
     signal?: AbortSignal,
@@ -121,11 +115,11 @@ export const chatAPI = {
           case 'reflection_complete':
             callbacks.onReflectionComplete?.(data?.content || '');
             break;
-          case 'signals':
-            callbacks.onSignals?.(data?.signals || []);
-            break;
           case 'action_hints':
             callbacks.onActionHints?.(data?.action_hints || []);
+            break;
+          case 'graph_edits':
+            callbacks.onGraphEdits?.(data as GraphEditSummary);
             break;
           case 'title_update':
             callbacks.onTitleUpdate?.(data?.title || '');
@@ -134,8 +128,8 @@ export const chatAPI = {
             callbacks.onDone?.({
               messageId: data?.message_id,
               reflectionId: data?.reflection_id,
-              signalsCount: data?.signals_count || 0,
               actionHintsCount: data?.action_hints_count || 0,
+              graphEditsApplied: data?.graph_edits_applied || false,
             });
             break;
           case 'error':

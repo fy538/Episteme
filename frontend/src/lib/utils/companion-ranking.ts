@@ -10,7 +10,6 @@
  */
 
 import type { ActionHint } from '@/lib/types/chat';
-import type { Signal } from '@/lib/types/signal';
 import type {
   ChatMode,
   BackgroundWorkItem,
@@ -21,7 +20,6 @@ import type {
 export type CompanionSectionId =
   | 'thinking'
   | 'action_hints'
-  | 'signals'
   | 'status'
   | 'receipts'
   | 'case_state';
@@ -29,7 +27,6 @@ export type CompanionSectionId =
 export interface SectionRankingInput {
   thinking: { content: string; isStreaming: boolean };
   actionHints: ActionHint[];
-  signals: Signal[];
   status: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts: SessionReceipt[];
   caseState?: CaseState;
@@ -53,8 +50,6 @@ function hasContent(id: CompanionSectionId, input: SectionRankingInput): boolean
       return input.thinking.content.trim().length > 0 || input.thinking.isStreaming;
     case 'action_hints':
       return input.actionHints.length > 0;
-    case 'signals':
-      return input.signals.length > 0;
     case 'status':
       return input.status.inProgress.length > 0 || input.status.justCompleted.length > 0;
     case 'receipts':
@@ -67,7 +62,7 @@ function hasContent(id: CompanionSectionId, input: SectionRankingInput): boolean
 export function rankSections(input: SectionRankingInput): CompanionSectionId[] {
   const now = Date.now();
   const allSections: CompanionSectionId[] = [
-    'thinking', 'action_hints', 'signals', 'status', 'receipts', 'case_state',
+    'thinking', 'action_hints', 'status', 'receipts', 'case_state',
   ];
 
   const scored = allSections

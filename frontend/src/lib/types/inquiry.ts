@@ -12,13 +12,3 @@ export interface Objection {
   created_at: string;
   updated_at: string;
 }
-
-export interface InquiryEvidence {
-  id: string;
-  inquiry: string;
-  content: string;
-  direction: 'supporting' | 'contradicting' | 'neutral';
-  source: string | null;
-  document: string | null;
-  created_at: string;
-}

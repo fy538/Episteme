@@ -2,7 +2,7 @@
 Embedding generation utilities
 
 Uses sentence-transformers for local embedding generation.
-Model: all-MiniLM-L6-v2 (384 dimensions, ~100MB)
+Model: configurable via EMBEDDING_MODEL setting (default: all-MiniLM-L12-v2, 384 dimensions).
 """
 
 import logging
@@ -12,8 +12,8 @@ from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded embedding service
-_embedding_service = None
+# Lazy-loaded SentenceTransformer model (singleton)
+_embedding_model = None
 
 # Query embedding cache: {text: (embedding, timestamp)}
 # LRU with TTL for query embeddings (saves ~50ms per repeated query)
@@ -22,12 +22,42 @@ _CACHE_MAX_SIZE = 100  # Max cached queries
 _CACHE_TTL_SECONDS = 300  # 5 minutes TTL
 
 
+class _EmbeddingService:
+    """
+    Singleton wrapper for SentenceTransformer model.
+
+    Uses EMBEDDING_MODEL setting (default: all-MiniLM-L12-v2, 384 dimensions).
+    """
+
+    _instance = None
+    _model = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            from django.conf import settings
+            model_name = getattr(settings, 'EMBEDDING_MODEL', 'all-MiniLM-L12-v2')
+            self.__class__._model = SentenceTransformer(model_name)
+
+    def encode(self, text, **kwargs):
+        """Encode text to embedding vector(s)."""
+        return self._model.encode(text, **kwargs)
+
+
+# Module-level singleton
+_embedding_service = None
+
+
 def _get_service():
     """Lazy load embedding service to avoid import overhead."""
     global _embedding_service
     if _embedding_service is None:
-        from apps.signals.embedding_service import get_embedding_service
-        _embedding_service = get_embedding_service()
+        _embedding_service = _EmbeddingService()
     return _embedding_service
 
 

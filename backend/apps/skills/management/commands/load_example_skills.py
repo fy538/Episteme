@@ -4,7 +4,7 @@ Management command to load example skills into the database
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from apps.common.models import Organization
-from apps.skills.models import Skill, SkillVersion
+from apps.skills.models import Skill
 import os
 
 
@@ -43,6 +43,7 @@ class Command(BaseCommand):
                 'domain': 'legal',
                 'applies_to_agents': ['research', 'critique', 'brief'],
                 'status': 'active',
+                'owner': user,
                 'created_by': user,
                 'episteme_config': {
                     'signal_types': [
@@ -61,7 +62,7 @@ class Command(BaseCommand):
                         'preferred_sources': ['Legal statutes', 'Case law', 'Attorney opinions'],
                         'minimum_credibility': 0.85
                     },
-                    'artifact_template': {
+                    'document_template': {
                         'brief': {
                             'sections': [
                                 'Legal Summary',
@@ -81,24 +82,19 @@ class Command(BaseCommand):
                 os.path.dirname(__file__),
                 '../../examples/legal_decision_analysis.md'
             )
-            
+
             try:
                 with open(skill_md_path, 'r') as f:
                     skill_md = f.read()
-                
-                SkillVersion.objects.create(
-                    skill=legal_skill,
-                    version=1,
-                    skill_md_content=skill_md,
-                    created_by=user,
-                    changelog='Initial version from example'
-                )
-                self.stdout.write(self.style.SUCCESS('✓ Created Legal Decision Analysis skill'))
+
+                legal_skill.skill_md_content = skill_md
+                legal_skill.save(update_fields=['skill_md_content'])
+                self.stdout.write(self.style.SUCCESS('Created Legal Decision Analysis skill'))
             except FileNotFoundError:
                 self.stdout.write(self.style.ERROR(f'Could not find {skill_md_path}'))
                 legal_skill.delete()
         else:
-            self.stdout.write(self.style.WARNING('✓ Legal Decision Analysis skill already exists'))
+            self.stdout.write(self.style.WARNING('Legal Decision Analysis skill already exists'))
         
         # Load Product Decision Framework
         product_skill, created = Skill.objects.get_or_create(
@@ -109,6 +105,7 @@ class Command(BaseCommand):
                 'domain': 'product',
                 'applies_to_agents': ['research', 'critique', 'brief'],
                 'status': 'active',
+                'owner': user,
                 'created_by': user,
                 'episteme_config': {
                     'signal_types': [
@@ -140,24 +137,19 @@ class Command(BaseCommand):
                 os.path.dirname(__file__),
                 '../../examples/product_decision_framework.md'
             )
-            
+
             try:
                 with open(skill_md_path, 'r') as f:
                     skill_md = f.read()
-                
-                SkillVersion.objects.create(
-                    skill=product_skill,
-                    version=1,
-                    skill_md_content=skill_md,
-                    created_by=user,
-                    changelog='Initial version from example'
-                )
-                self.stdout.write(self.style.SUCCESS('✓ Created Product Decision Framework skill'))
+
+                product_skill.skill_md_content = skill_md
+                product_skill.save(update_fields=['skill_md_content'])
+                self.stdout.write(self.style.SUCCESS('Created Product Decision Framework skill'))
             except FileNotFoundError:
                 self.stdout.write(self.style.ERROR(f'Could not find {skill_md_path}'))
                 product_skill.delete()
         else:
-            self.stdout.write(self.style.WARNING('✓ Product Decision Framework skill already exists'))
+            self.stdout.write(self.style.WARNING('Product Decision Framework skill already exists'))
         
         # Summary
         total_skills = Skill.objects.filter(organization=org).count()

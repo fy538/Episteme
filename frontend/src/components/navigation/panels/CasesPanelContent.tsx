@@ -19,7 +19,7 @@ interface CasesPanelContentProps {
   activeProjectId?: string;
 }
 
-export function CasesPanelContent({ activeCaseId }: CasesPanelContentProps) {
+export function CasesPanelContent({ activeCaseId, activeProjectId }: CasesPanelContentProps) {
   const router = useRouter();
   const { data: projects = [], isLoading } = useProjectsQuery();
   const [search, setSearch] = useState('');
@@ -46,50 +46,55 @@ export function CasesPanelContent({ activeCaseId }: CasesPanelContentProps) {
       }
     }
 
-    // Also find cases not assigned to any project (if your data model supports it)
+    // When viewing a project page, sort that project's cases to the top
+    if (activeProjectId) {
+      result.sort((a, b) => {
+        if (a.projectId === activeProjectId) return -1;
+        if (b.projectId === activeProjectId) return 1;
+        return 0;
+      });
+    }
+
     return result;
-  }, [projects, search]);
+  }, [projects, search, activeProjectId]);
 
   const totalCases = groups.reduce((sum, g) => sum + g.cases.length, 0);
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Cases</h2>
+      {/* Header — compact search + new button */}
+      <div className="px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <SearchSmallIcon className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-neutral-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+              className={cn(
+                'w-full pl-7 pr-2 py-1 text-[11px] rounded-md',
+                'bg-neutral-100 dark:bg-neutral-800',
+                'text-neutral-900 dark:text-neutral-100',
+                'placeholder:text-neutral-400 dark:placeholder:text-neutral-500',
+                'border border-transparent',
+                'focus:border-accent-300 dark:focus:border-accent-700 focus:outline-none',
+                'transition-colors duration-150'
+              )}
+            />
+          </div>
           <button
             onClick={() => router.push('/cases')}
             className={cn(
-              'flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium',
+              'flex items-center gap-0.5 px-1.5 py-1 rounded-md text-[11px] font-medium shrink-0',
               'bg-accent-50 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300',
               'hover:bg-accent-100 dark:hover:bg-accent-900/50',
               'transition-colors duration-150'
             )}
           >
-            <PlusIcon className="w-3.5 h-3.5" />
+            <PlusIcon className="w-3 h-3" />
             New
           </button>
-        </div>
-
-        {/* Search */}
-        <div className="relative">
-          <SearchSmallIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search cases..."
-            className={cn(
-              'w-full pl-8 pr-3 py-1.5 text-xs rounded-md',
-              'bg-neutral-100 dark:bg-neutral-800',
-              'text-neutral-900 dark:text-neutral-100',
-              'placeholder:text-neutral-400 dark:placeholder:text-neutral-500',
-              'border border-transparent',
-              'focus:border-accent-300 dark:focus:border-accent-700 focus:outline-none',
-              'transition-colors duration-150'
-            )}
-          />
         </div>
       </div>
 
@@ -112,12 +117,23 @@ export function CasesPanelContent({ activeCaseId }: CasesPanelContentProps) {
           </div>
         ) : (
           <div className="space-y-3">
-            {groups.map((group) => (
+            {groups.map((group) => {
+              const isActiveProject = activeProjectId === group.projectId;
+              return (
               <div key={group.projectId}>
-                {/* Project name as section header */}
-                <h3 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-1 px-2">
+                {/* Project name as clickable section header */}
+                <Link
+                  href={`/projects/${group.projectId}`}
+                  className={cn(
+                    'block text-[11px] font-medium uppercase tracking-wider mb-1 px-2 py-0.5 -mx-0.5 rounded',
+                    'transition-colors duration-150',
+                    isActiveProject
+                      ? 'text-accent-600 dark:text-accent-400 bg-accent-50/50 dark:bg-accent-900/20'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  )}
+                >
                   {group.projectTitle}
-                </h3>
+                </Link>
                 <div className="space-y-0.5">
                   {group.cases.map((caseItem) => (
                     <CaseItem
@@ -128,7 +144,8 @@ export function CasesPanelContent({ activeCaseId }: CasesPanelContentProps) {
                   ))}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -141,7 +158,7 @@ function CaseItem({ caseItem, isActive }: { caseItem: CaseWithInquiries; isActiv
     <Link
       href={`/cases/${caseItem.id}`}
       className={cn(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded-md',
+        'flex items-center gap-1.5 px-2 py-1 rounded-md',
         'transition-colors duration-150',
         isActive
           ? 'bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300'
@@ -149,8 +166,8 @@ function CaseItem({ caseItem, isActive }: { caseItem: CaseWithInquiries; isActiv
       )}
     >
       <CaseStatusIcon caseItem={caseItem} />
-      <span className="text-sm truncate flex-1">{caseItem.title}</span>
-      <span className="text-xs text-neutral-400 shrink-0">
+      <span className="text-xs truncate flex-1">{caseItem.title}</span>
+      <span className="text-[11px] text-neutral-400 shrink-0">
         {formatCompactTime(caseItem.updated_at)}
       </span>
     </Link>
@@ -159,12 +176,12 @@ function CaseItem({ caseItem, isActive }: { caseItem: CaseWithInquiries; isActiv
 
 function CaseStatusIcon({ caseItem }: { caseItem: CaseWithInquiries }) {
   if (caseItem.tensionsCount === 0 && caseItem.inquiries.length > 0 && caseItem.inquiries.every(i => i.status === 'resolved')) {
-    return <CheckCircleIcon className="w-3.5 h-3.5 text-success-500 shrink-0" />;
+    return <CheckCircleIcon className="w-3 h-3 text-success-500 shrink-0" />;
   }
   if (caseItem.tensionsCount > 0 || caseItem.blindSpotsCount > 0) {
-    return <AlertCircleIcon className="w-3.5 h-3.5 text-warning-500 shrink-0" />;
+    return <AlertCircleIcon className="w-3 h-3 text-warning-500 shrink-0" />;
   }
-  return <CircleIcon className="w-3.5 h-3.5 text-neutral-300 dark:text-neutral-600 shrink-0" />;
+  return <CircleIcon className="w-3 h-3 text-neutral-300 dark:text-neutral-600 shrink-0" />;
 }
 
 // --- Utility ---
@@ -230,3 +247,4 @@ function CircleIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+

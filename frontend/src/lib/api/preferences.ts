@@ -23,11 +23,9 @@ export interface UserPreferences {
   show_agent_reasoning?: boolean;
   show_agent_confidence?: boolean;
   
-  // Evidence
-  evidence_min_credibility: number;
+  // Highlighting
   highlight_assumptions?: boolean;
   highlight_questions?: boolean;
-  highlight_evidence?: boolean;
   
   // Appearance
   theme: 'light' | 'dark' | 'auto';
@@ -69,7 +67,6 @@ export const preferencesAPI = {
       agent_check_interval: 3,
       agent_min_confidence: 0.75,
       agent_auto_run: false,
-      evidence_min_credibility: 3,
       theme: 'light',
       font_size: 'medium',
       density: 'comfortable',

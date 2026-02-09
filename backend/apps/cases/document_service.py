@@ -9,7 +9,7 @@ import re
 from django.db import transaction
 from django.contrib.auth.models import User
 
-from apps.cases.models import Case, CaseDocument, DocumentType, EditFriction, DocumentCitation, CaseStatus
+from apps.cases.models import Case, WorkingDocument, DocumentType, EditFriction, DocumentCitation, CaseStatus
 from apps.cases.brief_templates import BriefTemplateGenerator
 from apps.cases.citation_parser import CitationParser
 from apps.inquiries.models import Inquiry
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 SECTION_MARKER_RE = re.compile(r'<!-- section:([a-zA-Z0-9_-]+) -->')
 
 
-def validate_section_markers(document: CaseDocument) -> dict:
+def validate_section_markers(document: WorkingDocument) -> dict:
     """
     Validate that every BriefSection's section_id has a corresponding
     ``<!-- section:ID -->`` marker in the document's content_markdown.
@@ -62,7 +62,7 @@ def validate_section_markers(document: CaseDocument) -> dict:
     }
 
 
-def log_marker_integrity(document: CaseDocument) -> None:
+def log_marker_integrity(document: WorkingDocument) -> None:
     """
     Run marker validation and log warnings for any mismatches.
 
@@ -88,7 +88,7 @@ def log_marker_integrity(document: CaseDocument) -> None:
         )
 
 
-class CaseDocumentService:
+class WorkingDocumentService:
     """Service for case document operations"""
     
     @staticmethod
@@ -99,7 +99,7 @@ class CaseDocumentService:
         project_id: str = None,
         content_markdown: str = None,
         **case_kwargs
-    ) -> tuple[Case, CaseDocument]:
+    ) -> tuple[Case, WorkingDocument]:
         """
         Create case and auto-generate main brief with AI outline.
 
@@ -131,7 +131,7 @@ class CaseDocumentService:
             outline = BriefTemplateGenerator.generate_case_brief_outline(case)
 
         # Create case brief document
-        case_brief = CaseDocument.objects.create(
+        case_brief = WorkingDocument.objects.create(
             case=case,
             document_type=DocumentType.CASE_BRIEF,
             title=f"{title} - Brief",
@@ -154,7 +154,7 @@ class CaseDocumentService:
         title: str,
         user: User,
         elevation_reason: str = 'user_created'
-    ) -> tuple[Inquiry, CaseDocument]:
+    ) -> tuple[Inquiry, WorkingDocument]:
         """
         Create inquiry and auto-generate inquiry brief with AI outline.
         
@@ -167,8 +167,12 @@ class CaseDocumentService:
         Returns:
             Tuple of (inquiry, inquiry_brief)
         """
-        # Calculate sequence index
-        last_inquiry = case.inquiries.order_by('-sequence_index').first()
+        # Calculate sequence index (select_for_update prevents concurrent duplicates)
+        last_inquiry = (
+            case.inquiries.select_for_update()
+            .order_by('-sequence_index')
+            .first()
+        )
         sequence_index = (last_inquiry.sequence_index + 1) if last_inquiry else 0
         
         # Create inquiry
@@ -183,7 +187,7 @@ class CaseDocumentService:
         outline = BriefTemplateGenerator.generate_inquiry_brief_outline(inquiry)
         
         # Create inquiry brief document
-        inquiry_brief = CaseDocument.objects.create(
+        inquiry_brief = WorkingDocument.objects.create(
             case=case,
             inquiry=inquiry,
             document_type=DocumentType.INQUIRY_BRIEF,
@@ -203,10 +207,10 @@ class CaseDocumentService:
     @staticmethod
     @transaction.atomic
     def update_document_content(
-        document: CaseDocument,
+        document: WorkingDocument,
         new_content: str,
         user: User
-    ) -> CaseDocument:
+    ) -> WorkingDocument:
         """
         Update document content and reparse citations.
         
@@ -256,7 +260,7 @@ class CaseDocumentService:
         ai_structure: dict,
         user: User,
         generation_prompt: str = ''
-    ) -> CaseDocument:
+    ) -> WorkingDocument:
         """
         Create AI-generated research document.
         
@@ -272,7 +276,7 @@ class CaseDocumentService:
         Returns:
             Created research document
         """
-        research_doc = CaseDocument.objects.create(
+        research_doc = WorkingDocument.objects.create(
             case=case,
             inquiry=inquiry,
             document_type=DocumentType.RESEARCH,
@@ -288,93 +292,3 @@ class CaseDocumentService:
         
         return research_doc
     
-    @staticmethod
-    def create_debate_document(
-        case: Case,
-        inquiry: Inquiry,
-        title: str,
-        content: str,
-        ai_structure: dict,
-        user: User
-    ) -> CaseDocument:
-        """Create AI-generated debate document"""
-        return CaseDocument.objects.create(
-            case=case,
-            inquiry=inquiry,
-            document_type=DocumentType.DEBATE,
-            title=title,
-            content_markdown=content,
-            edit_friction=EditFriction.HIGH,
-            ai_structure=ai_structure,
-            generated_by_ai=True,
-            agent_type='debate',
-            created_by=user
-        )
-    
-    @staticmethod
-    def create_critique_document(
-        case: Case,
-        inquiry: Inquiry,
-        title: str,
-        content: str,
-        ai_structure: dict,
-        user: User
-    ) -> CaseDocument:
-        """Create AI-generated critique document"""
-        return CaseDocument.objects.create(
-            case=case,
-            inquiry=inquiry,
-            document_type=DocumentType.CRITIQUE,
-            title=title,
-            content_markdown=content,
-            edit_friction=EditFriction.HIGH,
-            ai_structure=ai_structure,
-            generated_by_ai=True,
-            agent_type='critique',
-            created_by=user
-        )
-    
-    @staticmethod
-    def get_case_document_hierarchy(case: Case) -> dict:
-        """
-        Get structured view of all documents in a case.
-        
-        Args:
-            case: Case to get hierarchy for
-        
-        Returns:
-            Dictionary with organized document structure
-        """
-        from apps.cases.models import CaseDocument
-        
-        # Get all documents
-        docs = CaseDocument.objects.filter(case=case).select_related('inquiry')
-        
-        # Organize by type
-        hierarchy = {
-            'case_brief': None,
-            'inquiry_briefs': [],
-            'research_docs': [],
-            'debate_docs': [],
-            'critique_docs': [],
-            'source_docs': [],
-            'notes': []
-        }
-        
-        for doc in docs:
-            if doc.document_type == DocumentType.CASE_BRIEF:
-                hierarchy['case_brief'] = doc
-            elif doc.document_type == DocumentType.INQUIRY_BRIEF:
-                hierarchy['inquiry_briefs'].append(doc)
-            elif doc.document_type == DocumentType.RESEARCH:
-                hierarchy['research_docs'].append(doc)
-            elif doc.document_type == DocumentType.DEBATE:
-                hierarchy['debate_docs'].append(doc)
-            elif doc.document_type == DocumentType.CRITIQUE:
-                hierarchy['critique_docs'].append(doc)
-            elif doc.document_type == DocumentType.SOURCE:
-                hierarchy['source_docs'].append(doc)
-            elif doc.document_type == DocumentType.NOTES:
-                hierarchy['notes'].append(doc)
-        
-        return hierarchy

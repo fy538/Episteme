@@ -27,7 +27,7 @@ import { SuggestionPopover } from './SuggestionPopover';
 import { SectionNode, preprocessSectionMarkers, postprocessSectionMarkers } from './SectionNode';
 import { SectionGroundingGutter } from './SectionGroundingGutter';
 import { documentsAPI } from '@/lib/api/documents';
-import type { CaseDocument, BriefSection } from '@/lib/types/case';
+import type { WorkingDocument, BriefSection } from '@/lib/types/case';
 import type { BriefSectionSuggestion } from '@/components/cases/BriefSuggestion';
 
 interface DocumentVersion {
@@ -48,7 +48,7 @@ const VERSION_LABELS: Record<string, string> = {
 };
 
 interface BriefEditorProps {
-  document: CaseDocument;
+  document: WorkingDocument;
   onSave?: (content: string) => void;
   onCreateInquiry?: (selectedText: string) => void;
   onMarkAssumption?: (selectedText: string) => void;

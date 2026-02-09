@@ -4,7 +4,7 @@
  * Manages:
  * - Reflection/thinking state (streaming + completed)
  * - Action hints from AI responses
- * - Signals accumulated from streaming
+ * - Session receipts and background work
  * - Companion panel position (sidebar/bottom/hidden, localStorage-persisted)
  * - Section ranking (priority-based adaptive display)
  * - Section pinning (user override)
@@ -12,7 +12,6 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { ActionHint } from '@/lib/types/chat';
-import type { Signal } from '@/lib/types/signal';
 import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState } from '@/lib/types/companion';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
 import { rankSections, type CompanionSectionId } from '@/lib/utils/companion-ranking';
@@ -37,8 +36,6 @@ export interface UseCompanionStateReturn {
   companionThinking: CompanionThinking;
   actionHints: ActionHint[];
   clearReflection: () => void;
-  // Signals
-  signals: Signal[];
   // Status & receipts
   status: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts: SessionReceipt[];
@@ -67,7 +64,6 @@ export function useCompanionState({
   const [reflection, setReflection] = useState('');
   const [isReflectionStreaming, setIsReflectionStreaming] = useState(false);
   const [actionHints, setActionHints] = useState<ActionHint[]>([]);
-  const [signals, setSignals] = useState<Signal[]>([]);
 
   // --- Status & receipts ---
   const [backgroundWork, setBackgroundWork] = useState<BackgroundWorkItem[]>([]);
@@ -172,14 +168,6 @@ export function useCompanionState({
       setActionHints(hints);
       markUpdated('action_hints');
     },
-    onSignals: (newSignals: Signal[]) => {
-      setSignals(prev => {
-        const existingIds = new Set(prev.map(s => s.id));
-        const unique = newSignals.filter(s => !existingIds.has(s.id));
-        return unique.length > 0 ? [...prev, ...unique] : prev;
-      });
-      markUpdated('signals');
-    },
     onMessageComplete: (messageId?: string) => {
       onMessageCompleteRef.current?.(messageId);
     },
@@ -194,7 +182,6 @@ export function useCompanionState({
   const rankedSections = useMemo(() => rankSections({
     thinking: { content: reflection, isStreaming: isReflectionStreaming },
     actionHints,
-    signals,
     status,
     sessionReceipts,
     caseState,
@@ -202,14 +189,13 @@ export function useCompanionState({
     pinnedSection,
     lastUpdated: lastUpdatedRef.current,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [reflection, isReflectionStreaming, actionHints, signals, status, sessionReceipts, caseState, mode, pinnedSection, rankingEpoch]);
+  }), [reflection, isReflectionStreaming, actionHints, status, sessionReceipts, caseState, mode, pinnedSection, rankingEpoch]);
 
   return {
     streamCallbacks,
     companionThinking,
     actionHints,
     clearReflection,
-    signals,
     status,
     sessionReceipts,
     addReceipt,

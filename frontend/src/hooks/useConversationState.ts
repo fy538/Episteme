@@ -2,50 +2,32 @@
  * useConversationState Hook
  *
  * State management for the standalone /chat/[threadId] conversation page.
- * Composes existing useChatPanelState and useCompanionState hooks.
- * Adds thread metadata loading and thread-level actions.
+ * Composes useCompanionState for the companion panel and thread metadata.
+ *
+ * Chat panel state (messages, streaming) is managed entirely by ChatPanel's
+ * internal useChatPanelState — NOT duplicated here. The companion's
+ * streamCallbacks are passed to ChatPanel via the page-level wiring.
  */
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { chatAPI } from '@/lib/api/chat';
-import { useChatPanelState } from './useChatPanelState';
 import { useCompanionState } from './useCompanionState';
 
 interface UseConversationStateOptions {
   threadId: string;
-  /** Initial message to send on mount (from hero input handoff) */
-  initialMessage?: string | null;
 }
 
-export function useConversationState({ threadId, initialMessage }: UseConversationStateOptions) {
+export function useConversationState({ threadId }: UseConversationStateOptions) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [initialMessageSent, setInitialMessageSent] = useState(false);
 
-  // Companion state (reflection, action hints, signals, receipts)
+  // Companion state (reflection, action hints, receipts)
   const companion = useCompanionState({
     mode: 'casual',
-  });
-
-  // Chat panel state (streaming, messages, signals)
-  // Note: onTitleUpdate is wired at the page level (ConversationPage)
-  // where it can directly update the ChatPanel's streamCallbacks.
-  const chatState = useChatPanelState({
-    threadId,
-    streamCallbacks: companion.streamCallbacks,
-    mode: { mode: 'casual' },
-    initialMessage: !initialMessageSent && initialMessage ? initialMessage : undefined,
-    onInitialMessageSent: () => {
-      setInitialMessageSent(true);
-      // Clear sessionStorage after sending
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('episteme_initial_message');
-      }
-    },
   });
 
   // Thread metadata
@@ -81,9 +63,6 @@ export function useConversationState({ threadId, initialMessage }: UseConversati
   }, [threadId, router, queryClient]);
 
   return {
-    // Chat
-    chatState,
-
     // Companion
     companion,
 

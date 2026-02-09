@@ -1,37 +1,42 @@
 /**
  * Project Home Page
  *
- * The main view for a single project showing:
- * - ONE recommended action (most important case)
- * - ONE exploration prompt (cross-case connection)
- * - New activity for this project
- * - Cases with readiness indicators
+ * The main dashboard for a single project. This is the "scoped surface" —
+ * chatting here means the AI immediately knows the project context.
+ *
+ * Sections:
+ * 1. Header with project title, description, stats, and actions
+ * 2. Scoped chat input (creates project-scoped thread)
+ * 3. Action items (prioritized across all project cases)
+ * 4. Cases with stage, inquiry progress, and assumption stats
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useIntelligence } from '@/hooks/useIntelligence';
-import { RecommendedAction } from '@/components/workspace/dashboard/RecommendedAction';
-import { NewActivityFeed } from '@/components/workspace/dashboard/NewActivityFeed';
-import { TensionSlideOver } from '@/components/workspace/actions/TensionSlideOver';
-import { BlindSpotModal } from '@/components/workspace/actions/BlindSpotModal';
 import { NoCasesEmpty } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { MessageInput } from '@/components/chat/MessageInput';
+import { chatAPI } from '@/lib/api/chat';
 import { cn } from '@/lib/utils';
 import type { Project } from '@/lib/types/project';
-import type { IntelligenceItem } from '@/lib/types/intelligence';
-import type { CaseWithInquiries } from '@/hooks/useProjectsQuery';
+import type { CaseStage } from '@/lib/types/plan';
+import type {
+  ProjectCaseSummary,
+  ProjectStats,
+  ProjectActionItem,
+} from '@/hooks/useProjectDashboard';
 
 interface ProjectHomePageProps {
   project: Project;
-  cases: CaseWithInquiries[];
+  cases: ProjectCaseSummary[];
+  stats: ProjectStats;
+  actionItems: ProjectActionItem[];
+  isLoading: boolean;
   onCreateCase?: () => void;
-  onStartChat?: () => void;
   onOpenSettings?: () => void;
   onDelete?: () => void;
   className?: string;
@@ -40,128 +45,37 @@ interface ProjectHomePageProps {
 export function ProjectHomePage({
   project,
   cases,
+  stats,
+  actionItems,
+  isLoading,
   onCreateCase,
-  onStartChat,
   onOpenSettings,
   onDelete,
   className,
 }: ProjectHomePageProps) {
   const router = useRouter();
-
-  // Modal/SlideOver state
-  const [selectedItem, setSelectedItem] = useState<IntelligenceItem | null>(null);
-  const [showTensionPanel, setShowTensionPanel] = useState(false);
-  const [showBlindSpotModal, setShowBlindSpotModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
-  // Fetch intelligence for project scope
-  const { topAction, exploration, activity, isLoading, dismissItem } = useIntelligence({
-    scope: 'project',
-    projectId: project.id,
-  });
-
-  // Calculate project stats
-  const readyCases = cases.filter(c => c.tensionsCount === 0 && c.inquiries.every(i => i.status === 'resolved')).length;
-  const newActivityCount = activity.filter(a => a.isNew).length;
-
-  // Handle action click from RecommendedAction
-  const handleActionClick = (item: IntelligenceItem) => {
-    setSelectedItem(item);
-
-    switch (item.type) {
-      case 'tension':
-        setShowTensionPanel(true);
-        break;
-      case 'blind_spot':
-        setShowBlindSpotModal(true);
-        break;
-      case 'explore':
-        // Navigate to chat with pre-filled prompt
-        const prompt = encodeURIComponent(item.exploration?.question || item.title);
-        const chatUrl = item.caseId
-          ? `/?case=${item.caseId}&prompt=${prompt}`
-          : `/?project=${project.id}&prompt=${prompt}`;
-        router.push(chatUrl);
-        break;
-      case 'research_ready':
-        if (item.caseId) {
-          router.push(`/cases/${item.caseId}/research`);
-        }
-        break;
-      case 'ready':
-        if (item.caseId) {
-          router.push(`/cases/${item.caseId}/brief`);
-        }
-        break;
-      default:
-        // Default: navigate to the relevant case
-        if (item.caseId) {
-          router.push(`/cases/${item.caseId}`);
-        }
+  // Project-scoped chat: create a thread linked to this project
+  const handleChatSend = useCallback(async (content: string) => {
+    try {
+      setIsSending(true);
+      const thread = await chatAPI.createThread(project.id);
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('episteme_initial_message', JSON.stringify({ threadId: thread.id, content }));
+      }
+      router.push(`/chat/${thread.id}`);
+    } catch (err) {
+      console.error('Failed to start project chat:', err);
+      setIsSending(false);
     }
-  };
-
-  // Handle exploration click
-  const handleExploreClick = (item: IntelligenceItem) => {
-    const prompt = encodeURIComponent(item.exploration?.question || item.title);
-    const chatUrl = item.caseId
-      ? `/?case=${item.caseId}&prompt=${prompt}`
-      : `/?project=${project.id}&prompt=${prompt}`;
-    router.push(chatUrl);
-  };
-
-  // Tension resolution handlers
-  const handleTensionResolve = (choice: 'A' | 'B' | 'neither') => {
-    console.log('Resolved tension:', selectedItem?.id, 'with choice:', choice);
-    // TODO: Call API to resolve tension
-    setShowTensionPanel(false);
-    setSelectedItem(null);
-  };
-
-  const handleTensionDismiss = () => {
-    console.log('Dismissed tension:', selectedItem?.id);
-    // TODO: Call API to mark as unresolved
-    setShowTensionPanel(false);
-    setSelectedItem(null);
-  };
-
-  // Blind spot handlers
-  const handleBlindSpotResearch = () => {
-    console.log('Research blind spot:', selectedItem?.id);
-    setShowBlindSpotModal(false);
-    if (selectedItem?.caseId) {
-      router.push(`/cases/${selectedItem.caseId}/research?topic=${encodeURIComponent(selectedItem?.blindSpot?.area || '')}`);
-    }
-  };
-
-  const handleBlindSpotDiscuss = () => {
-    console.log('Discuss blind spot:', selectedItem?.id);
-    const prompt = encodeURIComponent(`Help me understand ${selectedItem?.blindSpot?.area || selectedItem?.title}`);
-    const chatUrl = selectedItem?.caseId
-      ? `/?case=${selectedItem.caseId}&prompt=${prompt}`
-      : `/?project=${project.id}&prompt=${prompt}`;
-    router.push(chatUrl);
-    setShowBlindSpotModal(false);
-  };
-
-  const handleBlindSpotAddInquiry = () => {
-    console.log('Add inquiry for blind spot:', selectedItem?.id);
-    // TODO: Open create inquiry modal or navigate
-    setShowBlindSpotModal(false);
-  };
-
-  const handleBlindSpotMarkAddressed = () => {
-    console.log('Mark blind spot addressed:', selectedItem?.id);
-    // TODO: Call API to mark as addressed
-    setShowBlindSpotModal(false);
-    setSelectedItem(null);
-  };
+  }, [project.id, router]);
 
   return (
     <div className={cn('max-w-3xl mx-auto py-8 px-4', className)}>
       {/* Header */}
       <header className="mb-6">
-        {/* Breadcrumb */}
         <Link
           href="/"
           className="text-sm text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 mb-2 inline-flex items-center gap-1"
@@ -171,7 +85,7 @@ export function ProjectHomePage({
         </Link>
 
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-primary-900 dark:text-primary-50">
               {project.title}
             </h1>
@@ -182,8 +96,7 @@ export function ProjectHomePage({
             )}
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button variant="ghost" size="icon" onClick={onOpenSettings} title="Settings">
               <SettingsIcon className="w-5 h-5" />
             </Button>
@@ -196,57 +109,51 @@ export function ProjectHomePage({
         </div>
       </header>
 
-      {/* Inline chat input */}
-      <div className="mb-6 rounded-lg border border-neutral-200/60 dark:border-neutral-700/50 overflow-hidden">
+      {/* Stats bar */}
+      {!isLoading && stats.totalCases > 0 && (
+        <div className="flex items-center gap-4 mb-6 px-1">
+          <StatPill
+            label="Cases"
+            value={`${stats.readyCases}/${stats.totalCases} ready`}
+            variant={stats.readyCases === stats.totalCases ? 'success' : 'default'}
+          />
+          {stats.totalInquiries > 0 && (
+            <StatPill
+              label="Inquiries"
+              value={`${stats.resolvedInquiries}/${stats.totalInquiries} resolved`}
+              variant={stats.resolvedInquiries === stats.totalInquiries ? 'success' : 'default'}
+            />
+          )}
+          {stats.highRiskUntested > 0 && (
+            <StatPill
+              label="Assumptions"
+              value={`${stats.highRiskUntested} high-risk untested`}
+              variant="warning"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Scoped chat input */}
+      <div className="mb-8 rounded-lg border border-neutral-200/60 dark:border-neutral-700/50 overflow-hidden">
         <MessageInput
           variant="hero"
-          onSend={(content) => {
-            const prompt = encodeURIComponent(content);
-            router.push(`/?project=${project.id}&prompt=${prompt}`);
-          }}
-          placeholder="Ask about this project..."
+          onSend={handleChatSend}
+          disabled={isSending}
+          placeholder={`Ask about ${project.title}...`}
         />
       </div>
 
-      {/* Recommended Action */}
-      {topAction && !isLoading && (
+      {/* Action items */}
+      {!isLoading && actionItems.length > 0 && (
         <section className="mb-8">
           <h2 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3">
-            Recommended Action
+            Action Items
           </h2>
-          <RecommendedAction
-            item={topAction}
-            onAction={handleActionClick}
-            onDismiss={() => dismissItem(topAction.id)}
-          />
-        </section>
-      )}
-
-      {/* Worth Exploring */}
-      {exploration && (
-        <section className="mb-8">
-          <h2 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3">
-            Worth Exploring
-          </h2>
-          <ExplorationCard item={exploration} onExplore={handleExploreClick} />
-        </section>
-      )}
-
-      {/* New Activity */}
-      {activity.length > 0 && (
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">
-              New This Week
-            </h2>
-            {newActivityCount > 0 && (
-              <span className="text-xs font-medium text-accent-600 dark:text-accent-400">
-                {newActivityCount} new
-              </span>
-            )}
-          </div>
-          <div className="border border-neutral-200/80 dark:border-neutral-800/80 rounded-md overflow-hidden">
-            <NewActivityFeed items={activity} maxItems={3} />
+          <div className="space-y-2">
+            {actionItems.map((item) => (
+              <ActionItemRow key={item.id} item={item} />
+            ))}
           </div>
         </section>
       )}
@@ -259,18 +166,18 @@ export function ProjectHomePage({
           </h2>
           {cases.length > 0 && (
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              {readyCases}/{cases.length} ready
+              {stats.readyCases}/{stats.totalCases} ready
             </span>
           )}
         </div>
 
-        {cases.length === 0 ? (
+        {cases.length === 0 && !isLoading ? (
           <NoCasesEmpty onCreate={onCreateCase || (() => {})} />
         ) : (
           <>
             <div className="space-y-3">
               {cases.map((caseItem) => (
-                <CaseCard key={caseItem.id} caseItem={caseItem} />
+                <ProjectCaseCard key={caseItem.id} caseItem={caseItem} />
               ))}
             </div>
 
@@ -281,43 +188,6 @@ export function ProjectHomePage({
           </>
         )}
       </section>
-
-      {/* Tension Slide Over */}
-      {selectedItem?.tension && (
-        <TensionSlideOver
-          tension={selectedItem.tension}
-          title={selectedItem.title}
-          caseName={selectedItem.caseTitle}
-          inquiryName={selectedItem.inquiryTitle}
-          isOpen={showTensionPanel}
-          onClose={() => {
-            setShowTensionPanel(false);
-            setSelectedItem(null);
-          }}
-          onResolve={handleTensionResolve}
-          onDismiss={handleTensionDismiss}
-        />
-      )}
-
-      {/* Blind Spot Modal */}
-      {selectedItem?.blindSpot && (
-        <BlindSpotModal
-          blindSpot={selectedItem.blindSpot}
-          title={selectedItem.title}
-          description={selectedItem.description}
-          caseName={selectedItem.caseTitle}
-          inquiryName={selectedItem.inquiryTitle}
-          isOpen={showBlindSpotModal}
-          onClose={() => {
-            setShowBlindSpotModal(false);
-            setSelectedItem(null);
-          }}
-          onResearch={handleBlindSpotResearch}
-          onDiscuss={handleBlindSpotDiscuss}
-          onAddInquiry={handleBlindSpotAddInquiry}
-          onMarkAddressed={handleBlindSpotMarkAddressed}
-        />
-      )}
 
       {/* Delete Confirm Dialog */}
       <ConfirmDialog
@@ -336,136 +206,162 @@ export function ProjectHomePage({
   );
 }
 
-// Exploration card component
-function ExplorationCard({
-  item,
-  onExplore
+// ===== Stats Pill =====
+
+function StatPill({
+  label,
+  value,
+  variant = 'default',
 }: {
-  item: IntelligenceItem;
-  onExplore: (item: IntelligenceItem) => void;
+  label: string;
+  value: string;
+  variant?: 'default' | 'success' | 'warning';
 }) {
   return (
-    <div className="p-4 border border-primary-200/60 dark:border-primary-800/60 rounded-md bg-primary-50/50 dark:bg-primary-900/10">
-      <div className="flex items-start gap-3">
-        <div className="p-2 rounded-lg bg-primary-100 dark:bg-primary-900/30">
-          <ExploreIcon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-        </div>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-primary-900 dark:text-primary-50 mb-1">
-            "{item.exploration?.question || item.title}"
-          </p>
-          <p className="text-xs text-neutral-600 dark:text-neutral-400">
-            {item.exploration?.context || item.description}
-          </p>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="mt-2 -ml-2"
-            onClick={() => onExplore(item)}
-          >
-            Explore →
-          </Button>
-        </div>
-      </div>
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-neutral-500 dark:text-neutral-400">{label}</span>
+      <span
+        className={cn(
+          'text-xs font-medium tabular-nums',
+          variant === 'success' && 'text-success-600 dark:text-success-400',
+          variant === 'warning' && 'text-warning-600 dark:text-warning-400',
+          variant === 'default' && 'text-primary-900 dark:text-primary-100'
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-// Case card component
-function CaseCard({ caseItem }: { caseItem: CaseWithInquiries }) {
-  const [expanded, setExpanded] = useState(false);
+// ===== Action Item Row =====
 
-  const isReady = caseItem.tensionsCount === 0 && caseItem.inquiries.length > 0 && caseItem.inquiries.every(i => i.status === 'resolved');
-  const resolvedInquiries = caseItem.inquiries.filter(i => i.status === 'resolved').length;
+const ACTION_TYPE_CONFIG: Record<ProjectActionItem['type'], { icon: string; color: string }> = {
+  resolve_inquiry: { icon: '\u26a1', color: 'text-warning-600 dark:text-warning-400' },
+  untested_assumptions: { icon: '\u26a0\ufe0f', color: 'text-warning-600 dark:text-warning-400' },
+  resume_investigating: { icon: '\u2192', color: 'text-accent-600 dark:text-accent-400' },
+  criteria_progress: { icon: '\u2713', color: 'text-success-600 dark:text-success-400' },
+  start_investigation: { icon: '\u2022', color: 'text-neutral-500 dark:text-neutral-400' },
+};
+
+function ActionItemRow({ item }: { item: ProjectActionItem }) {
+  const config = ACTION_TYPE_CONFIG[item.type] ?? ACTION_TYPE_CONFIG.start_investigation;
 
   return (
-    <div className="border border-neutral-200/80 dark:border-neutral-800/80 rounded-md overflow-hidden">
-      {/* Case Header */}
-      <div className="flex items-center gap-3 p-4">
-        {/* Expand toggle */}
-        {caseItem.inquiries.length > 0 && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="p-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded"
-          >
-            <ChevronIcon
-              className={cn(
-                'w-4 h-4 text-neutral-400 transition-transform',
-                expanded && 'rotate-90'
-              )}
-            />
-          </button>
-        )}
-
-        {/* Case info */}
-        <Link
-          href={`/cases/${caseItem.id}`}
-          className="flex-1 flex items-center justify-between hover:opacity-80 transition-opacity"
-        >
-          <div className="flex items-center gap-3">
-            {isReady ? (
-              <CheckCircleIcon className="w-5 h-5 text-success-500" />
-            ) : (
-              <CircleIcon className="w-5 h-5 text-neutral-300 dark:text-neutral-600" />
-            )}
-            <div>
-              <h3 className="font-medium text-primary-900 dark:text-primary-50">
-                {caseItem.title}
-              </h3>
-              <div className="flex items-center gap-2 mt-0.5">
-                {caseItem.tensionsCount > 0 && (
-                  <span className="text-xs text-warning-600 dark:text-warning-400">
-                    {caseItem.tensionsCount} tension{caseItem.tensionsCount !== 1 ? 's' : ''}
-                  </span>
-                )}
-                {caseItem.blindSpotsCount > 0 && (
-                  <span className="text-xs text-accent-600 dark:text-accent-400">
-                    {caseItem.blindSpotsCount} blind spot{caseItem.blindSpotsCount !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <span className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-            {resolvedInquiries}/{caseItem.inquiries.length} inquiries
-          </span>
-        </Link>
-      </div>
-
-      {/* Expanded Inquiries */}
-      {expanded && caseItem.inquiries.length > 0 && (
-        <div className="px-4 pb-4 pt-0 ml-9 space-y-1">
-          {caseItem.inquiries.map((inquiry) => (
-            <Link
-              key={inquiry.id}
-              href={`/cases/${caseItem.id}?inquiry=${inquiry.id}`}
-              className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition-colors"
-            >
-              {inquiry.status === 'resolved' ? (
-                <CheckIcon className="w-3.5 h-3.5 text-success-500" />
-              ) : (
-                <CircleSmallIcon className="w-3.5 h-3.5 text-neutral-300 dark:text-neutral-600" />
-              )}
-              <span
-                className={cn(
-                  'text-sm',
-                  inquiry.status === 'resolved'
-                    ? 'text-neutral-500 dark:text-neutral-400'
-                    : 'text-primary-900 dark:text-primary-50'
-                )}
-              >
-                {inquiry.title}
-              </span>
-            </Link>
-          ))}
-        </div>
+    <Link
+      href={item.href}
+      className={cn(
+        'flex items-center gap-3 p-3 rounded-lg border',
+        'border-neutral-200/80 dark:border-neutral-800/80',
+        'hover:border-accent-300 dark:hover:border-accent-700',
+        'hover:bg-accent-50/30 dark:hover:bg-accent-900/10',
+        'transition-all duration-150'
       )}
-    </div>
+    >
+      <span className="text-sm shrink-0">{config.icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-primary-900 dark:text-primary-50 truncate">
+          {item.title}
+        </p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+          {item.caseTitle}
+        </p>
+      </div>
+      <ChevronIcon className="w-4 h-4 text-neutral-400 shrink-0" />
+    </Link>
   );
 }
 
-// Icons
+// ===== Case Card =====
+
+const STAGE_CONFIG: Record<CaseStage, { label: string; dotColor: string }> = {
+  exploring: { label: 'Exploring', dotColor: 'bg-neutral-400' },
+  investigating: { label: 'Investigating', dotColor: 'bg-info-500' },
+  synthesizing: { label: 'Synthesizing', dotColor: 'bg-warning-500' },
+  ready: { label: 'Ready', dotColor: 'bg-success-500' },
+};
+
+function ProjectCaseCard({ caseItem }: { caseItem: ProjectCaseSummary }) {
+  const stage = STAGE_CONFIG[caseItem.stage];
+
+  return (
+    <Link
+      href={`/cases/${caseItem.id}`}
+      className={cn(
+        'block rounded-lg border p-4',
+        'border-neutral-200/80 dark:border-neutral-800/80',
+        'hover:border-accent-300 dark:hover:border-accent-700',
+        'hover:bg-accent-50/30 dark:hover:bg-accent-900/10',
+        'transition-all duration-150 group'
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            {caseItem.isReady ? (
+              <CheckCircleIcon className="w-4 h-4 text-success-500 shrink-0" />
+            ) : (
+              <div className={cn('w-2 h-2 rounded-full shrink-0', stage.dotColor)} />
+            )}
+            <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              {stage.label}
+            </span>
+          </div>
+
+          <h3 className="text-sm font-medium text-primary-900 dark:text-primary-100 truncate">
+            {caseItem.title}
+          </h3>
+
+          <div className="flex items-center gap-3 mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+            {caseItem.inquiries.total > 0 && (
+              <span className="tabular-nums">
+                {caseItem.inquiries.resolved}/{caseItem.inquiries.total} inquiries
+              </span>
+            )}
+            {caseItem.assumptions.highRiskUntested > 0 && (
+              <span className="text-warning-600 dark:text-warning-400">
+                {caseItem.assumptions.highRiskUntested} untested
+              </span>
+            )}
+            <span>{formatRelativeTime(caseItem.updatedAt)}</span>
+          </div>
+        </div>
+
+        <span
+          className={cn(
+            'text-xs font-medium px-2.5 py-1 rounded-md shrink-0',
+            'text-accent-700 dark:text-accent-300',
+            'bg-accent-100 dark:bg-accent-900/40',
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-150'
+          )}
+        >
+          Open
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+// ===== Utils =====
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60_000);
+
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// ===== Icons =====
+
 function ChevronLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -491,28 +387,11 @@ function SettingsIcon({ className }: { className?: string }) {
   );
 }
 
-function ChatIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
-    </svg>
-  );
-}
-
 function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="3 6 5 6 21 6" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ExploreIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z" />
     </svg>
   );
 }
@@ -530,30 +409,6 @@ function CheckCircleIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
       <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CircleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CircleSmallIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="4" />
     </svg>
   );
 }

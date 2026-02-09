@@ -5,9 +5,9 @@
 'use client';
 
 import ReactMarkdown from 'react-markdown';
-import type { CaseDocument } from '@/lib/types/case';
+import type { WorkingDocument } from '@/lib/types/case';
 
-export function AIDocumentViewer({ document }: { document: CaseDocument }) {
+export function AIDocumentViewer({ document }: { document: WorkingDocument }) {
   return (
     <div className="bg-white h-screen overflow-y-auto">
       {/* Header indicating read-only */}

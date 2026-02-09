@@ -15,10 +15,9 @@ from django.contrib.auth.models import User
 from django.core.cache import cache as django_cache
 
 from apps.events.models import Event, EventType, ActorType
-from apps.cases.models import Case, CaseDocument, DocumentType, EditFriction, ReadinessChecklistItem
-from apps.inquiries.models import Inquiry, Evidence, InquiryStatus, ElevationReason
+from apps.cases.models import Case, WorkingDocument, DocumentType, EditFriction
+from apps.inquiries.models import Inquiry, InquiryStatus, ElevationReason
 from apps.projects.models import Project
-from apps.signals.models import Signal, SignalType, SignalSourceType
 from apps.cases.brief_models import (
     BriefSection, BriefAnnotation,
     SectionType, GroundingStatus, AnnotationType, AnnotationPriority,
@@ -36,7 +35,7 @@ class BriefTestMixin:
     """Shared helpers for creating test data."""
 
     def _create_event(self, case=None, event_type=EventType.CASE_CREATED):
-        """Create an Event (required FK for Signal)."""
+        """Create an Event."""
         return Event.objects.create(
             actor_type=ActorType.SYSTEM,
             type=event_type,
@@ -45,7 +44,7 @@ class BriefTestMixin:
         )
 
     def _create_case_with_brief(self, title='Test Case', decision_question=''):
-        """Create a Case with a CaseDocument (main_brief) and return both."""
+        """Create a Case with a WorkingDocument (main_brief) and return both."""
         event = self._create_event(event_type=EventType.CASE_CREATED)
         project = Project.objects.create(
             title='Test Project',
@@ -59,7 +58,7 @@ class BriefTestMixin:
             decision_question=decision_question,
             created_from_event_id=event.id,
         )
-        doc = CaseDocument.objects.create(
+        doc = WorkingDocument.objects.create(
             case=case,
             document_type=DocumentType.CASE_BRIEF,
             title='Brief',
@@ -97,33 +96,30 @@ class BriefTestMixin:
             created_from_event_id=event.id,
         )
 
-    def _create_signal(self, case, inquiry=None, signal_type=SignalType.CLAIM,
-                       text='Test signal'):
-        """Create a Signal."""
-        event = self._create_event(case=case, event_type=EventType.SIGNAL_EXTRACTED)
-        return Signal.objects.create(
-            type=signal_type,
-            text=text,
-            normalized_text=text.lower(),
-            confidence=0.8,
-            case=case,
-            inquiry=inquiry,
-            event=event,
-            sequence_index=0,
-            dedupe_key=uuid.uuid4().hex[:16],
-        )
-
     def _create_evidence(self, inquiry, direction='supports', strength=0.7):
-        """Create an Evidence item."""
-        return Evidence.objects.create(
-            inquiry=inquiry,
-            evidence_type='expert_opinion',
-            evidence_text='Some evidence text',
-            direction=direction,
-            strength=strength,
-            credibility=0.8,
-            created_by=self.user,
+        """Create a graph evidence Node + Edge (replaces inquiries.Evidence)."""
+        from apps.graph.models import Node, Edge, EdgeType, NodeSourceType
+        evidence_node = Node.objects.create(
+            project=inquiry.case.project,
+            node_type='evidence',
+            content='Some evidence text',
+            confidence=strength,
+            source_type=NodeSourceType.USER,
         )
+        # Create an inquiry node if one doesn't exist yet, then link
+        inquiry_node, _ = Node.objects.get_or_create(
+            project=inquiry.case.project,
+            node_type='inquiry',
+            content=inquiry.title,
+            defaults={'source_type': NodeSourceType.AGENT_ANALYSIS},
+        )
+        edge_type = EdgeType.SUPPORTS if direction == 'supports' else EdgeType.CONTRADICTS
+        Edge.objects.create(
+            source_node=evidence_node,
+            target_node=inquiry_node,
+            edge_type=edge_type,
+        )
+        return evidence_node
 
 
 class TestBriefGroundingEngine(BriefTestMixin, TestCase):
@@ -147,10 +143,14 @@ class TestBriefGroundingEngine(BriefTestMixin, TestCase):
             self.brief, heading='Inquiry Section',
             section_type=SectionType.INQUIRY_BRIEF, inquiry=inquiry
         )
-        # Add an assumption signal with no evidence
-        self._create_signal(
-            self.case, inquiry=inquiry,
-            signal_type=SignalType.ASSUMPTION, text='Assumption without evidence'
+        # Add an assumption node in the graph layer (replaces assumption signals)
+        from apps.graph.models import Node, NodeSourceType
+        Node.objects.create(
+            project=self.case.project,
+            node_type='assumption',
+            content='Assumption without evidence',
+            status='untested',
+            source_type=NodeSourceType.AGENT_ANALYSIS,
         )
         result = BriefGroundingEngine.compute_section_grounding(section)
         self.assertEqual(result['status'], GroundingStatus.WEAK)
@@ -183,16 +183,20 @@ class TestBriefGroundingEngine(BriefTestMixin, TestCase):
         self.assertEqual(result['evidence_count'], 3)
 
     def test_conflicting_evidence_returns_conflicted(self):
-        """Section with contradicting signals returns conflicted status."""
+        """Section with tension nodes returns conflicted status."""
         inquiry = self._create_inquiry(self.case)
         section = self._create_section(
             self.brief, heading='Conflicted Section',
             section_type=SectionType.INQUIRY_BRIEF, inquiry=inquiry
         )
-        # Create two signals that contradict each other
-        signal_a = self._create_signal(self.case, inquiry=inquiry, text='Claim A')
-        signal_b = self._create_signal(self.case, inquiry=inquiry, text='Claim B contradicts A')
-        signal_a.contradicts.add(signal_b)
+        # Create a tension node in the graph layer (replaces signal.contradicts M2M)
+        from apps.graph.models import Node, NodeSourceType
+        Node.objects.create(
+            project=self.case.project,
+            node_type='tension',
+            content='Contradicting claims about performance',
+            source_type=NodeSourceType.AGENT_ANALYSIS,
+        )
 
         self._create_evidence(inquiry, direction='supports')
 
@@ -585,25 +589,22 @@ class TestBriefSerializers(BriefTestMixin, TestCase):
         self.assertEqual(counts['blocking'], 1)
         self.assertEqual(counts['important'], 0)
 
-    def test_annotation_serializer_includes_source_signal_ids(self):
-        """BriefAnnotationSerializer includes source_signal_ids."""
+    def test_annotation_serializer_basic_fields(self):
+        """BriefAnnotationSerializer includes expected fields."""
         inquiry = self._create_inquiry(self.case)
         section = self._create_section(
-            self.brief, heading='Signals',
+            self.brief, heading='Annotated Section',
             section_type=SectionType.INQUIRY_BRIEF, inquiry=inquiry
         )
-        signal = self._create_signal(self.case, inquiry=inquiry, text='Test signal')
         ann = BriefAnnotation.objects.create(
             section=section,
             annotation_type=AnnotationType.TENSION,
             description='Test tension',
             priority=AnnotationPriority.BLOCKING,
         )
-        ann.source_signals.add(signal)
-
         data = BriefAnnotationSerializer(ann).data
-        self.assertEqual(len(data['source_signal_ids']), 1)
-        self.assertEqual(data['source_signal_ids'][0], str(signal.id))
+        self.assertEqual(data['annotation_type'], AnnotationType.TENSION)
+        self.assertEqual(data['priority'], AnnotationPriority.BLOCKING)
 
     def test_overview_serializer_overall_grounding_score(self):
         """BriefOverviewSerializer computes overall grounding score."""

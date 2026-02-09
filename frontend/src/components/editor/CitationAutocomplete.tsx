@@ -7,7 +7,7 @@
 import { useState, useEffect } from 'react';
 import type { Editor } from '@tiptap/react';
 import { documentsAPI } from '@/lib/api/documents';
-import type { CaseDocument } from '@/lib/types/case';
+import type { WorkingDocument } from '@/lib/types/case';
 
 interface CitationAutocompleteProps {
   editor: Editor | null;
@@ -19,7 +19,7 @@ export function CitationAutocomplete({
   caseId 
 }: CitationAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [suggestions, setSuggestions] = useState<CaseDocument[]>([]);
+  const [suggestions, setSuggestions] = useState<WorkingDocument[]>([]);
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -77,7 +77,7 @@ export function CitationAutocomplete({
     d.title.toLowerCase().includes(query.toLowerCase())
   ).slice(0, 5);
 
-  function insertCitation(doc: CaseDocument) {
+  function insertCitation(doc: WorkingDocument) {
     if (!editor) return;
 
     const { from } = editor.state.selection;

@@ -4,7 +4,7 @@ Tests for Phase 3 (Premortem, WWCYM) and Phase 4 (Section Judgment) endpoints.
 Covers:
 - CaseViewSet.premortem: save premortem text, timestamp idempotency
 - CaseViewSet.what_changed_mind_response: save WWCYM response, validation
-- CaseDocumentViewSet.section_confidence: set/clear per-section confidence
+- WorkingDocumentViewSet.section_confidence: set/clear per-section confidence
 - CaseViewSet.section_judgment_summary: mismatch detection between user judgment and grounding
 """
 import uuid
@@ -16,7 +16,7 @@ from rest_framework import status
 from apps.events.models import Event, EventType, ActorType
 from apps.projects.models import Project
 from apps.cases.models import (
-    Case, CaseDocument, CaseStatus, DocumentType, EditFriction,
+    Case, WorkingDocument, CaseStatus, DocumentType, EditFriction,
 )
 from apps.cases.brief_models import (
     BriefSection, SectionType, GroundingStatus,
@@ -56,7 +56,7 @@ class Phase34TestMixin:
     def _create_case_with_brief(self, user, project):
         """Create a case with a main brief document and return (case, brief)."""
         case = self._create_case(user, project)
-        brief = CaseDocument.objects.create(
+        brief = WorkingDocument.objects.create(
             case=case,
             document_type=DocumentType.CASE_BRIEF,
             title='Brief',
