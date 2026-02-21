@@ -122,7 +122,7 @@ def stream_agentic_task(
             step['status'] = 'failed'
             step['error'] = str(e)
             executed_steps.append(step)
-            yield {'event': 'step_complete', 'data': {'step_id': step['id'], 'status': 'failed', 'error': str(e)}}
+            yield {'event': 'step_complete', 'data': {'step_id': step['id'], 'status': 'failed', 'error': 'Step execution failed.'}}
 
     # Phase 3: Review
     yield {'event': 'phase', 'data': {'phase': 'reviewing'}}
@@ -385,7 +385,7 @@ Return ONLY the JSON object."""
             return json.loads(response_text)
         except Exception as e:
             logger.warning(f"Failed to execute step: {e}")
-            return {'changed': False, 'new_content': content, 'error': str(e)}
+            return {'changed': False, 'new_content': content, 'error': 'Step execution failed.'}
 
     return async_to_sync(execute)()
 

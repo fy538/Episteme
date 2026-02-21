@@ -30,7 +30,8 @@ class UnifiedAnalysisHandler:
         response_content: str,
         reflection_content: str,
         model_key: str,
-        correlation_id: Optional[uuid.UUID] = None
+        correlation_id: Optional[uuid.UUID] = None,
+        retrieval_result=None,
     ) -> Dict[str, Any]:
         """
         Handle completion of unified analysis.
@@ -42,6 +43,7 @@ class UnifiedAnalysisHandler:
             reflection_content: Full reflection text
             model_key: Model used for generation
             correlation_id: Optional correlation ID for event tracking
+            retrieval_result: Optional RetrievalResult with source chunks
 
         Returns:
             Dict with created object IDs
@@ -71,6 +73,28 @@ class UnifiedAnalysisHandler:
         except Exception as e:
             logger.exception(f"Failed to save assistant message: {e}")
             raise
+
+        # 1b. Link source chunks for RAG citation tracking
+        if retrieval_result and retrieval_result.has_sources:
+            try:
+                chunk_ids = [chunk.chunk_id for chunk in retrieval_result.chunks]
+                from apps.projects.models import DocumentChunk
+                # Evaluate queryset in sync context first, then set M2M
+                chunks_qs = await sync_to_async(
+                    lambda: list(DocumentChunk.objects.filter(id__in=chunk_ids))
+                )()
+                if chunks_qs:
+                    await sync_to_async(assistant_message.source_chunks.set)(chunks_qs)
+                if len(chunks_qs) != len(chunk_ids):
+                    logger.warning(
+                        f"Source chunk mismatch: expected {len(chunk_ids)}, found {len(chunks_qs)} "
+                        f"for message {assistant_message.id}"
+                    )
+                logger.debug(
+                    f"Linked {len(chunks_qs)} source chunks to message {assistant_message.id}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to link source chunks: {e}")
 
         # 2. Emit completion event
         try:

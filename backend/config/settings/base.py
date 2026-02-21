@@ -20,6 +20,9 @@ environ.Env.read_env(os.path.join(BASE_DIR.parent, '.env'))
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY', default='django-insecure-dev-key-change-in-production')
 
+if not DEBUG and SECRET_KEY == 'django-insecure-dev-key-change-in-production':
+    raise ValueError("SECRET_KEY must be set to a unique, unpredictable value in production.")
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -42,7 +45,6 @@ INSTALLED_APPS = [
     'apps.inquiries',  # Phase 2
     'apps.agents',  # Phase 2B
     'apps.projects',  # Phase 2
-    'apps.artifacts',  # Deprecated — kept for deletion migration only, remove after migrating
     'apps.skills',  # Skills system
     'apps.intelligence',  # Unified analysis engine
     'apps.graph',  # Knowledge graph (Node/Edge/GraphDelta)
@@ -148,6 +150,9 @@ CORS_ALLOW_HEADERS = [
 # Celery Configuration
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+
+# Redis for tool confirmation cache (db=1, isolated from Celery's db=0)
+TOOL_CONFIRM_REDIS_URL = env('TOOL_CONFIRM_REDIS_URL', default='redis://localhost:6379/1')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -161,6 +166,10 @@ CELERY_BEAT_SCHEDULE = {
     'regenerate-stale-summaries': {
         'task': 'apps.graph.tasks.regenerate_stale_summaries',
         'schedule': crontab(hour=3, minute=0),
+    },
+    'cleanup-stuck-generating-summaries': {
+        'task': 'apps.graph.tasks.cleanup_stuck_generating_summaries',
+        'schedule': crontab(minute='*/10'),  # every 10 minutes
     },
 }
 
@@ -236,6 +245,47 @@ AI_MODELS = {
 EMBEDDING_BACKEND = env('EMBEDDING_BACKEND', default='postgresql')
 # sentence-transformers model for embeddings (384-dim, same dims for L6/L12)
 EMBEDDING_MODEL = env('EMBEDDING_MODEL', default='all-MiniLM-L12-v2')
+
+# ── Summary Generation Settings ──
+# Tunable LLM parameters for project summary tiers. Override via env vars
+# or per-environment settings files (e.g., staging with lower timeouts).
+SUMMARY_SETTINGS = {
+    'thematic': {
+        'max_tokens': env.int('SUMMARY_THEMATIC_MAX_TOKENS', default=1024),
+        'temperature': env.float('SUMMARY_THEMATIC_TEMPERATURE', default=0.3),
+        'timeout_seconds': env.int('SUMMARY_THEMATIC_TIMEOUT', default=30),
+    },
+    'full': {
+        'max_tokens': env.int('SUMMARY_FULL_MAX_TOKENS', default=2048),
+        'temperature': env.float('SUMMARY_FULL_TEMPERATURE', default=0.4),
+        'timeout_seconds': env.int('SUMMARY_FULL_TIMEOUT', default=120),
+    },
+    'cleanup_threshold_minutes': env.int('SUMMARY_CLEANUP_THRESHOLD_MINUTES', default=5),
+    # ── Clustering parameters ──
+    # Node clustering (Leiden / Union-Find) — used in full summary generation
+    'node_clustering': {
+        'resolution': env.float('CLUSTERING_RESOLUTION', default=1.0),
+        'similarity_threshold': env.float('CLUSTERING_SIMILARITY_THRESHOLD', default=0.6),
+        'merge_threshold': env.float('CLUSTERING_MERGE_THRESHOLD', default=0.75),
+        'semantic_variance_threshold': env.float('CLUSTERING_SEMANTIC_VARIANCE_THRESHOLD', default=0.7),
+    },
+    # Chunk clustering (agglomerative) — used in thematic summary generation
+    'chunk_clustering': {
+        'distance_threshold': env.float('CHUNK_CLUSTERING_DISTANCE_THRESHOLD', default=0.65),
+        'max_direct_cluster': env.int('CHUNK_CLUSTERING_MAX_DIRECT', default=5000),
+    },
+}
+
+# ── Case Extraction Settings ──
+# Objective-driven extraction: extract nodes at case-creation-time
+# instead of document-upload-time, using the decision question as focus.
+CASE_EXTRACTION_SETTINGS = {
+    'enabled': env.bool('USE_CASE_LEVEL_EXTRACTION', default=False),
+    'max_chunks': env.int('CASE_EXTRACTION_MAX_CHUNKS', default=50),
+    'similarity_threshold': 0.45,
+    'hierarchy_theme_threshold': 0.5,
+    'hierarchy_topic_threshold': 0.55,
+}
 
 # Document Processing (Phase 2)
 MAX_UPLOAD_SIZE = env.int('MAX_UPLOAD_SIZE', default=10485760)  # 10MB

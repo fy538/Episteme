@@ -4,99 +4,95 @@ Where Episteme fits in the market, how to describe it, and the messaging hierarc
 
 ---
 
-## [V1 SCOPE] Category: Assumption Mapper / Epistemic Orientation Tool
+## Category: Decision Investigation Platform
 
-The honest, precise category for v1:
+> **Episteme is a decision investigation platform — a system that helps you think through complex situations by extracting structure from your documents and conversations, tracking what you're assuming without proof, and helping you learn from the decisions you make.**
 
-> **Episteme is an assumption mapper — a tool that makes your thinking visible by extracting claims from documents, detecting where they contradict, and showing you what you're betting on without proof.**
+**Why this category:**
+- It's honest about what the product does: not just mapping assumptions, but supporting the full decision lifecycle
+- It differentiates from "research tool" (Perplexity, NotebookLM) and "AI chat" (ChatGPT with structure)
+- It positions decision capture and outcome tracking as the strategic capstone, not an afterthought
+- It's founder-friendly — immediate value without onboarding, with depth that grows over time
 
-**Why this category for v1:**
-- It's honest about scope (not a full decision platform yet)
-- It differentiates from "research tool" (Perplexity) and "decision copilot" (ChatGPT with structure)
-- It's founder-friendly — immediate value without onboarding
-- "Assumption mapper" is concrete; you understand what it does
+**The category evolution:**
 
-**Better one-liners for v1:**
-
-| Context | One-Liner |
-|---------|-----------|
-| **Hero section** | See the state of your thinking. |
-| **Product Hunt** | Upload your docs. See where they agree, fight, and stay silent. |
-| **Founder pitch** | The difference between scattered research and structured thinking. |
-| **Social bio** | Where founders go to see what they're actually betting on. |
+| Stage | Category | What It Reflects |
+|-------|----------|-----------------|
+| ~~V1 (past)~~ | ~~Assumption Mapper~~ | ~~Extract graph from docs, show contradictions~~ |
+| **Current** | **Decision Investigation Platform** | Three-level architecture, CEAT extraction, decision capture, outcome tracking |
+| Future | Decision Intelligence System | Autonomous agents, calibration, organizational decision memory |
 
 ---
 
-## [FUTURE SCOPE] Category Evolution (Post-V1)
+## Positioning Statement
 
-### Near-term (Post-V1, with readiness + plan):
-**"Decision Copilot"** — AI-powered investigation with evidence-tracked reasoning.
+### Recommended (Founder-First)
 
-### Medium-term (with multi-player, output skills):
-**"Decision Intelligence Platform"** — Organizational decision-making with memory, audit trails, and governance.
+> **For** founders making bets that could sink or scale their company **who** are working alone without a team to challenge their assumptions, **Episteme is a decision investigation platform that** helps you think through complex situations by building structure from your conversations and documents — surfacing contradictions, tracking assumptions, and recording decisions so you can learn from them. **Unlike** ChatGPT (which agrees), research tools (which summarize), or NotebookLM (which synthesizes), **Episteme** shows you where your information fights with itself, what you're betting on without proof, and — critically — helps you track whether your decisions turn out right.
 
-### For now in v1:
-Focus on **"Assumption Mapper"** or **"Epistemic Orientation Tool"** — honest about what you're building, maximally differentiated from chat.
+**Why founder-first:** Founders feel the pain acutely. They decide alone. They can't afford bad bets. And Episteme's value is maximally obvious: structure + visibility + accountability in a form they can use immediately.
 
 ---
 
-## Positioning Statement [V1 SCOPE]
-
-### Recommended (V1 — Founder-First)
-
-> **For** founders making bets that could sink or scale their company **who** are working alone without a team to challenge their assumptions, **Episteme is an assumption mapper that** makes your thinking visible by extracting claims from documents, detecting contradictions, and showing you what you're betting on without proof. **Unlike** ChatGPT (which agrees) or research tools (which summarize), **Episteme** shows you where your information fights with itself and what you'll need to know before you decide.
-
-**Why founder-first:** Founders feel the pain acutely. They decide alone. They can't afford bad bets. And Episteme's value is maximally obvious: structure + visibility in a form they can use immediately.
-
----
-
-## Primary Message [V1]
+## Primary Message
 
 > **See the state of your thinking.**
 
-This is it. Not "make better decisions," not "eliminate bias," but the core promise: **make invisible thinking visible**.
+This is it. Not "make better decisions," not "eliminate bias," but the core promise: **make invisible thinking visible**. The message works across all stages of the product because structure and visibility are the foundation everything else builds on.
+
+**Supporting messages that layer on:**
+
+| When | Message |
+|------|---------|
+| Orientation (Project) | See what your documents cover — and what they miss |
+| Exploration (Chat) | The companion that builds structure from your thinking |
+| Investigation (Case) | Know what you're betting on without proof |
+| Decision (Capture) | Record what you decided, and why |
+| Learning (Outcome) | Come back in 60 days. Were you right? |
 
 ---
 
-## Supporting Pillars [V1]
+## Supporting Pillars
 
-### Pillar 1: "Contradiction Detection"
-> Your documents probably disagree on something important. Most tools hide it. We show it.
+### Pillar 1: "Structure Emerges From Thinking"
+> You don't fill out forms. You talk. The system builds decision trees, surfaces assumptions, and detects contradictions — from your words and your documents.
 
-Features: Cross-document analysis, visual contradiction marking, source-specific claims.
+Features: Organic companion, CEAT extraction, hierarchical document clustering, conversational editing.
 
-### Pillar 2: "Assumption Surfacing"
-> You're betting on things you've never proven. The system shows you what.
+### Pillar 2: "See What You're Betting On"
+> Your documents probably disagree on something important. You're probably assuming things you've never tested. The system shows you what.
 
-Features: Assumption extraction, distinction between "claimed" vs. "evidenced," visual grounding indicators.
+Features: Cross-document contradiction detection, assumption lifecycle tracking, absence inference, blind spot analysis.
 
-### Pillar 3: "Structured Thinking"
-> Scattered research becomes a navigable graph you can explore, question, and refine.
+### Pillar 3: "Decisions You Can Learn From"
+> Record what you decided and why. Check back in 30/60/90 days. Over time, build a personal track record of decision quality.
 
-Features: Graph visualization, conversational editing, interactive exploration.
+Features: DecisionRecord capture, outcome check-ins, confidence tracking, personal decision journal.
 
 ---
 
-## One-Liner Variations [V1]
+## One-Liner Variations
 
 | Context | One-Liner |
 |---------|-----------|
 | **Website hero** | See the state of your thinking. |
-| **Product Hunt** | Upload your docs. See where they agree, fight, and stay silent. |
-| **Founder pitch** | The difference between scattered research and structured thinking. |
+| **Product Hunt** | Upload your docs. See where they agree, fight, and stay silent. Then decide — and track whether you were right. |
+| **Founder pitch** | The difference between scattered research and structured thinking — with a decision journal that helps you learn. |
 | **Twitter/Social** | Where founders go to see what they're actually betting on. |
-| **Email hook** | Other tools summarize your docs. We show you where they contradict. |
+| **Email hook** | Other tools summarize your docs. We show you where they contradict — and help you decide what to do about it. |
+| **Investor pitch** | The only tool that helps you make decisions *and* learn from them. |
 
 ---
 
-## Anti-Positioning [V1]: What Episteme Is NOT
+## Anti-Positioning: What Episteme Is NOT
 
 | We are NOT | Why not |
 |-----------|---------|
-| A ChatGPT wrapper | Chat is input; the graph is the product |
-| A research tool | We don't gather info; we structure what you have |
+| A ChatGPT wrapper | Chat is input; structured investigation is the product |
+| A research tool | We don't gather info; we structure what you have and track what it means |
+| NotebookLM with features | We're a different category: investigation + decision, not synthesis |
 | A document editor | We don't help you write; we help you think |
-| A project management tool | We track thinking, not tasks |
+| A project management tool | We track thinking and decisions, not tasks |
 | A knowledge base | We investigate, not store |
 | An analytics platform | We help *you* reason, not process data |
 
@@ -104,24 +100,26 @@ Features: Graph visualization, conversational editing, interactive exploration.
 
 ## Category Evolution Roadmap
 
-### V1: Assumption Mapper (Solo Founder)
-- **Dump & Discover**: Zero-intent entry point — upload docs, get an evidence map showing agreements, contradictions, gaps, and hidden assumptions (see [Product Funnel](./PRODUCT_FUNNEL.md))
-- **Investigation workflow**: The core structured decision journey for founders
-- **Founder-first persona**: Market Entry, High-Stakes Decision Quality skills as defaults
-- PLG-friendly positioning — no onboarding friction for Dump & Discover
-- **Validate**: Do users convert from evidence map → investigation? Do they complete cases and come back?
+### Current: Decision Investigation Platform (Solo Founder)
+- **Three-level architecture**: Project (orientation) → Chat (exploration) → Case (investigation)
+- **CEAT framework**: Claims, Evidence, Assumptions, Tensions — extracted and tracked
+- **Decision capture**: Record decisions, set outcome check dates, build a personal decision journal
+- **Founder-first persona**: Deciding alone, highest stakes, natural evangelists
+- **Validate**: Do users complete cases? Do they record decisions? Do they come back for outcome checks?
 
-### Next: Decision Copilot (Post-V1 — Individual, Multi-Persona)
+### Next: Decision Copilot (Individual, Multi-Persona)
 - Add readiness tracking + evidence sufficiency gates
 - Expand to consultant and tech lead personas
 - Output flexibility (memos, decks, ARDs)
+- RAG citations for source-grounded responses
 
-### Later: Decision Agent (Post-V1 — Autonomous Investigation)
+### Later: Decision Intelligence System (Autonomous + Calibration)
 - Autonomous agent governed by same epistemic stack proven in human usage
+- Confidence calibration: "Users with your profile are right X% of the time at this confidence level"
 - Premium tier
-- **Prerequisite**: Prove epistemic stack improves actual decisions
+- **Prerequisite**: Prove epistemic stack improves actual decisions (requires outcome data)
 
-### Future: Decision Intelligence Workspace & Platform (Post-V1 — Team)
+### Future: Decision Intelligence Workspace (Team)
 - Multi-player investigation
 - Organizational decision memory
 - Integration with Jira, Notion, Slack
@@ -134,35 +132,40 @@ Granola (AI meeting notes, $250M valuation) operates in a market far more crowde
 
 Key lessons for Episteme:
 
-1. **One architectural decision can be the entire differentiator.** For us, that's the delta view: "what does this document change about your decision?" vs. every other tool's "here's what's in your document."
-2. **UX is the moat, not the LLM.** Granola's founder says this explicitly. Everyone uses the same models. The differentiation is interaction design. Our cascade, delta view, and section locking are UX, not AI capability.
-3. **Cut features ruthlessly.** Granola built real-time AI augmentation during meetings. Users stopped paying attention to conversations. They cut 50% of built features. The constraint became the product identity. We should ask: which of our 10 metacognitive layers produce 90% of the value?
+1. **One architectural decision can be the entire differentiator.** For us, that's **decision capture + outcome tracking**: the full lifecycle from "what should I decide?" to "was I right?" No other tool in the market does this.
+2. **UX is the moat, not the LLM.** Granola's founder says this explicitly. Everyone uses the same models. The differentiation is interaction design. Our organic companion, CEAT extraction, and decision journal are UX, not AI capability.
+3. **Cut features ruthlessly.** Granola built real-time AI augmentation during meetings. Users stopped paying attention to conversations. They cut 50% of built features. The constraint became the product identity. We should ask: which of our layers produce 90% of the value?
 4. **Surgical beachhead, then expand.** Granola started with VCs and founders — tiny market, highest pain, natural evangelists, were literally the investors. Our founder-first strategy follows the same logic.
 
 See [Product Funnel](./PRODUCT_FUNNEL.md) for the full strategic vision.
 
 ---
 
-## Naming & Language Guide [V1]
+## Naming & Language Guide
 
-### Core Terms (V1)
+### Core Terms
 
 | Term | Meaning |
 |------|---------|
-| **Graph** | Your thinking made visible: nodes (beliefs, claims, evidence) + edges (relationships) |
-| **Node** | An atomic unit: assumption, claim, or evidence |
-| **Edge** | A relationship: supports, contradicts, relates-to |
-| **Assumption** | Something you believe without proof (yet) |
-| **Evidence** | Sourced facts from documents |
-| **Grounding** | Whether something is proven or assumed |
-| **Contradiction** | Where two claims or documents disagree |
+| **Project** | A long-lived container for a domain of concern; accumulates documents and knowledge |
+| **Companion** | The organic chat agent that builds structure from your thinking |
+| **Case** | A focused investigation workspace with a decision question as lens |
+| **CEAT** | Claims, Evidence, Assumptions, Tensions — the structured reasoning framework |
+| **Assumption** | Something you believe without proof (tracked lifecycle: untested → confirmed/challenged/refuted) |
+| **Evidence** | Sourced facts from documents, linked to specific claims and assumptions |
+| **Tension** | Where claims, evidence, or assumptions contradict each other |
+| **Hierarchy** | The hierarchical theme map of a project's documents (clusters of topics) |
+| **DecisionRecord** | The formal artifact capturing what you decided, why, and your confidence |
+| **Outcome** | What actually happened — recorded at check-in dates |
 | **Delta** | What changed when you added new information |
+| **Grounding** | Whether something is proven or assumed |
 
-### Terms to Avoid (V1)
+### Terms to Avoid
 
 | Avoid | Use Instead | Why |
 |-------|------------|-----|
-| "Insight" | "Assumption" or "Contradiction" | Be specific |
-| "Summary" | "Evidence Map" or "Graph" | We diagnose, not summarize |
-| "Tool" | "Episteme" or "Assumption Mapper" | Avoid generic framing |
-| "Report" | (Post-V1 only) | V1 outputs graphs, not documents |
+| "Insight" | "Assumption" or "Tension" | Be specific about what the system found |
+| "Summary" | "Evidence Map" or "Hierarchy" | We diagnose, not summarize |
+| "Report" | "Decision Record" or "Case" | We produce investigation artifacts, not documents |
+| "AI assistant" | "Companion" or "agent" | We're a thinking partner, not a helper |
+| "V1 scope" | (remove) | We're past V1 — describe current state directly |

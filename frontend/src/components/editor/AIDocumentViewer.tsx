@@ -23,7 +23,7 @@ export function AIDocumentViewer({ document }: { document: WorkingDocument }) {
           </div>
           <div className="flex gap-2">
             {document.agent_type && (
-              <span className="text-xs px-2 py-1 bg-purple-100 text-purple-800 rounded font-medium">
+              <span className="text-xs px-2 py-1 bg-accent-100 text-accent-800 rounded font-medium">
                 {document.agent_type}
               </span>
             )}

@@ -120,6 +120,7 @@ class DeltaTrigger(models.TextChoices):
     CHAT_EDIT = 'chat_edit', 'Chat Edit'
     AGENT_ANALYSIS = 'agent_analysis', 'Agent Analysis'
     USER_EDIT = 'user_edit', 'User Edit'
+    CASE_EXTRACTION = 'case_extraction', 'Case Extraction'
 
 
 class InclusionType(models.TextChoices):
@@ -472,6 +473,7 @@ class SummaryStatus(models.TextChoices):
     """Generation state of a project summary."""
     NONE = 'none', 'No summary yet'
     SEED = 'seed', 'Seed (template, no LLM)'
+    THEMATIC = 'thematic', 'Thematic (chunk-based, no graph)'
     GENERATING = 'generating', 'Generating'
     PARTIAL = 'partial', 'Partial'
     FULL = 'full', 'Full'
@@ -538,7 +540,313 @@ class ProjectSummary(UUIDModel, TimestampedModel):
         indexes = [
             models.Index(fields=['project', '-created_at']),
             models.Index(fields=['project', 'is_stale']),
+            models.Index(
+                fields=['project', 'status'],
+                name='graph_proj_status_idx',
+            ),
         ]
 
     def __str__(self):
         return f"Summary v{self.version} [{self.status}] for {self.project_id}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Cluster Hierarchy
+# ═══════════════════════════════════════════════════════════════════
+
+class HierarchyStatus(models.TextChoices):
+    BUILDING = 'building', 'Building'
+    READY = 'ready', 'Ready'
+    FAILED = 'failed', 'Failed'
+
+
+class ClusterHierarchy(UUIDModel, TimestampedModel):
+    """
+    Hierarchical cluster tree for a project's document chunks.
+
+    Documents are chunked and embedded, then clustered recursively:
+    Level 0 (chunks) → Level 1 (topics) → Level 2 (themes) → Level 3 (root).
+
+    Each level has LLM-generated labels and summaries. The tree is stored
+    as a JSON blob for fast retrieval. Only one hierarchy per project
+    should have is_current=True at any time.
+    """
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.CASCADE,
+        related_name='cluster_hierarchies',
+    )
+    version = models.IntegerField(default=1)
+    status = models.CharField(
+        max_length=20,
+        choices=HierarchyStatus.choices,
+        default=HierarchyStatus.BUILDING,
+    )
+    tree = models.JSONField(
+        default=dict,
+        help_text="Serialized ClusterTreeNode tree: {id, level, label, summary, children, chunk_ids, ...}",
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Generation metadata: model, duration_ms, total_chunks, total_clusters, levels",
+    )
+    is_current = models.BooleanField(
+        default=True,
+        help_text="Only the latest successful hierarchy should be current",
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['project', '-created_at']),
+            models.Index(
+                fields=['project', 'is_current'],
+                name='graph_hierarchy_current_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f"Hierarchy v{self.version} [{self.status}] for {self.project_id}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Project Insights
+# ═══════════════════════════════════════════════════════════════════
+
+class InsightType(models.TextChoices):
+    TENSION = 'tension', 'Tension'
+    BLIND_SPOT = 'blind_spot', 'Blind Spot'
+    PATTERN = 'pattern', 'Pattern'
+    STALE_FINDING = 'stale_finding', 'Stale Finding'
+    CONNECTION = 'connection', 'Connection'
+    # Orientation finding types
+    CONSENSUS = 'consensus', 'Consensus'
+    GAP = 'gap', 'Gap'
+    WEAK_EVIDENCE = 'weak_evidence', 'Weak Evidence'
+    # Exploration angle (title-only prompt, content generated on demand)
+    EXPLORATION_ANGLE = 'exploration_angle', 'Exploration Angle'
+
+
+class InsightSource(models.TextChoices):
+    AGENT_DISCOVERY = 'agent_discovery', 'Agent Discovery'
+    CASE_PROMOTION = 'case_promotion', 'Case Promotion'
+    CONVERSATION_PROMOTION = 'conversation_promotion', 'Conversation Promotion'
+    USER_CREATED = 'user_created', 'User Created'
+    ORIENTATION = 'orientation', 'Orientation'
+
+
+class InsightStatus(models.TextChoices):
+    ACTIVE = 'active', 'Active'
+    ACKNOWLEDGED = 'acknowledged', 'Acknowledged'
+    RESOLVED = 'resolved', 'Resolved'
+    DISMISSED = 'dismissed', 'Dismissed'
+    SUPERSEDED = 'superseded', 'Superseded'
+    RESEARCHING = 'researching', 'Researching'
+
+
+class ProjectInsight(UUIDModel, TimestampedModel):
+    """
+    Agent-discovered observations about a project's knowledge base.
+
+    Insights are produced by the InsightDiscoveryAgent after hierarchical
+    clustering completes. They surface tensions across clusters, coverage
+    gaps, recurring patterns, and stale findings.
+    """
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.CASCADE,
+        related_name='insights',
+    )
+    insight_type = models.CharField(
+        max_length=20,
+        choices=InsightType.choices,
+    )
+    title = models.CharField(max_length=200)
+    content = models.TextField()
+    source_type = models.CharField(
+        max_length=30,
+        choices=InsightSource.choices,
+        default=InsightSource.AGENT_DISCOVERY,
+    )
+    source_chunks = models.ManyToManyField(
+        'projects.DocumentChunk',
+        blank=True,
+        help_text="Evidence chunks supporting this insight",
+    )
+    source_cluster_ids = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Cluster tree node IDs involved in this insight",
+    )
+    source_case = models.ForeignKey(
+        'cases.Case',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='promoted_insights',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=InsightStatus.choices,
+        default=InsightStatus.ACTIVE,
+    )
+    confidence = models.FloatField(
+        default=0.7,
+        help_text="Agent's confidence in this insight (0.0-1.0)",
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Generation metadata: model, prompt_tokens, etc.",
+    )
+    # ── Orientation fields ───────────────────────────────────────
+    orientation = models.ForeignKey(
+        'graph.ProjectOrientation',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='findings',
+        help_text="Which orientation generated this insight (if any)",
+    )
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Ordering within an orientation (lower = first)",
+    )
+    action_type = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        help_text="Exit ramp action: 'discuss', 'research', or '' for none",
+    )
+    linked_thread = models.ForeignKey(
+        'chat.ChatThread',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='source_insights',
+        help_text="Chat thread opened via 'Discuss this' action",
+    )
+    research_result = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Background research findings: {answer, sources[], researched_at}",
+    )
+
+    # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
+    embedding = VectorField(
+        dimensions=384,
+        null=True,
+        blank=True,
+        help_text="384-dim embedding from sentence-transformers"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['project', 'status']),
+            models.Index(fields=['project', 'insight_type']),
+            models.Index(fields=['project', '-created_at']),
+            models.Index(fields=['orientation', 'display_order']),
+        ]
+
+    def __str__(self):
+        return f"[{self.insight_type}] {self.title[:60]}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Project Orientation
+# ═══════════════════════════════════════════════════════════════════
+
+class OrientationStatus(models.TextChoices):
+    GENERATING = 'generating', 'Generating'
+    READY = 'ready', 'Ready'
+    FAILED = 'failed', 'Failed'
+
+
+class ProjectOrientation(UUIDModel, TimestampedModel):
+    """
+    Thin metadata model for a lens-based orientation of a project.
+
+    Stores the lens type, lead text, and lens scores. Actual findings and
+    exploration angles are ProjectInsight records linked via FK (related_name='findings').
+
+    Generated automatically after hierarchical clustering completes.
+    The orientation layer interprets the thematic cluster map through a
+    detected lens (e.g. positions & tensions, structure & dependencies)
+    to surface what the documents mean — not just what topics they cover.
+    """
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.CASCADE,
+        related_name='orientations',
+    )
+    hierarchy = models.ForeignKey(
+        'graph.ClusterHierarchy',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='orientations',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=OrientationStatus.choices,
+        default=OrientationStatus.GENERATING,
+    )
+    lens_type = models.CharField(
+        max_length=40,
+        help_text=(
+            "Primary lens: positions_and_tensions, structure_and_dependencies, "
+            "perspectives_and_sentiment, obligations_and_constraints, "
+            "events_and_causation, concepts_and_progression"
+        ),
+    )
+    lead_text = models.TextField(
+        blank=True,
+        help_text="2-3 sentence lead paragraph orienting the user.",
+    )
+    lens_scores = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Scores for each candidate lens: {lens_type: float}",
+    )
+    secondary_lens = models.CharField(
+        max_length=40,
+        blank=True,
+        default='',
+        help_text="Secondary lens type (surfaced as invitation, not auto-applied)",
+    )
+    secondary_lens_reason = models.TextField(
+        blank=True,
+        default='',
+        help_text="Why the secondary lens is relevant (1 sentence)",
+    )
+    is_current = models.BooleanField(default=True)
+    generation_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Timing, model, token counts, etc.",
+    )
+    user_guidance = models.TextField(
+        null=True,
+        blank=True,
+        help_text="User-supplied perspective or emphasis that influenced lens selection and synthesis.",
+    )
+    generation_context = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Context that influenced this generation: source, thread_id, user_message, etc.",
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['project', '-created_at']),
+            models.Index(
+                fields=['project', 'is_current'],
+                name='graph_orientation_current_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f"Orientation [{self.lens_type}] [{self.status}] for {self.project_id}"

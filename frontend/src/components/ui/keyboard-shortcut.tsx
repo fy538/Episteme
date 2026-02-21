@@ -18,7 +18,7 @@ export function KeyboardShortcut({ keys, className }: KeyboardShortcutProps) {
       {keys.map((key, index) => (
         <kbd
           key={index}
-          className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 font-mono text-[10px] font-semibold text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded shadow-sm"
+          className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 font-mono text-xs font-semibold text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded shadow-sm"
         >
           {key}
         </kbd>

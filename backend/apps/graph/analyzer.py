@@ -3,7 +3,11 @@ Graph analyzer - Find patterns in the knowledge graph
 """
 import uuid
 import logging
+from collections import defaultdict
 from typing import Dict, List
+
+from django.db.models import Count, Q
+
 from apps.chat.models import ChatThread
 from apps.graph.models import Node, Edge, EdgeType
 from apps.inquiries.models import Inquiry
@@ -55,18 +59,18 @@ class GraphAnalyzer:
 
         # 1. Find ungrounded assumptions
         # Assumptions are now graph Nodes, not Signals. Query the graph layer.
+        # Annotate with support count to avoid N+1 queries.
         case_assumptions = Node.objects.filter(
             case=case,
             node_type='assumption',
+        ).annotate(
+            support_count=Count(
+                'incoming_edges',
+                filter=Q(incoming_edges__edge_type=EdgeType.SUPPORTS),
+            )
         )
         for assumption in case_assumptions:
-            # Check if any 'supports' edges point to this assumption
-            support_count = Edge.objects.filter(
-                target_node=assumption,
-                edge_type=EdgeType.SUPPORTS,
-            ).count()
-
-            if support_count == 0:
+            if assumption.support_count == 0:
                 patterns['ungrounded_assumptions'].append({
                     'id': str(assumption.id),
                     'text': assumption.content,
@@ -91,21 +95,28 @@ class GraphAnalyzer:
 
         # 3. Find strongly supported claims
         # Claims are now graph Nodes. Check supporting edges + evidence links.
+        # Bulk-fetch all support edges for claims in this case, then group by target.
         case_claims = Node.objects.filter(
             case=case,
             node_type='claim',
         )
+        claim_ids = set(case_claims.values_list('id', flat=True))
+        all_support_edges = Edge.objects.filter(
+            target_node_id__in=claim_ids,
+            edge_type=EdgeType.SUPPORTS,
+        )
+        support_edges_by_target = defaultdict(list)
+        for edge in all_support_edges:
+            support_edges_by_target[edge.target_node_id].append(edge)
+
         for claim_node in case_claims:
-            support_edges = Edge.objects.filter(
-                target_node=claim_node,
-                edge_type=EdgeType.SUPPORTS,
-            )
-            support_count = support_edges.count()
+            edges_for_claim = support_edges_by_target.get(claim_node.id, [])
+            support_count = len(edges_for_claim)
 
             if support_count >= 2:
                 # Use average edge strength as confidence proxy
                 strengths = [
-                    e.strength for e in support_edges
+                    e.strength for e in edges_for_claim
                     if e.strength is not None
                 ]
                 avg_confidence = (
@@ -224,30 +235,49 @@ class GraphAnalyzer:
             case=thread.primary_case,
             node_type='assumption',
         )
+        assumption_ids = set(assumptions.values_list('id', flat=True))
+        if not assumption_ids:
+            return orphaned
+
+        # Bulk: which assumptions have direct support edges?
+        directly_supported_ids = set(
+            Edge.objects.filter(
+                target_node_id__in=assumption_ids,
+                edge_type=EdgeType.SUPPORTS,
+            ).values_list('target_node_id', flat=True)
+        )
+
+        unsupported_ids = assumption_ids - directly_supported_ids
+        if not unsupported_ids:
+            return orphaned
+
+        # Bulk: depends_on edges from unsupported assumptions
+        dep_edges = Edge.objects.filter(
+            source_node_id__in=unsupported_ids,
+            edge_type=EdgeType.DEPENDS_ON,
+        ).values_list('source_node_id', 'target_node_id')
+
+        deps_by_assumption = defaultdict(set)
+        all_dep_target_ids = set()
+        for src_id, tgt_id in dep_edges:
+            deps_by_assumption[src_id].add(tgt_id)
+            all_dep_target_ids.add(tgt_id)
+
+        # Bulk: which dependency targets have support edges?
+        grounded_dep_ids = set()
+        if all_dep_target_ids:
+            grounded_dep_ids = set(
+                Edge.objects.filter(
+                    target_node_id__in=all_dep_target_ids,
+                    edge_type=EdgeType.SUPPORTS,
+                ).values_list('target_node_id', flat=True)
+            )
 
         for assumption in assumptions:
-            # Check if any 'supports' edge targets this assumption
-            has_direct_support = Edge.objects.filter(
-                target_node=assumption,
-                edge_type=EdgeType.SUPPORTS,
-            ).exists()
-
-            if has_direct_support:
+            if assumption.id in directly_supported_ids:
                 continue
-
-            # Check if any node this assumption depends_on has support
-            has_grounded_dependency = False
-            dep_target_ids = Edge.objects.filter(
-                source_node=assumption,
-                edge_type=EdgeType.DEPENDS_ON,
-            ).values_list('target_node_id', flat=True)
-
-            if dep_target_ids:
-                has_grounded_dependency = Edge.objects.filter(
-                    target_node_id__in=dep_target_ids,
-                    edge_type=EdgeType.SUPPORTS,
-                ).exists()
-
+            dep_targets = deps_by_assumption.get(assumption.id, set())
+            has_grounded_dependency = bool(dep_targets & grounded_dep_ids)
             if not has_grounded_dependency:
                 orphaned.append({
                     'id': str(assumption.id),
@@ -274,13 +304,34 @@ class GraphAnalyzer:
             status__in=['open', 'investigating']
         ).select_related('case__project')
 
+        # Bulk: collect distinct project IDs and count evidence nodes per project
+        project_ids = set()
         for inquiry in inquiries:
-            # Count evidence from graph nodes
-            try:
-                total_evidence = Node.objects.filter(
-                    project=inquiry.case.project,
+            if inquiry.case and inquiry.case.project_id:
+                project_ids.add(inquiry.case.project_id)
+
+        evidence_counts_by_project = {}
+        if project_ids:
+            evidence_qs = (
+                Node.objects.filter(
+                    project_id__in=project_ids,
                     node_type='evidence',
-                ).count() if inquiry.case and inquiry.case.project else 0
+                )
+                .values('project_id')
+                .annotate(cnt=Count('id'))
+            )
+            evidence_counts_by_project = {
+                row['project_id']: row['cnt'] for row in evidence_qs
+            }
+
+        for inquiry in inquiries:
+            try:
+                project_id = (
+                    inquiry.case.project_id
+                    if inquiry.case and inquiry.case.project_id
+                    else None
+                )
+                total_evidence = evidence_counts_by_project.get(project_id, 0)
             except Exception:
                 total_evidence = 0
 
@@ -372,17 +423,19 @@ class GraphAnalyzer:
         case = inquiry.case if hasattr(inquiry, 'case') else None
 
         # 1. Ungrounded assumptions (now graph Nodes, not Signals)
+        # Annotate with support count to avoid N+1 queries.
         if case:
             case_assumptions = Node.objects.filter(
                 case=case,
                 node_type='assumption',
+            ).annotate(
+                support_count=Count(
+                    'incoming_edges',
+                    filter=Q(incoming_edges__edge_type=EdgeType.SUPPORTS),
+                )
             )
             for assumption in case_assumptions:
-                has_support = Edge.objects.filter(
-                    target_node=assumption,
-                    edge_type=EdgeType.SUPPORTS,
-                ).exists()
-                if not has_support:
+                if assumption.support_count == 0:
                     patterns['ungrounded_assumptions'].append({
                         'id': str(assumption.id),
                         'text': assumption.content,
@@ -413,20 +466,27 @@ class GraphAnalyzer:
                     })
 
         # 3. Strong claims (now graph Nodes)
+        # Bulk-fetch all support edges for claims in this case, then group by target.
         if case:
             case_claims = Node.objects.filter(
                 case=case,
                 node_type='claim',
             )
+            claim_ids = set(case_claims.values_list('id', flat=True))
+            all_claim_support_edges = Edge.objects.filter(
+                target_node_id__in=claim_ids,
+                edge_type=EdgeType.SUPPORTS,
+            )
+            claim_support_by_target = defaultdict(list)
+            for edge in all_claim_support_edges:
+                claim_support_by_target[edge.target_node_id].append(edge)
+
             for claim_node in case_claims:
-                support_edges = Edge.objects.filter(
-                    target_node=claim_node,
-                    edge_type=EdgeType.SUPPORTS,
-                )
-                support_count = support_edges.count()
+                edges_for_claim = claim_support_by_target.get(claim_node.id, [])
+                support_count = len(edges_for_claim)
                 if support_count >= 2:
                     strengths = [
-                        e.strength for e in support_edges
+                        e.strength for e in edges_for_claim
                         if e.strength is not None
                     ]
                     avg_conf = (
@@ -504,31 +564,50 @@ class GraphAnalyzer:
             case=case,
             node_type='assumption',
         )
+        assumption_ids = set(assumptions.values_list('id', flat=True))
+        if not assumption_ids:
+            return orphaned
+
+        # Bulk: which assumptions have direct support edges?
+        directly_supported_ids = set(
+            Edge.objects.filter(
+                target_node_id__in=assumption_ids,
+                edge_type=EdgeType.SUPPORTS,
+            ).values_list('target_node_id', flat=True)
+        )
+
+        unsupported_ids = assumption_ids - directly_supported_ids
+        if not unsupported_ids:
+            return orphaned
+
+        # Bulk: depends_on edges from unsupported assumptions
+        dep_edges = Edge.objects.filter(
+            source_node_id__in=unsupported_ids,
+            edge_type=EdgeType.DEPENDS_ON,
+        ).values_list('source_node_id', 'target_node_id')
+
+        deps_by_assumption = defaultdict(set)
+        all_dep_target_ids = set()
+        for src_id, tgt_id in dep_edges:
+            deps_by_assumption[src_id].add(tgt_id)
+            all_dep_target_ids.add(tgt_id)
+
+        # Bulk: which dependency targets have support edges?
+        grounded_dep_ids = set()
+        if all_dep_target_ids:
+            grounded_dep_ids = set(
+                Edge.objects.filter(
+                    target_node_id__in=all_dep_target_ids,
+                    edge_type=EdgeType.SUPPORTS,
+                ).values_list('target_node_id', flat=True)
+            )
 
         for assumption in assumptions:
-            # Has direct support edge?
-            has_direct_support = Edge.objects.filter(
-                target_node=assumption,
-                edge_type=EdgeType.SUPPORTS,
-            ).exists()
-
-            if has_direct_support:
+            if assumption.id in directly_supported_ids:
                 continue
-
-            # Has grounded dependency? (depends_on edge -> node with support)
-            dep_target_ids = Edge.objects.filter(
-                source_node=assumption,
-                edge_type=EdgeType.DEPENDS_ON,
-            ).values_list('target_node_id', flat=True)
-
-            has_grounded_dep = False
-            dep_count = len(dep_target_ids)
-            if dep_target_ids:
-                has_grounded_dep = Edge.objects.filter(
-                    target_node_id__in=dep_target_ids,
-                    edge_type=EdgeType.SUPPORTS,
-                ).exists()
-
+            dep_targets = deps_by_assumption.get(assumption.id, set())
+            has_grounded_dep = bool(dep_targets & grounded_dep_ids)
+            dep_count = len(dep_targets)
             if not has_grounded_dep:
                 orphaned.append({
                     'id': str(assumption.id),
@@ -539,88 +618,3 @@ class GraphAnalyzer:
 
         return orphaned
 
-    def compute_inquiry_health(self, inquiry_id: uuid.UUID) -> Dict:
-        """
-        Compute an overall health assessment for an inquiry.
-
-        Combines pattern analysis into a single health summary
-        suitable for driving brief annotations and readiness items.
-
-        Args:
-            inquiry_id: Inquiry to assess
-
-        Returns:
-            Dict with:
-            - health_score: 0-100 overall health
-            - blocking_issues: List of critical issues
-            - warnings: List of non-critical concerns
-            - strengths: List of well-grounded areas
-        """
-        patterns = self.find_patterns_for_inquiry(inquiry_id)
-
-        health = {
-            'health_score': 50,  # Start neutral
-            'blocking_issues': [],
-            'warnings': [],
-            'strengths': [],
-        }
-
-        # High-confidence contradictions are blocking
-        for contradiction in patterns['contradictions']:
-            if contradiction.get('both_high_confidence'):
-                health['blocking_issues'].append({
-                    'type': 'high_confidence_contradiction',
-                    'description': (
-                        f'High-confidence conflict: "{contradiction["signal_text"][:50]}..." '
-                        f'vs "{contradiction["contradicts_text"][:50]}..."'
-                    ),
-                })
-                health['health_score'] -= 15
-            else:
-                health['warnings'].append({
-                    'type': 'contradiction',
-                    'description': (
-                        f'Conflict: "{contradiction["signal_text"][:50]}..." '
-                        f'vs "{contradiction["contradicts_text"][:50]}..."'
-                    ),
-                })
-                health['health_score'] -= 5
-
-        # Ungrounded assumptions are warnings
-        for assumption in patterns['ungrounded_assumptions']:
-            health['warnings'].append({
-                'type': 'ungrounded_assumption',
-                'description': f'Unvalidated: "{assumption["text"][:60]}..."',
-            })
-            health['health_score'] -= 5
-
-        # Strong claims are strengths
-        for claim in patterns['strong_claims']:
-            health['strengths'].append({
-                'type': 'well_grounded_claim',
-                'description': (
-                    f'Well-supported ({claim["evidence_count"]} evidence): '
-                    f'"{claim["text"][:60]}..."'
-                ),
-            })
-            health['health_score'] += 10
-
-        # Evidence quality adjustments
-        eq = patterns['evidence_quality']
-        if eq['total'] == 0:
-            health['warnings'].append({
-                'type': 'no_evidence',
-                'description': 'No evidence gathered yet.',
-            })
-            health['health_score'] -= 20
-        elif eq['total'] < 2:
-            health['warnings'].append({
-                'type': 'insufficient_evidence',
-                'description': f'Only {eq["total"]} piece(s) of evidence. Consider gathering more.',
-            })
-            health['health_score'] -= 10
-
-        # Clamp to 0-100
-        health['health_score'] = max(0, min(100, health['health_score']))
-
-        return health

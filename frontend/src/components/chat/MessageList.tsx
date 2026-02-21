@@ -13,10 +13,13 @@ import type { Message as MessageType, InlineActionCard } from '@/lib/types/chat'
 import type { CardAction } from '@/lib/types/cards';
 import { Streamdown } from 'streamdown';
 import remarkGfm from 'remark-gfm';
+import { Button } from '@/components/ui/button';
 import { CardRenderer } from './cards/CardRenderer';
 import { InlineActionCardRenderer, type InlineCardActions } from './cards/InlineActionCardRenderer';
 import { MessageListSkeleton } from '@/components/ui/skeleton';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { CitationRenderer } from './CitationRenderer';
+import { CitationFooter } from './CitationFooter';
 
 // Separate Message component to call hooks at top level
 function Message({
@@ -37,6 +40,7 @@ function Message({
   const isRichMessage = message.is_rich_content && message.structured_content;
   const showActions = message.role === 'assistant' && !isStreamingMsg && !isRichMessage && message.content.length > 20;
   const isFull = variant === 'full';
+  const sourceChunks = message.source_chunks || [];
 
   const handleCardAction = (action: CardAction) => {
     if (onCardAction) {
@@ -51,7 +55,7 @@ function Message({
         {message.role === 'user' ? (
           // User message: right-aligned, subtle rounded rectangle
           <div className="max-w-[85%] rounded-lg px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
-            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
+            <p className="text-base leading-relaxed whitespace-pre-wrap">{message.content}</p>
           </div>
         ) : isRichMessage ? (
           // Rich card: full width, no box
@@ -73,35 +77,46 @@ function Message({
                 </span>
               </div>
             ) : (
-              <div className="prose prose-sm max-w-none dark:prose-invert text-[15px] leading-relaxed text-neutral-800 dark:text-neutral-200 prose-p:text-[15px] prose-p:leading-relaxed prose-p:text-neutral-800 dark:prose-p:text-neutral-200 prose-headings:text-neutral-900 dark:prose-headings:text-neutral-100 prose-li:text-[15px] prose-code:text-[13px] prose-pre:text-[13px]">
-                <Streamdown
-                  remarkPlugins={[remarkGfm]}
-                  parseIncompleteMarkdown={isStreamingMsg}
-                  isAnimating={isStreamingMsg}
-                  shikiTheme={['min-light', 'min-dark']}
-                >
-                  {message.content}
-                </Streamdown>
+              <div className="prose prose-sm max-w-none dark:prose-invert text-base leading-relaxed text-neutral-800 dark:text-neutral-200 prose-p:text-base prose-p:leading-relaxed prose-p:text-neutral-800 dark:prose-p:text-neutral-200 prose-headings:text-neutral-900 dark:prose-headings:text-neutral-100 prose-li:text-base prose-code:text-sm prose-pre:text-sm">
+                <CitationRenderer content={message.content} sourceChunks={sourceChunks}>
+                  <Streamdown
+                    remarkPlugins={[remarkGfm]}
+                    parseIncompleteMarkdown={isStreamingMsg}
+                    isAnimating={isStreamingMsg}
+                    shikiTheme={['min-light', 'min-dark']}
+                  >
+                    {message.content}
+                  </Streamdown>
+                </CitationRenderer>
               </div>
+            )}
+
+            {/* Citation footer for RAG-grounded responses */}
+            {sourceChunks.length > 0 && !isStreamingMsg && (
+              <CitationFooter chunks={sourceChunks} />
             )}
 
             {/* Action buttons (show on hover) */}
             {showActions && (
               <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex gap-2">
                 {onAddToBrief && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => onAddToBrief(message.id, message.content)}
-                    className="text-xs px-2 py-1 text-neutral-500 hover:text-accent-600 hover:bg-accent-50 rounded transition-colors dark:text-neutral-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30"
+                    className="text-xs px-2 py-1 text-neutral-500 hover:text-accent-600 hover:bg-accent-50 dark:text-neutral-400 dark:hover:text-accent-400 dark:hover:bg-accent-900/30"
                   >
                     Add to Brief
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => navigator.clipboard.writeText(message.content)}
-                  className="text-xs px-2 py-1 text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded transition-colors dark:text-neutral-400 dark:hover:text-neutral-300 dark:hover:bg-neutral-800"
+                  className="text-xs px-2 py-1 text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:text-neutral-300 dark:hover:bg-neutral-800"
                 >
                   Copy
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -156,37 +171,48 @@ function Message({
             </div>
           ) : (
             <div className="prose prose-sm max-w-none dark:prose-invert">
-              <Streamdown
-                remarkPlugins={[remarkGfm]}
-                parseIncompleteMarkdown={isStreamingMsg}
-                isAnimating={isStreamingMsg}
-                shikiTheme={['min-light', 'min-dark']}
-              >
-                {message.content}
-              </Streamdown>
+              <CitationRenderer content={message.content} sourceChunks={sourceChunks}>
+                <Streamdown
+                  remarkPlugins={[remarkGfm]}
+                  parseIncompleteMarkdown={isStreamingMsg}
+                  isAnimating={isStreamingMsg}
+                  shikiTheme={['min-light', 'min-dark']}
+                >
+                  {message.content}
+                </Streamdown>
+              </CitationRenderer>
             </div>
           )
         ) : (
           <p className="whitespace-pre-wrap">{message.content}</p>
         )}
 
+        {/* Citation footer for RAG-grounded responses */}
+        {sourceChunks.length > 0 && !isStreamingMsg && (
+          <CitationFooter chunks={sourceChunks} />
+        )}
+
         {/* Action buttons (show on hover) */}
         {showActions && (
           <div className="opacity-0 group-hover:opacity-100 transition-opacity mt-2 flex gap-2">
             {onAddToBrief && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => onAddToBrief(message.id, message.content)}
-                className="text-xs px-2 py-1 bg-accent-50 text-accent-700 rounded hover:bg-accent-100 transition-colors dark:bg-accent-900 dark:text-accent-200"
+                className="text-xs px-2 py-1 bg-accent-50 text-accent-700 hover:bg-accent-100 dark:bg-accent-900 dark:text-accent-200"
               >
                 Add to Brief
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => navigator.clipboard.writeText(message.content)}
-              className="text-xs px-2 py-1 bg-neutral-50 text-neutral-700 rounded hover:bg-neutral-100 transition-colors dark:bg-neutral-800 dark:text-neutral-300"
+              className="text-xs px-2 py-1 bg-neutral-50 text-neutral-700 hover:bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-300"
             >
               Copy
-            </button>
+            </Button>
           </div>
         )}
       </div>

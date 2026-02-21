@@ -5,6 +5,7 @@
  * - Reflection/thinking state (streaming + completed)
  * - Action hints from AI responses
  * - Session receipts and background work
+ * - Conversation structure from organic companion
  * - Companion panel position (sidebar/bottom/hidden, localStorage-persisted)
  * - Section ranking (priority-based adaptive display)
  * - Section pinning (user override)
@@ -12,7 +13,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { ActionHint } from '@/lib/types/chat';
-import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState } from '@/lib/types/companion';
+import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState, ConversationStructure, ConversationEpisode, CurrentEpisodeInfo, EpisodeSealedEvent, CompanionCaseContext } from '@/lib/types/companion';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
 import { rankSections, type CompanionSectionId } from '@/lib/utils/companion-ranking';
 
@@ -24,6 +25,8 @@ export interface UseCompanionStateOptions {
   mode: ChatMode;
   /** Consumer-specific logic to run on message completion */
   onMessageComplete?: (messageId?: string) => void;
+  /** Consumer-specific logic for case signal detection */
+  onCaseSignal?: (data: CompanionCaseContext) => void;
 }
 
 export interface CompanionThinking {
@@ -46,6 +49,12 @@ export interface UseCompanionStateReturn {
   // Case state (set by consumer)
   caseState: CaseState | undefined;
   setCaseState: (state: CaseState | undefined) => void;
+  // Conversation structure (from companion)
+  conversationStructure: ConversationStructure | undefined;
+  // Episodes
+  currentEpisode: CurrentEpisodeInfo | undefined;
+  episodeHistory: ConversationEpisode[];
+  setEpisodeHistory: (episodes: ConversationEpisode[]) => void;
   // Position
   companionPosition: CompanionPosition;
   setCompanionPosition: (pos: CompanionPosition) => void;
@@ -59,11 +68,19 @@ export interface UseCompanionStateReturn {
 export function useCompanionState({
   mode,
   onMessageComplete,
+  onCaseSignal,
 }: UseCompanionStateOptions): UseCompanionStateReturn {
   // --- Core state ---
   const [reflection, setReflection] = useState('');
   const [isReflectionStreaming, setIsReflectionStreaming] = useState(false);
   const [actionHints, setActionHints] = useState<ActionHint[]>([]);
+
+  // --- Conversation structure ---
+  const [conversationStructure, setConversationStructure] = useState<ConversationStructure | undefined>(undefined);
+
+  // --- Episodes ---
+  const [currentEpisode, setCurrentEpisode] = useState<CurrentEpisodeInfo | undefined>(undefined);
+  const [episodeHistory, setEpisodeHistory] = useState<ConversationEpisode[]>([]);
 
   // --- Status & receipts ---
   const [backgroundWork, setBackgroundWork] = useState<BackgroundWorkItem[]>([]);
@@ -109,14 +126,20 @@ export function useCompanionState({
   const lastUpdatedRef = useRef<Partial<Record<CompanionSectionId, number>>>({});
   const [rankingEpoch, setRankingEpoch] = useState(0);
 
+  // --- Turn counter for early-turn thinking boost ---
+  // Tracks completed assistant responses this session. Resets on remount (page navigation).
+  const [turnCount, setTurnCount] = useState(0);
+
   const markUpdated = useCallback((section: CompanionSectionId) => {
     lastUpdatedRef.current[section] = Date.now();
     setRankingEpoch(e => e + 1);
   }, []);
 
-  // Ref for onMessageComplete to keep streamCallbacks stable
+  // Refs for callbacks to keep streamCallbacks stable
   const onMessageCompleteRef = useRef(onMessageComplete);
   onMessageCompleteRef.current = onMessageComplete;
+  const onCaseSignalRef = useRef(onCaseSignal);
+  onCaseSignalRef.current = onCaseSignal;
 
   const clearReflection = useCallback(() => {
     setReflection('');
@@ -169,7 +192,44 @@ export function useCompanionState({
       markUpdated('action_hints');
     },
     onMessageComplete: (messageId?: string) => {
+      setTurnCount(prev => prev + 1);
       onMessageCompleteRef.current?.(messageId);
+    },
+    onCompanionStructure: (structure: ConversationStructure) => {
+      setConversationStructure(structure);
+      markUpdated('conversation_structure');
+    },
+    onResearchStarted: (data: { question: string; priority: string }) => {
+      // Add as background work item
+      setBackgroundWork(prev => [...prev, {
+        id: `research-${Date.now()}`,
+        type: 'research' as const,
+        title: data.question,
+        status: 'running' as const,
+        startedAt: new Date().toISOString(),
+      }]);
+      markUpdated('status');
+    },
+    onCaseSignal: (data: CompanionCaseContext) => {
+      onCaseSignalRef.current?.(data);
+    },
+    onEpisodeSealed: (data: EpisodeSealedEvent) => {
+      // Add sealed episode to history
+      setEpisodeHistory(prev => [...prev, data.episode]);
+      // Update current episode if new one provided
+      if (data.new_episode) {
+        setCurrentEpisode({
+          id: data.new_episode.id,
+          episode_index: data.new_episode.episode_index,
+          topic_label: data.new_episode.topic_label,
+          sealed: false,
+        });
+      }
+      markUpdated('episode_timeline');
+    },
+    onCurrentEpisodeUpdate: (info: CurrentEpisodeInfo) => {
+      setCurrentEpisode(info);
+      markUpdated('episode_timeline');
     },
   }), [markUpdated]);
 
@@ -185,11 +245,14 @@ export function useCompanionState({
     status,
     sessionReceipts,
     caseState,
+    conversationStructure,
+    episodeHistory,
     mode,
     pinnedSection,
     lastUpdated: lastUpdatedRef.current,
+    turnCount,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [reflection, isReflectionStreaming, actionHints, status, sessionReceipts, caseState, mode, pinnedSection, rankingEpoch]);
+  }), [reflection, isReflectionStreaming, actionHints, status, sessionReceipts, caseState, conversationStructure, episodeHistory, mode, pinnedSection, rankingEpoch, turnCount]);
 
   return {
     streamCallbacks,
@@ -204,6 +267,10 @@ export function useCompanionState({
     dismissCompleted,
     caseState,
     setCaseState,
+    conversationStructure,
+    currentEpisode,
+    episodeHistory,
+    setEpisodeHistory,
     companionPosition,
     setCompanionPosition,
     toggleCompanion,

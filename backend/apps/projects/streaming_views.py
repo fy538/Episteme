@@ -16,30 +16,9 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
+from apps.common.auth import authenticate_jwt
+
 logger = logging.getLogger(__name__)
-
-
-async def _authenticate_jwt(request):
-    """Authenticate a raw Django request using JWT (for async views outside DRF)."""
-    from rest_framework_simplejwt.authentication import JWTAuthentication
-    from rest_framework_simplejwt.exceptions import (
-        InvalidToken,
-        AuthenticationFailed as JWTAuthFailed,
-    )
-
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if not auth_header.startswith('Bearer '):
-        return None
-
-    jwt_auth = JWTAuthentication()
-    try:
-        validated_token = await sync_to_async(jwt_auth.get_validated_token)(
-            auth_header.split(' ', 1)[1]
-        )
-        user = await sync_to_async(jwt_auth.get_user)(validated_token)
-        return user
-    except (InvalidToken, JWTAuthFailed):
-        return None
 
 
 @csrf_exempt
@@ -57,7 +36,7 @@ async def document_processing_stream(request, document_id):
 
     The stream terminates on completed/failed or after 5 minutes.
     """
-    user = await _authenticate_jwt(request)
+    user = await authenticate_jwt(request)
     if user is None:
         return JsonResponse({'error': 'Authentication required'}, status=401)
 

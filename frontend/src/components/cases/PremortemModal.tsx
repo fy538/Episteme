@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { casesAPI } from '@/lib/api/cases';
 
 interface PremortemModalProps {
@@ -54,18 +56,18 @@ export function PremortemModal({ caseId, isOpen, onClose, onSaved }: PremortemMo
           </p>
         </div>
 
-        <textarea
+        <Textarea
           aria-label="Premortem: describe the most likely reason this decision could fail"
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="e.g., We underestimated the competitor's response, or the market timing was wrong..."
-          className="w-full px-3 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent resize-none bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100"
+          className="resize-none"
           rows={4}
           autoFocus
         />
 
         {error && (
-          <p className="text-xs text-red-500" role="alert">{error}</p>
+          <p className="text-xs text-error-500" role="alert">{error}</p>
         )}
 
         <p className="text-xs text-neutral-400 dark:text-neutral-500">
@@ -73,19 +75,17 @@ export function PremortemModal({ caseId, isOpen, onClose, onSaved }: PremortemMo
         </p>
 
         <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             Skip for now
-          </button>
-          <button
+          </Button>
+          <Button
+            size="sm"
             onClick={handleSave}
             disabled={!text.trim() || isSaving}
-            className="px-4 py-2 text-sm bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-lg hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            isLoading={isSaving}
           >
             {isSaving ? 'Saving...' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

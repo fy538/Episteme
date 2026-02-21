@@ -9,6 +9,7 @@
 
 import { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { GROUNDING_CONFIG, SECTION_TYPE_LABELS } from '@/lib/constants/grounding';
 import type { BriefSection, SectionType } from '@/lib/types/case';
 
@@ -84,19 +85,21 @@ export function BriefOutlineNav({
     <div className={cn('flex flex-col', className)}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
           Outline
         </h3>
         {onAddSection && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onAddSection}
-            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+            className="h-6 w-6 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
             title="Add section"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 5v14M5 12h14" strokeLinecap="round" />
             </svg>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -145,10 +148,10 @@ export function BriefOutlineNav({
               {annotationCount > 0 && (
                 <span
                   className={cn(
-                    'text-[9px] font-bold min-w-[14px] h-[14px] flex items-center justify-center rounded-full flex-shrink-0',
+                    'text-xs font-bold min-w-[14px] h-[14px] flex items-center justify-center rounded-full flex-shrink-0',
                     hasBlocking
-                      ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
-                      : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400',
+                      ? 'bg-error-100 dark:bg-error-900/40 text-error-600 dark:text-error-400'
+                      : 'bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400',
                   )}
                 >
                   {annotationCount}

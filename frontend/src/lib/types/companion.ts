@@ -14,7 +14,7 @@
 /**
  * Chat modes determining the context and behavior
  */
-export type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph';
+export type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph' | 'orientation';
 
 /**
  * Context for the current chat mode
@@ -88,6 +88,120 @@ export interface CaseState {
   evidenceGaps: number;
 }
 
+// ===== Conversation Structure =====
+
+/**
+ * Structure types that the companion can generate
+ */
+export type StructureType =
+  | 'assumption_surface'
+  | 'angle_map'
+  | 'decision_tree'
+  | 'checklist'
+  | 'comparison'
+  | 'exploration_map'
+  | 'flow'
+  | 'constraint_list'
+  | 'pros_cons'
+  | 'concept_map';
+
+/**
+ * The organic conversation structure from the companion
+ */
+export interface ConversationStructure {
+  id: string;
+  thread_id?: string;
+  version: number;
+  structure_type: StructureType;
+  content: Record<string, unknown>;
+  established: string[];
+  open_questions: string[];
+  eliminated: string[];
+  context_summary: string;
+  updated_at: string | null;
+}
+
+/**
+ * Research result from background companion research
+ */
+export interface ResearchResult {
+  id: string;
+  question: string;
+  answer: string;
+  sources: Array<{
+    type: 'web' | 'project_chunk';
+    title: string;
+    snippet: string;
+    url?: string;
+    chunk_id?: string;
+  }>;
+  status: 'researching' | 'complete' | 'failed';
+  surfaced: boolean;
+  created_at?: string;
+}
+
+/**
+ * Context transferred from companion to case creation
+ */
+export interface CompanionCaseContext {
+  suggested_title: string;
+  decision_question: string;
+  reason: string;
+  companion_state: {
+    established: string[];
+    open_questions: string[];
+    eliminated: string[];
+    structure_snapshot: Record<string, unknown>;
+    structure_type: string;
+  };
+}
+
+// ===== Conversation Episodes =====
+
+/**
+ * Topic shift type for an episode
+ */
+export type EpisodeShiftType = 'initial' | 'continuous' | 'partial_shift' | 'discontinuous';
+
+/**
+ * A topically coherent conversation segment
+ */
+export interface ConversationEpisode {
+  id: string;
+  episode_index: number;
+  topic_label: string;
+  content_summary: string;
+  message_count: number;
+  shift_type: EpisodeShiftType;
+  sealed: boolean;
+  sealed_at: string | null;
+  start_message_id: string | null;
+  end_message_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Compact current episode info attached to companion_structure SSE payload
+ */
+export interface CurrentEpisodeInfo {
+  id: string;
+  episode_index: number;
+  topic_label: string;
+  sealed: boolean;
+}
+
+/**
+ * SSE event emitted when an episode is sealed due to topic shift
+ */
+export interface EpisodeSealedEvent {
+  episode: ConversationEpisode;
+  new_episode?: {
+    id: string;
+    episode_index: number;
+    topic_label: string;
+  } | null;
+}
+
 // ===== Companion State =====
 
 /**
@@ -105,4 +219,5 @@ export interface CompanionState {
   };
   sessionReceipts: SessionReceipt[];
   caseState?: CaseState;
+  conversationStructure?: ConversationStructure;
 }

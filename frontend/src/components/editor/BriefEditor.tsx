@@ -26,6 +26,7 @@ import { SuggestionMark } from './SuggestionMark';
 import { SuggestionPopover } from './SuggestionPopover';
 import { SectionNode, preprocessSectionMarkers, postprocessSectionMarkers } from './SectionNode';
 import { SectionGroundingGutter } from './SectionGroundingGutter';
+import { Button } from '@/components/ui/button';
 import { documentsAPI } from '@/lib/api/documents';
 import type { WorkingDocument, BriefSection } from '@/lib/types/case';
 import type { BriefSectionSuggestion } from '@/components/cases/BriefSuggestion';
@@ -356,16 +357,18 @@ export function BriefEditor({
               {isSaving && 'Saving...'}
               {!isSaving && lastSaved && `Saved ${lastSaved.toLocaleTimeString()}`}
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleToggleVersionHistory}
-              className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+              className={`text-xs ${
                 showVersionHistory
                   ? 'bg-accent-50 border-accent-200 text-accent-700'
-                  : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                  : ''
               }`}
             >
               History
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -377,16 +380,18 @@ export function BriefEditor({
             {isSaving && 'Saving...'}
             {!isSaving && lastSaved && `Saved ${lastSaved.toLocaleTimeString()}`}
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleToggleVersionHistory}
-            className={`text-xs px-2 py-1 rounded-md border transition-colors ${
+            className={`text-xs ${
               showVersionHistory
                 ? 'bg-accent-50 border-accent-200 text-accent-700'
-                : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                : ''
             }`}
           >
             History
-          </button>
+          </Button>
         </div>
       )}
 
@@ -412,9 +417,9 @@ export function BriefEditor({
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-mono text-neutral-400">v{v.version}</span>
                         <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          v.created_by === 'ai_task' ? 'bg-purple-100 text-purple-700' :
-                          v.created_by === 'ai_suggestion' ? 'bg-blue-100 text-blue-700' :
-                          v.created_by === 'restore' ? 'bg-amber-100 text-amber-700' :
+                          v.created_by === 'ai_task' ? 'bg-accent-100 text-accent-700' :
+                          v.created_by === 'ai_suggestion' ? 'bg-info-100 text-info-700' :
+                          v.created_by === 'restore' ? 'bg-warning-100 text-warning-700' :
                           'bg-neutral-100 text-neutral-600'
                         }`}>
                           {VERSION_LABELS[v.created_by] || v.created_by}
@@ -427,13 +432,15 @@ export function BriefEditor({
                         {new Date(v.created_at).toLocaleString()}
                       </span>
                     </div>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => handleRestoreVersion(v.id, v.version)}
                       disabled={isRestoring}
-                      className="opacity-0 group-hover:opacity-100 text-xs px-2 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-white hover:border-neutral-400 transition-all disabled:opacity-50"
+                      className="opacity-0 group-hover:opacity-100 text-xs"
                     >
                       {isRestoring ? 'Restoring...' : 'Restore'}
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>

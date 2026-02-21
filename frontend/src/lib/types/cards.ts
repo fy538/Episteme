@@ -8,6 +8,7 @@ export interface CardAction {
   id: string;
   label: string;
   action_type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: Record<string, any>;
   variant?: CardActionVariant;
 }
@@ -17,6 +18,7 @@ export interface BaseCard {
   heading: string;
   description?: string;
   actions: CardAction[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata: Record<string, any>;
 }
 
@@ -27,8 +29,8 @@ export interface AssumptionValidatorCard extends BaseCard {
     text: string;
     status: 'pending' | 'validated' | 'refuted' | 'uncertain';
     confidence?: number;
-    supporting_evidence: any[];
-    contradicting_evidence: any[];
+    supporting_evidence: Record<string, unknown>[];
+    contradicting_evidence: Record<string, unknown>[];
   }>;
 }
 

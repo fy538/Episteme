@@ -32,8 +32,8 @@ const SCOPE_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
-  draft: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+  active: 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400',
+  draft: 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400',
   archived: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500',
 };
 
@@ -113,7 +113,7 @@ export function AdvancedTab({ preferences, onChange }: AdvancedTabProps) {
                                 <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200 truncate">
                                   {skill.name}
                                 </span>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${STATUS_COLORS[skill.status] ?? STATUS_COLORS.draft}`}>
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full ${STATUS_COLORS[skill.status] ?? STATUS_COLORS.draft}`}>
                                   {skill.status}
                                 </span>
                               </div>
@@ -121,20 +121,20 @@ export function AdvancedTab({ preferences, onChange }: AdvancedTabProps) {
                                 {skill.description}
                               </p>
                               <div className="flex items-center gap-2 mt-1">
-                                <span className="text-[10px] text-neutral-400 uppercase">
+                                <span className="text-xs text-neutral-400 uppercase">
                                   {skill.domain}
                                 </span>
-                                <span className="text-[10px] text-neutral-400">
+                                <span className="text-xs text-neutral-400">
                                   {SCOPE_LABELS[skill.scope] ?? skill.scope}
                                 </span>
                                 {skill.applies_to_agents.length > 0 && (
-                                  <span className="text-[10px] text-neutral-400">
+                                  <span className="text-xs text-neutral-400">
                                     → {skill.applies_to_agents.join(', ')}
                                   </span>
                                 )}
                               </div>
                             </div>
-                            <span className="text-[10px] text-neutral-400 shrink-0">
+                            <span className="text-xs text-neutral-400 shrink-0">
                               v{skill.current_version}
                             </span>
                           </div>

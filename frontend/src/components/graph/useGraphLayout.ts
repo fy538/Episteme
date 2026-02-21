@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { ElkNode, ElkExtendedEdge } from 'elkjs';
 import type { Node as FlowNode, Edge as FlowEdge } from '@xyflow/react';
 import type { GraphNode, GraphEdge, NodeType, BackendCluster } from '@/lib/types/graph';
-import { NODE_DIMENSIONS, EDGE_TYPE_CONFIG } from './graph-config';
+import { NODE_DIMENSIONS, EDGE_TYPE_CONFIG, CLUSTER_CONFIG } from './graph-config';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -204,6 +204,16 @@ function buildClusteredGraph(
     }
   }
 
+  // Pre-build summary lookup for O(1) height decisions
+  const clusterSummaryMap = new Map<string, boolean>();
+  if (backendClusters) {
+    for (let i = 0; i < backendClusters.length; i++) {
+      const bc = backendClusters[i];
+      const cid = bc.centroid_node_id || `backend-${i}`;
+      if (bc.summary) clusterSummaryMap.set(cid, true);
+    }
+  }
+
   const children: ElkNode[] = [];
 
   for (const [clusterId, cluster] of clusterMap) {
@@ -213,10 +223,11 @@ function buildClusteredGraph(
       // Collapsed cluster → single super-node
       const nodeCount = cluster.nodeIds.length;
       const width = Math.min(300, 180 + Math.min(nodeCount, 20) * 4);
+      const hasSummary = clusterSummaryMap.has(clusterId);
       children.push({
         id: `cluster-${clusterId}`,
         width,
-        height: 120,
+        height: hasSummary ? CLUSTER_CONFIG.superNodeSummaryHeight : CLUSTER_CONFIG.superNodeMinHeight,
       });
     } else {
       // Expanded cluster → sub-graph with children
@@ -457,10 +468,11 @@ function extractPositions(
   const positionedNodes: FlowNode[] = [];
   const clusterInfos: ClusterInfo[] = [];
 
-  // Build label + type-counts lookup from backend clusters
+  // Build label + type-counts + summary lookup from backend clusters
   const clusterLabelLookup = new Map<string, string>();
   const clusterTypeCounts = new Map<string, Record<string, number>>();
   const clusterNodeIds = new Map<string, string[]>();
+  const clusterSummaryLookup = new Map<string, string>();
   if (backendClusters) {
     for (let i = 0; i < backendClusters.length; i++) {
       const bc = backendClusters[i];
@@ -468,6 +480,9 @@ function extractPositions(
       clusterLabelLookup.set(clusterId, bc.label ?? `Cluster ${i + 1}`);
       clusterTypeCounts.set(clusterId, bc.node_types ?? {});
       clusterNodeIds.set(clusterId, bc.node_ids);
+      if (bc.summary) {
+        clusterSummaryLookup.set(clusterId, bc.summary);
+      }
     }
   }
 
@@ -485,12 +500,15 @@ function extractPositions(
         const memberIds = clusterNodeIds.get(clusterId) ?? [];
         const typeCounts = clusterTypeCounts.get(clusterId) ?? {};
 
+        const summary = clusterSummaryLookup.get(clusterId);
+
         positionedNodes.push({
           id: clusterElk.id,
           type: 'cluster',
           position: { x: clusterX, y: clusterY },
           data: {
             label,
+            summary,
             nodeCount: memberIds.length,
             typeCounts,
             clusterId,

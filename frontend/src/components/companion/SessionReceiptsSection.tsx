@@ -10,7 +10,7 @@
 'use client';
 
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
 import { theme, isTerminalTheme } from '@/lib/theme/companionTheme';
 import type { SessionReceipt, SessionReceiptType } from '@/lib/types/companion';
 
@@ -24,21 +24,6 @@ const RECEIPT_ICONS: Record<SessionReceiptType, string> = {
   inquiry_resolved: '!',
   research_completed: '?',
 };
-
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  return date.toLocaleDateString();
-}
 
 // Get theme colors for receipt type
 function getReceiptTheme(type: SessionReceiptType) {
@@ -123,7 +108,7 @@ export function SessionReceiptsSection({
 
                       {/* Timestamp */}
                       <div className={cn('mt-1', theme.thinking.textSubtle)}>
-                        {formatTimestamp(receipt.timestamp)}
+                        {formatRelativeTime(receipt.timestamp)}
                       </div>
                     </div>
                   </div>

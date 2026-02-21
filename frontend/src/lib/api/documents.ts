@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import type { SSEEventData } from './sse-parser';
 import type { WorkingDocument } from '../types/case';
 import type { UploadedDocument } from '../types/document';
 
@@ -125,83 +126,27 @@ export const documentsAPI = {
   executeTaskStream(
     docId: string,
     task: string,
-    onEvent: (event: { type: string; data: any }) => void,
-    onDone: (result: any) => void,
+    onEvent: (event: { type: string; data: SSEEventData }) => void,
+    onDone: (result: SSEEventData) => void,
     onError: (error: string) => void,
   ): { abort: () => void } {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-    const url = `${API_BASE}/working-documents/${docId}/execute-task-stream/`;
     const controller = new AbortController();
 
-    // Use fetch with ReadableStream since EventSource doesn't support POST
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(typeof window !== 'undefined' && localStorage.getItem('auth_token')
-          ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
-          : {}),
-      },
-      body: JSON.stringify({ task }),
-      signal: controller.signal,
-      credentials: 'include',
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          onError(`HTTP ${response.status}: ${response.statusText}`);
-          return;
-        }
+    apiClient
+      .stream(
+        `/working-documents/${docId}/execute-task-stream/`,
+        { task },
+        (sseEvent) => {
+          onEvent({ type: sseEvent.event, data: sseEvent.data });
 
-        const reader = response.body?.getReader();
-        if (!reader) {
-          onError('No response body');
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE format: "event: type\ndata: json\n\n"
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || ''; // Keep incomplete chunk
-
-          for (const block of lines) {
-            if (!block.trim()) continue;
-
-            let eventType = 'message';
-            let eventData = '';
-
-            for (const line of block.split('\n')) {
-              if (line.startsWith('event: ')) {
-                eventType = line.slice(7).trim();
-              } else if (line.startsWith('data: ')) {
-                eventData = line.slice(6);
-              }
-            }
-
-            if (eventData) {
-              try {
-                const parsed = JSON.parse(eventData);
-                onEvent({ type: eventType, data: parsed });
-
-                if (eventType === 'done') {
-                  onDone(parsed);
-                } else if (eventType === 'error') {
-                  onError(parsed.error || 'Unknown error');
-                }
-              } catch {
-                // Ignore parse errors for partial data
-              }
-            }
+          if (sseEvent.event === 'done') {
+            onDone(sseEvent.data);
+          } else if (sseEvent.event === 'error') {
+            onError(sseEvent.data?.error || 'Unknown error');
           }
-        }
-      })
+        },
+        controller.signal,
+      )
       .catch((err) => {
         if (err.name !== 'AbortError') {
           onError(err.message || 'Stream failed');
@@ -333,7 +278,7 @@ export const documentsAPI = {
    */
   streamProcessing(
     documentId: string,
-    onEvent: (event: { event: string; data: any }) => void,
+    onEvent: (event: { event: string; data: SSEEventData }) => void,
     signal?: AbortSignal,
   ): Promise<void> {
     return apiClient.streamGet(

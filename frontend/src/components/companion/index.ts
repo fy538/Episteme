@@ -9,3 +9,6 @@ export { ThinkingSection } from './ThinkingSection';
 export { StatusSection } from './StatusSection';
 export { SessionReceiptsSection } from './SessionReceiptsSection';
 export { CaseStateSection } from './CaseStateSection';
+export { ConversationStructureSection } from './ConversationStructureSection';
+export { EpisodeTimelineSection } from './EpisodeTimelineSection';
+export { CompanionSkeleton } from './CompanionSkeleton';

@@ -109,12 +109,12 @@ export function AITab({ preferences, onChange }: AITabProps) {
               title={model.name}
               description={model.description}
               meta={
-                <Badge variant={model.provider === 'anthropic' ? 'default' : 'success'} className="text-[10px]">
+                <Badge variant={model.provider === 'anthropic' ? 'default' : 'success'} className="text-xs">
                   {model.provider}
                 </Badge>
               }
             >
-              <div className="flex gap-3 text-[10px] text-neutral-500 dark:text-neutral-400 mt-1 uppercase tracking-wider">
+              <div className="flex gap-3 text-xs text-neutral-500 dark:text-neutral-400 mt-1 uppercase tracking-wider">
                 <span>Speed: {model.speed}</span>
                 <span>Cost: {model.cost}</span>
               </div>

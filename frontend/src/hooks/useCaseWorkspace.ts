@@ -24,7 +24,7 @@ import type { InvestigationPlan, PlanAssumption } from '@/lib/types/plan';
 import type { ReadinessChecklistItemData, ChecklistProgress } from '@/components/readiness';
 import type { UploadedDocument } from '@/lib/types/document';
 
-export type ViewMode = 'home' | 'brief' | 'inquiry' | 'inquiry-dashboard' | 'readiness' | 'document';
+export type ViewMode = 'home' | 'brief' | 'inquiry' | 'inquiry-dashboard' | 'readiness' | 'document' | 'graph';
 
 interface UseCaseWorkspaceOptions {
   caseId: string | null;
@@ -358,6 +358,9 @@ export function useCaseWorkspace({ caseId }: UseCaseWorkspaceOptions) {
     addBackgroundWork: companion.addBackgroundWork,
     completeBackgroundWork: companion.completeBackgroundWork,
     dismissCompleted: companion.dismissCompleted,
+    episodeHistory: companion.episodeHistory,
+    currentEpisode: companion.currentEpisode,
+    setEpisodeHistory: companion.setEpisodeHistory,
 
     // Actions
     loadWorkspace,

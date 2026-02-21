@@ -15,6 +15,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/ui/spinner';
 import {
   ReactFlow,
   Background,
@@ -93,6 +94,14 @@ interface GraphCanvasProps {
   backendClusters?: BackendCluster[];
   /** Cluster quality metrics from backend */
   clusterQuality?: ClusterQuality;
+  /** Total node count in the project (may exceed nodes.length if truncated) */
+  totalNodeCount?: number;
+  /** Whether the graph response was truncated by server-side limit */
+  truncated?: boolean;
+  /** When provided, enables "Ask about this" button in the node detail drawer */
+  onAskAboutNode?: (node: GraphNode) => void;
+  /** Node IDs to highlight (e.g. from upload impact card) */
+  highlightedNodeIds?: string[];
   className?: string;
 }
 
@@ -113,8 +122,12 @@ function GraphCanvasInner({
   caseId,
   layoutMode: initialMode = 'clustered',
   focusedNodeId,
+  highlightedNodeIds,
   backendClusters,
   clusterQuality,
+  totalNodeCount,
+  truncated,
+  onAskAboutNode,
   className,
 }: GraphCanvasProps) {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(initialMode);
@@ -170,11 +183,32 @@ function GraphCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
 
-  // Sync layout results into React Flow state
+  // Build highlight set for fast lookups
+  const highlightSet = useMemo(
+    () => new Set(highlightedNodeIds ?? []),
+    [highlightedNodeIds],
+  );
+  const highlightsActive = highlightSet.size > 0;
+
+  // Sync layout results into React Flow state, injecting highlight flags
   useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, setNodes, setEdges]);
+    if (highlightsActive) {
+      setNodes(layoutNodes.map(n => ({
+        ...n,
+        data: { ...n.data, highlighted: highlightSet.has(n.id), highlightsActive: true },
+      })));
+    } else {
+      setNodes(layoutNodes);
+    }
+    if (highlightsActive) {
+      setEdges(layoutEdges.map(e => ({
+        ...e,
+        data: { ...e.data, highlightsActive: true },
+      })));
+    } else {
+      setEdges(layoutEdges);
+    }
+  }, [layoutNodes, layoutEdges, setNodes, setEdges, highlightSet, highlightsActive]);
 
   // Focus a specific node (e.g. from summary citation click)
   useEffect(() => {
@@ -199,7 +233,7 @@ function GraphCanvasInner({
   const handleNodeClick = useCallback((_event: React.MouseEvent, node: FlowNode) => {
     if (node.type === 'cluster') {
       // Expand the collapsed cluster
-      const clusterId = (node.data as any)?.clusterId;
+      const clusterId = (node.data as Record<string, unknown>)?.clusterId as string | undefined;
       if (clusterId) {
         handleToggleCollapse(clusterId);
       }
@@ -292,7 +326,7 @@ function GraphCanvasInner({
       {/* Main graph area */}
       <div className="flex-1 relative">
         {/* Health bar */}
-        <GraphHealthBar nodes={graphNodes} clusterQuality={clusterQuality} className="absolute top-3 left-3 z-10" />
+        <GraphHealthBar nodes={graphNodes} clusterQuality={clusterQuality} totalNodeCount={totalNodeCount} truncated={truncated} className="absolute top-3 left-3 z-10" />
 
         {/* Filter bar */}
         <GraphFilterBar
@@ -310,10 +344,7 @@ function GraphCanvasInner({
         {isLayouting && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/50 dark:bg-neutral-950/50 backdrop-blur-sm">
             <div className="flex items-center gap-2 text-sm text-neutral-500">
-              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 019.17 6" strokeLinecap="round" />
-              </svg>
+              <Spinner />
               Computing layout...
             </div>
           </div>
@@ -363,6 +394,7 @@ function GraphCanvasInner({
             projectId={projectId}
             onClose={handleDrawerClose}
             onNavigateToNode={handleNavigateToNode}
+            onAskAboutNode={onAskAboutNode}
           />
         )}
       </AnimatePresence>

@@ -13,7 +13,7 @@ export interface StatusBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const statusStyles: Record<StatusType, string> = {
   untested: 'bg-warning-100 text-warning-800 border-warning-300 dark:bg-warning-900/50 dark:text-warning-300 dark:border-warning-700',
-  investigating: 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/50 dark:text-purple-300 dark:border-purple-700',
+  investigating: 'bg-info-100 text-info-800 border-info-300 dark:bg-info-900/50 dark:text-info-300 dark:border-info-700',
   validated: 'bg-success-100 text-success-800 border-success-300 dark:bg-success-900/50 dark:text-success-300 dark:border-success-700',
 };
 

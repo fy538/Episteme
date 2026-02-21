@@ -15,6 +15,8 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { EvolveIcon } from '@/components/ui/icons';
 import dynamic from 'next/dynamic';
 
 const BriefEditor = dynamic(
@@ -217,7 +219,7 @@ export function UnifiedBriefView({
                 strokeLinecap="round"
               />
             </svg>
-            <span className={cn('absolute text-[10px] font-bold', scoreColor)}>
+            <span className={cn('absolute text-xs font-bold', scoreColor)}>
               {editor.overallGrounding}
             </span>
           </div>
@@ -229,7 +231,7 @@ export function UnifiedBriefView({
                 Grounding
               </span>
               {editor.isPolling && (
-                <span className="flex items-center gap-1 text-[10px] text-accent-500">
+                <span className="flex items-center gap-1 text-xs text-accent-500">
                   <span className="relative flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-500" />
@@ -244,7 +246,7 @@ export function UnifiedBriefView({
                 .map(([status, count]) => (
                   <span
                     key={status}
-                    className={cn('flex items-center gap-0.5 text-[10px]', GROUNDING_SUMMARY[status].color)}
+                    className={cn('flex items-center gap-0.5 text-xs', GROUNDING_SUMMARY[status].color)}
                   >
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
                     {count} {GROUNDING_SUMMARY[status].label.toLowerCase()}
@@ -273,7 +275,7 @@ export function UnifiedBriefView({
           >
             {editor.isEvolving ? (
               <>
-                <LoadingSpinner className="w-3 h-3 mr-1" />
+                <Spinner size="xs" className="mr-1" />
                 Evolving...
               </>
             ) : (
@@ -359,12 +361,15 @@ export function UnifiedBriefView({
               <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                 Content Changes
               </h3>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setShowVersionDiff(false)}
-                className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                className="h-7 w-7 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                aria-label="Close diff"
               >
                 &times;
-              </button>
+              </Button>
             </div>
             <div className="flex-1 overflow-auto p-6">
               {loadingVersionDiff ? (
@@ -432,15 +437,15 @@ function EvolveDiffBanner({
   const hasNegative = downgraded.length > 0 || newConflicts.length > 0;
 
   const bannerStyle = hasNegative
-    ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10'
+    ? 'border-warning-200 dark:border-warning-900/40 bg-warning-50/50 dark:bg-warning-900/10'
     : hasPositive
-    ? 'border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-900/10'
-    : 'border-blue-200 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10';
+    ? 'border-success-200 dark:border-success-900/40 bg-success-50/50 dark:bg-success-900/10'
+    : 'border-info-200 dark:border-info-900/40 bg-info-50/50 dark:bg-info-900/10';
   const textStyle = hasNegative
-    ? 'text-amber-700 dark:text-amber-300'
+    ? 'text-warning-700 dark:text-warning-300'
     : hasPositive
-    ? 'text-emerald-700 dark:text-emerald-300'
-    : 'text-blue-700 dark:text-blue-300';
+    ? 'text-success-700 dark:text-success-300'
+    : 'text-info-700 dark:text-info-300';
 
   return (
     <div className={cn('px-4 py-2 border-b flex items-center justify-between gap-3', bannerStyle)}>
@@ -454,42 +459,27 @@ function EvolveDiffBanner({
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {onViewChanges && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onViewChanges}
-            className={cn('text-[11px] underline hover:no-underline', textStyle)}
+            className={cn('text-xs underline hover:no-underline h-auto px-0', textStyle)}
           >
             View changes
-          </button>
+          </Button>
         )}
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onDismiss}
-          className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+          className="h-6 w-6 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
           title="Dismiss"
+          aria-label="Dismiss"
         >
           <span className="text-sm">&times;</span>
-        </button>
+        </Button>
       </div>
     </div>
-  );
-}
-
-// ── Icons ────────────────────────────────────────────────────────
-
-function EvolveIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M23 4v6h-6M1 20v-6h6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function LoadingSpinner({ className }: { className?: string }) {
-  return (
-    <svg className={cn(className, 'animate-spin')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-      <path d="M12 2a10 10 0 019.17 6" strokeLinecap="round" />
-    </svg>
   );
 }
 

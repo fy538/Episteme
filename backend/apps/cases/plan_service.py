@@ -128,6 +128,86 @@ class PlanService:
 
         return plan, version
 
+    @staticmethod
+    def merge_plan_diff(current_content: dict, diff_data: dict) -> dict:
+        """
+        Merge an LLM-generated diff into the current plan state to produce
+        a complete proposed_content snapshot.
+
+        This allows the LLM to emit only the diff (added/updated assumptions,
+        criteria, stage changes) while the backend reconstructs the full plan
+        state. Reduces token usage and avoids the LLM echoing back unchanged
+        content.
+
+        Args:
+            current_content: Current plan version content dict
+            diff_data: The diff from the LLM's <plan_edits> section
+
+        Returns:
+            Complete proposed_content dict ready for PlanVersion storage
+        """
+        content = copy.deepcopy(current_content)
+
+        # --- Apply assumption changes ---
+        assumptions = content.get('assumptions', [])
+        assumption_map = {a['id']: a for a in assumptions if 'id' in a}
+
+        # Update existing assumptions
+        for update in diff_data.get('updated_assumptions', []):
+            a_id = update.get('id')
+            if a_id and a_id in assumption_map:
+                if 'status' in update:
+                    assumption_map[a_id]['status'] = update['status']
+                if 'evidence_summary' in update:
+                    assumption_map[a_id]['evidence_summary'] = update['evidence_summary']
+                if 'risk_level' in update:
+                    assumption_map[a_id]['risk_level'] = update['risk_level']
+
+        # Add new assumptions
+        for new_a in diff_data.get('added_assumptions', []):
+            assumptions.append({
+                'id': str(uuid.uuid4()),
+                'text': new_a.get('text', ''),
+                'status': 'untested',
+                'test_strategy': new_a.get('test_strategy', ''),
+                'evidence_summary': '',
+                'risk_level': new_a.get('risk_level', 'medium'),
+            })
+
+        content['assumptions'] = assumptions
+
+        # --- Apply criteria changes ---
+        criteria = content.get('decision_criteria', [])
+        criteria_map = {c['id']: c for c in criteria if 'id' in c}
+
+        # Update existing criteria
+        for update in diff_data.get('updated_criteria', []):
+            c_id = update.get('id')
+            if c_id and c_id in criteria_map:
+                if 'is_met' in update:
+                    criteria_map[c_id]['is_met'] = update['is_met']
+
+        # Add new criteria
+        for new_c in diff_data.get('added_criteria', []):
+            criteria.append({
+                'id': str(uuid.uuid4()),
+                'text': new_c.get('text', ''),
+                'is_met': False,
+                'priority': new_c.get('priority', 'nice_to_have'),
+                'linked_inquiry_id': None,
+            })
+
+        content['decision_criteria'] = criteria
+
+        # --- Apply stage change ---
+        stage_change = diff_data.get('stage_change')
+        if stage_change and isinstance(stage_change, str):
+            content['stage_rationale'] = diff_data.get('stage_rationale', f'Stage advanced to {stage_change}')
+        elif stage_change and isinstance(stage_change, dict):
+            content['stage_rationale'] = stage_change.get('rationale', '')
+
+        return content
+
     @classmethod
     def get_current_version(cls, case_id):
         """
@@ -152,6 +232,8 @@ class PlanService:
         actor_type=ActorType.SYSTEM,
         actor_id: Optional[uuid.UUID] = None,
         correlation_id: Optional[uuid.UUID] = None,
+        trigger_type: str = 'initial',
+        generation_context: Optional[dict] = None,
     ):
         """
         Create a new plan version (for accepted AI proposals or user-requested changes).
@@ -165,6 +247,8 @@ class PlanService:
             created_by=created_by,
             diff_summary=diff_summary,
             diff_data=diff_data,
+            trigger_type=trigger_type,
+            generation_context=generation_context,
         )
 
         EventService.append(
@@ -213,6 +297,7 @@ class PlanService:
             created_by='ai_proposal',
             diff_summary=f'Stage changed: {old_stage} \u2192 {new_stage}',
             diff_data={'type': 'stage_change', 'from': old_stage, 'to': new_stage},
+            trigger_type='stage_change',
         )
 
         EventService.append(
@@ -253,6 +338,7 @@ class PlanService:
             created_by='restore',
             diff_summary=f'Restored from version {target_version_number}',
             diff_data={'type': 'restore', 'restored_from': target_version_number},
+            trigger_type='restore',
         )
 
         EventService.append(
@@ -316,6 +402,7 @@ class PlanService:
                 'from': old_status,
                 'to': new_status,
             },
+            trigger_type='user_edit',
         )
 
         # Note: assumption_status sync to Signal removed — assumption lifecycle
@@ -365,6 +452,7 @@ class PlanService:
                 'criterion_id': criterion_id,
                 'is_met': is_met,
             },
+            trigger_type='user_edit',
         )
 
         cls._trigger_regrounding(case_id, context='criterion_update')

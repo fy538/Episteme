@@ -64,6 +64,8 @@ class EventType(models.TextChoices):
     # User decisions
     CONFIDENCE_CHANGED = 'ConfidenceChanged', 'Confidence Changed'
     POSITION_REVISED = 'PositionRevised', 'Position Revised'
+    DECISION_RECORDED = 'DecisionRecorded', 'Decision Recorded'
+    OUTCOME_NOTE_ADDED = 'OutcomeNoteAdded', 'Outcome Note Added'
 
     # Investigation plan lifecycle
     PLAN_CREATED = 'PlanCreated', 'Investigation Plan Created'
@@ -107,6 +109,14 @@ class EventType(models.TextChoices):
     PLAN_DIFF_ACCEPTED = 'PlanDiffAccepted', 'Plan Diff Accepted'
     PLAN_DIFF_REJECTED = 'PlanDiffRejected', 'Plan Diff Rejected'
     PLAN_RESTORED = 'PlanRestored', 'Plan Restored to Previous Version'
+
+    # ══ CASE EXTRACTION ════════════════════════════════════════════
+    # Case-level graph extraction pipeline events.
+
+    CASE_EXTRACTION_STARTED = 'CaseExtractionStarted', 'Case Extraction Started'
+    CASE_EXTRACTION_COMPLETED = 'CaseExtractionCompleted', 'Case Extraction Completed'
+    CASE_EXTRACTION_FAILED = 'CaseExtractionFailed', 'Case Extraction Failed'
+    CASE_ANALYSIS_COMPLETED = 'CaseAnalysisCompleted', 'Case Analysis Completed'
 
     # ══ GRAPH ═════════════════════════════════════════════════════
     # Knowledge graph events — Node/Edge/GraphDelta lifecycle.

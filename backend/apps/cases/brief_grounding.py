@@ -118,8 +118,8 @@ class BriefGroundingEngine:
                         result['confidence_avg'] = round(
                             sum(confidences) / len(confidences), 2
                         )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Grounding confidence lookup failed: %s", e)
 
         # Count unvalidated assumptions from the graph layer
         # Scoped to case-visible nodes (case-owned + referenced project nodes)
@@ -134,8 +134,8 @@ class BriefGroundingEngine:
                     node_type='assumption',
                 ).exclude(status__in=['confirmed', 'refuted'])
                 result['unvalidated_assumptions'] = assumption_nodes.count()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Assumption count lookup failed: %s", e)
 
         # Count tensions from the graph layer
         # Scoped to case-visible nodes
@@ -150,8 +150,8 @@ class BriefGroundingEngine:
                     node_type='tension',
                 )
                 result['tensions_count'] = tension_nodes.count()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Tension count lookup failed: %s", e)
 
         # Determine status
         result['status'] = BriefGroundingEngine._determine_status(result, evidence_threshold)

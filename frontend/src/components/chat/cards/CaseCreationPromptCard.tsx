@@ -8,6 +8,7 @@
 
 'use client';
 
+import { Button } from '@/components/ui/button';
 import type { InlineActionCard, CaseCreationPromptData } from '@/lib/types/chat';
 
 interface CaseCreationPromptCardProps {
@@ -33,21 +34,26 @@ export function CaseCreationPromptCard({
           {aiReason || 'This looks like a decision worth structuring.'}
         </p>
         <div className="flex items-center gap-3 mt-2.5">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => onCreateCase(suggestedTitle)}
             disabled={isCreating}
-            className="text-xs font-medium text-accent-600 dark:text-accent-400 hover:text-accent-700 dark:hover:text-accent-300 transition-colors disabled:opacity-50"
+            isLoading={isCreating}
+            className="text-xs font-medium text-accent-600 dark:text-accent-400 hover:text-accent-700 dark:hover:text-accent-300 px-0"
           >
             {isCreating ? 'Analyzing...' : 'Structure as a case'}
-          </button>
+          </Button>
           <span className="text-neutral-300 dark:text-neutral-700">&middot;</span>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onDismiss}
             disabled={isCreating}
-            className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors disabled:opacity-50"
+            className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 px-0"
           >
             Dismiss
-          </button>
+          </Button>
         </div>
       </div>
     </div>

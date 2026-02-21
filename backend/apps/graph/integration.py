@@ -6,20 +6,16 @@ After Phase A extracts nodes from a document, Phase B:
 2. Calls LLM to discover relationships, tensions, and status updates
 3. Creates edges, tension nodes, and applies updates via GraphService
 """
-import json
 import logging
-import re
 import uuid
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from asgiref.sync import async_to_sync
-from django.conf import settings
 
 from apps.common.vector_utils import similarity_search
 
 from .models import Node, Edge, NodeType, NodeStatus, EdgeType, NodeSourceType
 from .services import GraphService
-from .serialization import GraphSerializationService
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +335,11 @@ def _serialize_context_for_integration(
 
 
 def _call_integration_llm(graph_context: str, new_nodes: List[Node]) -> Optional[Dict]:
-    """Call LLM for integration analysis using structured tool_use."""
+    """Call LLM for integration analysis using structured tool_use.
+
+    Returns None on LLM failures (best-effort — integration is non-critical).
+    The caller logs the empty result and continues the pipeline.
+    """
     from apps.common.llm_providers import get_llm_provider
     provider = get_llm_provider('extraction')
 
@@ -354,7 +354,11 @@ def _call_integration_llm(graph_context: str, new_nodes: List[Node]) -> Optional
             temperature=0.3,
         )
 
-    result = async_to_sync(_call)()
+    try:
+        result = async_to_sync(_call)()
+    except Exception:
+        logger.warning("Integration LLM call failed", exc_info=True)
+        return None
 
     if not isinstance(result, dict) or not result:
         logger.warning("Integration LLM returned non-dict: %s", type(result))
@@ -506,38 +510,4 @@ def _resolve_node_id(id_str: str, nodes_map: Dict[str, Node]) -> Optional[uuid.U
     except ValueError:
         pass
 
-    return None
-
-
-def _parse_json_from_response(text: str) -> Any:
-    """Multi-strategy JSON extraction from LLM response."""
-    if not text:
-        return None
-
-    text = text.strip()
-
-    # Strategy 1: Direct parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 2: Extract from code fence
-    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Strategy 3: Find first { to last }
-    first = text.find('{')
-    last = text.rfind('}')
-    if first != -1 and last > first:
-        try:
-            return json.loads(text[first:last + 1])
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("integration_json_parse_failed", extra={"text_preview": text[:200]})
     return None

@@ -10,10 +10,13 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { ChatPanel } from '@/components/workspace/ChatPanel';
 import { CompanionPanel } from '@/components/companion';
+import { Button } from '@/components/ui/button';
 import { useConversationState } from '@/hooks/useConversationState';
+import { projectsAPI } from '@/lib/api/projects';
 import type { ChatThread } from '@/lib/types/chat';
 
 export default function ConversationPage({
@@ -49,9 +52,30 @@ export default function ConversationPage({
     }
   });
 
+  // Track the gap between initial message being sent and companion streaming starting.
+  // Without this, the skeleton disappears briefly when onInitialMessageSent fires
+  // but before the first SSE chunk arrives (~200-500ms gap).
+  const [waitingForFirstStream, setWaitingForFirstStream] = useState(false);
+
   const queryClient = useQueryClient();
-  const { companion } = useConversationState({
+  const { companion, thread } = useConversationState({
     threadId: params.threadId,
+  });
+
+  // Clear waitingForFirstStream once the companion actually starts streaming
+  if (waitingForFirstStream && companion.companionThinking.isStreaming) {
+    setWaitingForFirstStream(false);
+  }
+
+  // Show companion skeleton when a message is being processed but no sections are ranked yet
+  const isCompanionProcessing = initialMessage !== null || waitingForFirstStream || companion.companionThinking.isStreaming;
+
+  // Resolve project name for breadcrumb (only when thread has a project)
+  const { data: project } = useQuery({
+    queryKey: ['project', thread?.project],
+    queryFn: () => projectsAPI.getProject(thread!.project!),
+    enabled: !!thread?.project,
+    staleTime: 60_000,
   });
 
   // Merge title update handler into companion stream callbacks
@@ -65,16 +89,46 @@ export default function ConversationPage({
     },
   }), [companion.streamCallbacks, params.threadId, queryClient]);
 
+  const threadTitle = thread?.title || 'Conversation';
+
   return (
     <div className="absolute inset-0 flex">
       {/* Main chat area */}
       <div className="flex-1 min-w-0 flex flex-col">
+        {/* Thin breadcrumb bar */}
+        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-neutral-200/60 dark:border-neutral-800/60 bg-white dark:bg-neutral-950 shrink-0">
+          <Link
+            href="/"
+            className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
+          >
+            Home
+          </Link>
+          {thread?.project && project && (
+            <>
+              <BreadcrumbChevron />
+              <Link
+                href={`/projects/${thread.project}`}
+                className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors truncate max-w-[160px]"
+              >
+                {project.title}
+              </Link>
+            </>
+          )}
+          <BreadcrumbChevron />
+          <span className="text-xs font-medium text-neutral-700 dark:text-neutral-200 truncate max-w-[240px]">
+            {threadTitle}
+          </span>
+        </div>
+
         <ChatPanel
             threadId={params.threadId}
             variant="full"
             streamCallbacks={streamCallbacksWithTitle}
             initialMessage={initialMessage || undefined}
-            onInitialMessageSent={() => setInitialMessage(null)}
+            onInitialMessageSent={() => {
+              setWaitingForFirstStream(true);
+              setInitialMessage(null);
+            }}
           />
       </div>
 
@@ -85,27 +139,43 @@ export default function ConversationPage({
             thinking={companion.companionThinking}
             mode="casual"
             position="sidebar"
+            isProcessing={isCompanionProcessing}
             actionHints={companion.actionHints}
+            status={companion.status}
+            conversationStructure={companion.conversationStructure}
+            episodeHistory={companion.episodeHistory}
+            currentEpisode={companion.currentEpisode}
             rankedSections={companion.rankedSections}
             pinnedSection={companion.pinnedSection}
             onPinSection={companion.setPinnedSection}
+            onDismissCompleted={companion.dismissCompleted}
             onTogglePosition={companion.toggleCompanion}
             onClose={() => companion.setCompanionPosition('hidden')}
           />
         </div>
       ) : (
         /* Floating button to re-open the companion panel */
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={companion.toggleCompanion}
-          className="absolute top-3 right-3 z-30 w-8 h-8 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 shadow-sm hover:shadow-md flex items-center justify-center text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-all duration-200"
+          className="absolute top-3 right-3 z-30 w-8 h-8 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 shadow-sm hover:shadow-md text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-all duration-200"
           aria-label="Open companion panel"
           title="Open companion panel"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-        </button>
+        </Button>
       )}
     </div>
+  );
+}
+
+function BreadcrumbChevron() {
+  return (
+    <svg className="w-3 h-3 text-neutral-300 dark:text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

@@ -1,12 +1,15 @@
 /**
  * useNavigationState Hook
  *
- * Core navigation state for the sidebar architecture.
+ * Core navigation state for the three-mode sidebar architecture.
  *
- * The sidebar has two tabs (Decisions / Threads). The active tab is:
- *   1. Auto-derived from the URL pathname (e.g. /chat → threads, /cases → decisions)
- *   2. Manually overridable by the user clicking a tab
- *   3. Override resets on the next URL navigation
+ * The sidebar has three modes that match progressive zoom levels:
+ *   - home: All projects + scratch threads (/, /chat, /chat/:id)
+ *   - project: Scoped to one project (/projects/:id)
+ *   - case: Scoped to one case (/cases/:id)
+ *
+ * The mode is derived from the URL pathname. Transition direction
+ * (forward/back) is computed for slide animations.
  *
  * Panel collapse state is persisted in localStorage.
  */
@@ -15,80 +18,70 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import type { SidebarTab, RailSection, PanelMode } from '@/lib/types/navigation';
+import type {
+  SidebarMode,
+  TransitionDirection,
+} from '@/lib/types/navigation';
 
 const STORAGE_KEY = 'episteme_nav_panel_collapsed';
-const TAB_STORAGE_KEY = 'episteme_nav_default_tab';
 
 /** Regex patterns for extracting route params from pathname */
 const CHAT_THREAD_RE = /^\/chat\/([^/]+)/;
 const CASE_ID_RE = /^\/cases\/([^/]+)/;
 const PROJECT_ID_RE = /^\/projects\/([^/]+)/;
 
-/** Derive the sidebar tab from the current pathname */
-function deriveTab(pathname: string): SidebarTab {
-  if (pathname.startsWith('/chat')) return 'threads';
-  // Home, cases, inquiries, projects all map to decisions
-  if (pathname === '/') return 'decisions';
-  if (pathname.startsWith('/cases')) return 'decisions';
-  if (pathname.startsWith('/inquiries')) return 'decisions';
-  if (pathname.startsWith('/projects')) return 'decisions';
-  return 'decisions'; // default
+// --- Mode depth for computing transition direction ---
+const MODE_DEPTH: Record<SidebarMode['mode'], number> = {
+  home: 0,
+  project: 1,
+  case: 2,
+};
+
+/** Derive the sidebar mode from the current pathname */
+function deriveSidebarMode(pathname: string): SidebarMode {
+  // Case page: /cases/:id (or /cases/:id/anything)
+  const caseMatch = pathname.match(CASE_ID_RE);
+  if (caseMatch) return { mode: 'case', caseId: caseMatch[1] };
+
+  // Project page: /projects/:id (or /projects/:id/anything)
+  const projectMatch = pathname.match(PROJECT_ID_RE);
+  if (projectMatch) return { mode: 'project', projectId: projectMatch[1] };
+
+  // Everything else: home (/, /chat, /chat/:id, /projects, /inquiries, etc.)
+  return { mode: 'home' };
 }
 
-/** Map SidebarTab to the legacy RailSection for backwards compat */
-function tabToRailSection(tab: SidebarTab): RailSection {
-  return tab === 'threads' ? 'conversations' : 'cases';
-}
-
-/** Derive the panel mode from the pathname */
-function derivePanelMode(pathname: string): PanelMode {
-  // Home shows decisions panel
-  if (pathname === '/') return { section: 'cases' };
-
-  if (pathname.startsWith('/chat')) {
-    const match = pathname.match(CHAT_THREAD_RE);
-    return match
-      ? { section: 'conversations', activeThreadId: match[1] }
-      : { section: 'conversations' };
+/** Compute transition direction between two sidebar modes */
+function computeTransitionDirection(
+  prev: SidebarMode,
+  next: SidebarMode
+): TransitionDirection {
+  if (prev.mode === next.mode) {
+    // Same mode — no transition (or lateral move within same level)
+    return null;
   }
-
-  if (pathname.startsWith('/cases')) {
-    const match = pathname.match(CASE_ID_RE);
-    return match
-      ? { section: 'cases', activeCaseId: match[1] }
-      : { section: 'cases' };
-  }
-
-  if (pathname.startsWith('/inquiries')) {
-    return { section: 'cases' };
-  }
-
-  if (pathname.startsWith('/projects')) {
-    const match = pathname.match(PROJECT_ID_RE);
-    return match
-      ? { section: 'cases', activeProjectId: match[1] }
-      : { section: 'cases' };
-  }
-
-  return { section: 'conversations' };
+  const prevDepth = MODE_DEPTH[prev.mode];
+  const nextDepth = MODE_DEPTH[next.mode];
+  return nextDepth > prevDepth ? 'forward' : 'back';
 }
 
 export interface UseNavigationStateReturn {
-  // State
-  /** Active sidebar tab — the source of truth for which panel content to show */
-  activeTab: SidebarTab;
-  /** @deprecated Use activeTab. Derived for backwards compatibility. */
-  railSection: RailSection;
-  panelMode: PanelMode;
+  // --- New primary API ---
+
+  /** Current sidebar mode — the source of truth for which sidebar content to show */
+  sidebarMode: SidebarMode;
+  /** Direction of last mode transition (for slide animation) */
+  transitionDirection: TransitionDirection;
+
+  // --- Common state ---
+
   isPanelCollapsed: boolean;
   isTransitioning: boolean;
   /** Whether the overlay sidebar is open (used on narrow/mobile screens) */
   isOverlayOpen: boolean;
 
-  // Actions
-  /** Manually switch the sidebar tab (overrides URL-derived tab until next navigation) */
-  setActiveTab: (tab: SidebarTab) => void;
+  // --- Actions ---
+
   setPanelCollapsed: (collapsed: boolean) => void;
   togglePanel: () => void;
   /** Open the sidebar as a floating overlay (for narrow/mobile screens) */
@@ -96,51 +89,70 @@ export interface UseNavigationStateReturn {
   /** Close the overlay sidebar */
   closeOverlay: () => void;
 
-  // Derived
-  activeCaseId: string | null;
-  activeThreadId: string | null;
+  // --- Derived ---
 
-  // Navigation helpers
+  activeCaseId: string | null;
+  activeProjectId: string | null;
+  activeThreadId: string | null;
+  /** Which project sub-page is active: 'home' | 'explore' | 'sources' | 'cases' | 'chat' | null */
+  activeProjectSubPage: string | null;
+
+  // --- Navigation helpers ---
+
   navigateToConversation: (threadId: string) => void;
   navigateToCase: (caseId: string) => void;
+  navigateToProject: (projectId: string) => void;
   navigateToHome: () => void;
   navigateToSearch: () => void;
+
+  // --- Override ---
+
+  /** Override sidebar mode with data-driven value (e.g., thread → project) */
+  setSidebarModeOverride: (mode: SidebarMode | null) => void;
 }
 
 export function useNavigationState(): UseNavigationStateReturn {
   const pathname = usePathname();
   const router = useRouter();
 
-  // Derive tab and panel mode from URL
-  const urlDerivedTab = deriveTab(pathname);
-  const panelMode = derivePanelMode(pathname);
+  // Derive sidebar mode from URL
+  const urlSidebarMode = deriveSidebarMode(pathname);
 
-  // Active tab state: URL-derived by default, manually overridable
-  const [tabOverride, setTabOverride] = useState<SidebarTab | null>(null);
-  const prevPathnameRef = useRef(pathname);
+  // Data-driven override (e.g., thread belongs to a project → show project sidebar)
+  const [sidebarModeOverride, setSidebarModeOverride] = useState<SidebarMode | null>(null);
 
-  // Reset tab override on pathname change (URL navigation takes precedence)
+  // Clear override when URL-derived mode changes (user navigated to a different route)
   useEffect(() => {
-    if (prevPathnameRef.current !== pathname) {
-      setTabOverride(null);
-      prevPathnameRef.current = pathname;
+    setSidebarModeOverride(null);
+  }, [urlSidebarMode.mode]);
+
+  // Effective sidebar mode: override takes precedence over URL-derived
+  const sidebarMode = sidebarModeOverride ?? urlSidebarMode;
+
+  // Track previous mode for transition direction
+  const prevModeRef = useRef<SidebarMode>(sidebarMode);
+  const [transitionDirection, setTransitionDirection] = useState<TransitionDirection>(null);
+
+  // Transition state
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Detect mode changes and compute transition direction
+  useEffect(() => {
+    const prev = prevModeRef.current;
+    const next = sidebarMode;
+
+    if (prev.mode !== next.mode) {
+      const dir = computeTransitionDirection(prev, next);
+      setTransitionDirection(dir);
+      setIsTransitioning(true);
+      const timer = setTimeout(() => setIsTransitioning(false), 200);
+      prevModeRef.current = next;
+      return () => clearTimeout(timer);
     }
-  }, [pathname]);
 
-  // Effective active tab: override > URL-derived
-  const activeTab = tabOverride ?? urlDerivedTab;
-
-  // Legacy railSection derived from activeTab
-  const railSection = tabToRailSection(activeTab);
-
-  // Manual tab switch (sets override, doesn't navigate)
-  const setActiveTab = useCallback((tab: SidebarTab) => {
-    setTabOverride(tab);
-    // Persist preference for ambiguous routes (like home)
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(TAB_STORAGE_KEY, tab);
-    }
-  }, []);
+    // Same mode but different ID (e.g., switching cases) — update ref without animating
+    prevModeRef.current = next;
+  }, [sidebarMode]);
 
   // Panel collapse state (persisted)
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(() => {
@@ -150,20 +162,6 @@ export function useNavigationState(): UseNavigationStateReturn {
 
   // Overlay sidebar state (for narrow/mobile screens)
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
-
-  // Transition state
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const prevTabRef = useRef<SidebarTab>(activeTab);
-
-  // Detect tab changes and trigger transition animation
-  useEffect(() => {
-    if (prevTabRef.current !== activeTab) {
-      setIsTransitioning(true);
-      const timer = setTimeout(() => setIsTransitioning(false), 200);
-      prevTabRef.current = activeTab;
-      return () => clearTimeout(timer);
-    }
-  }, [activeTab]);
 
   // Persist panel collapse state
   const setPanelCollapsed = useCallback((collapsed: boolean) => {
@@ -190,22 +188,33 @@ export function useNavigationState(): UseNavigationStateReturn {
     setIsOverlayOpen(false);
   }, [pathname]);
 
-  // Derived values
+  // --- Derived values ---
+
   const activeCaseId = useMemo(() => {
-    if (panelMode.section === 'cases' && 'activeCaseId' in panelMode) {
-      return panelMode.activeCaseId ?? null;
-    }
+    return sidebarMode.mode === 'case' ? sidebarMode.caseId : null;
+  }, [sidebarMode]);
+
+  const activeProjectId = useMemo(() => {
+    if (sidebarMode.mode === 'project') return sidebarMode.projectId;
+    if (sidebarMode.mode === 'case') return sidebarMode.projectId ?? null;
     return null;
-  }, [panelMode]);
+  }, [sidebarMode]);
 
   const activeThreadId = useMemo(() => {
-    if (panelMode.section === 'conversations' && 'activeThreadId' in panelMode) {
-      return panelMode.activeThreadId ?? null;
-    }
-    return null;
-  }, [panelMode]);
+    const match = pathname.match(CHAT_THREAD_RE);
+    return match ? match[1] : null;
+  }, [pathname]);
 
-  // Navigation helpers
+  /** Which project sub-page is active (home, explore, sources, cases, chat). */
+  const activeProjectSubPage = useMemo(() => {
+    if (sidebarMode.mode !== 'project') return null;
+    // Extract sub-path after /projects/[id]/
+    const match = pathname.match(/^\/projects\/[^/]+\/([^/]+)/);
+    return match ? match[1] : 'home';
+  }, [pathname, sidebarMode]);
+
+  // --- Navigation helpers ---
+
   const navigateToConversation = useCallback(
     (threadId: string) => {
       router.push(`/chat/${threadId}`);
@@ -216,6 +225,13 @@ export function useNavigationState(): UseNavigationStateReturn {
   const navigateToCase = useCallback(
     (caseId: string) => {
       router.push(`/cases/${caseId}`);
+    },
+    [router]
+  );
+
+  const navigateToProject = useCallback(
+    (projectId: string) => {
+      router.push(`/projects/${projectId}`);
     },
     [router]
   );
@@ -232,22 +248,29 @@ export function useNavigationState(): UseNavigationStateReturn {
   }, []);
 
   return {
-    activeTab,
-    railSection,
-    panelMode,
+    sidebarMode,
+    transitionDirection,
+
     isPanelCollapsed,
     isTransitioning,
     isOverlayOpen,
-    setActiveTab,
+
     setPanelCollapsed,
     togglePanel,
     openOverlay,
     closeOverlay,
+
     activeCaseId,
+    activeProjectId,
     activeThreadId,
+    activeProjectSubPage,
+
     navigateToConversation,
     navigateToCase,
+    navigateToProject,
     navigateToHome,
     navigateToSearch,
+
+    setSidebarModeOverride,
   };
 }

@@ -80,29 +80,6 @@ def chunk_by_tokens(
     return chunks
 
 
-def estimate_char_to_token_ratio(text: str, encoding_name: str = "cl100k_base") -> float:
-    """
-    Estimate character-to-token ratio for a text
-    
-    Useful for quick estimation without full tokenization.
-    Average English text: ~4 chars per token
-    
-    Args:
-        text: Sample text
-        encoding_name: Tiktoken encoding
-    
-    Returns:
-        Ratio of characters to tokens
-    """
-    encoding = tiktoken.get_encoding(encoding_name)
-    tokens = encoding.encode(text)
-    
-    if len(tokens) == 0:
-        return 4.0  # Default estimate
-    
-    return len(text) / len(tokens)
-
-
 def split_text_to_fit_tokens(
     text: str,
     max_tokens: int,

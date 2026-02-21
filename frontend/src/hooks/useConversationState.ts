@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { chatAPI } from '@/lib/api/chat';
@@ -37,6 +37,44 @@ export function useConversationState({ threadId }: UseConversationStateOptions) 
     enabled: !!threadId,
     staleTime: 60_000,
   });
+
+  // Load existing conversation structure on mount
+  const { data: existingStructure } = useQuery({
+    queryKey: ['thread-structure', threadId],
+    queryFn: () => chatAPI.getConversationStructure(threadId),
+    enabled: !!threadId,
+    staleTime: 30_000,
+  });
+
+  // Load episode history on mount
+  const { data: episodesData } = useQuery({
+    queryKey: ['thread-episodes', threadId],
+    queryFn: () => chatAPI.getEpisodes(threadId),
+    enabled: !!threadId,
+    staleTime: 30_000,
+  });
+
+  // Hydrate companion with existing structure.
+  // Including threadId ensures that if the component is reused across navigations,
+  // the effect re-runs with the correct thread's data (React Query scopes by key,
+  // but the effect must re-fire when the key changes).
+  useEffect(() => {
+    if (existingStructure) {
+      companion.streamCallbacks.onCompanionStructure?.(existingStructure);
+    }
+    // Only run when existingStructure or threadId changes, not on every companion change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingStructure, threadId]);
+
+  // Hydrate companion with episode history (same threadId guard as above)
+  useEffect(() => {
+    if (episodesData) {
+      // Only load sealed episodes into history (active one tracked via currentEpisode)
+      const sealedEpisodes = episodesData.episodes.filter(ep => ep.sealed);
+      companion.setEpisodeHistory(sealedEpisodes);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodesData, threadId]);
 
   // Create new thread and navigate to it
   const handleNewThread = useCallback(async () => {

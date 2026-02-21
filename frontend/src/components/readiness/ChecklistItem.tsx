@@ -8,6 +8,7 @@
 'use client';
 
 import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import type { ReadinessChecklistItemData } from './ReadinessChecklist';
 
 interface ChecklistItemProps {
@@ -45,9 +46,10 @@ export function ChecklistItem({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <button
+            <Button
+              variant="ghost"
               onClick={hasContext ? onExpand : undefined}
-              className={`text-left flex-1 ${hasContext ? 'cursor-pointer' : 'cursor-default'}`}
+              className={`text-left flex-1 h-auto p-0 justify-start ${hasContext ? 'cursor-pointer' : 'cursor-default'}`}
             >
               <div>
                 <span
@@ -65,12 +67,14 @@ export function ChecklistItem({
                   </div>
                 )}
               </div>
-            </button>
+            </Button>
 
             {hasContext && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={onExpand}
-                className="flex-shrink-0 p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors"
+                className="flex-shrink-0 p-1 h-auto w-auto"
                 aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
               >
                 <svg
@@ -88,7 +92,7 @@ export function ChecklistItem({
                     d="M19 9l-7 7-7-7"
                   />
                 </svg>
-              </button>
+              </Button>
             )}
           </div>
 
@@ -105,8 +109,8 @@ export function ChecklistItem({
               )}
 
               {item.completion_note && item.is_complete && (
-                <div className="text-xs text-neutral-600 dark:text-neutral-400 pl-3 border-l-2 border-green-500">
-                  <span className="font-medium text-green-700 dark:text-green-400">
+                <div className="text-xs text-neutral-600 dark:text-neutral-400 pl-3 border-l-2 border-success-500">
+                  <span className="font-medium text-success-700 dark:text-success-400">
                     Completed:{' '}
                   </span>
                   {item.completion_note}
@@ -145,12 +149,14 @@ export function ChecklistItem({
               </span>
             )}
 
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onDelete}
-              className="ml-auto text-xs text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              className="ml-auto text-xs text-neutral-400 hover:text-error-600 dark:hover:text-error-400 h-auto px-1 py-0"
             >
               Delete
-            </button>
+            </Button>
           </div>
         </div>
       </div>

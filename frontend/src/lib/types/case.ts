@@ -22,7 +22,7 @@ export interface Stakeholder {
 export interface Case {
   id: string;
   title: string;
-  status: 'draft' | 'active' | 'archived';
+  status: 'draft' | 'active' | 'decided' | 'archived';
   stakes: 'low' | 'medium' | 'high';
   position: string;
   // User-stated epistemic confidence
@@ -59,6 +59,16 @@ export interface Case {
   updated_at: string;
   // Active skills (from CaseSerializer.active_skills_summary)
   active_skills_summary?: Array<{ id: string; name: string; domain: string }>;
+  // Decision lifecycle (from CaseWithDecisionSerializer, only on project-filtered list)
+  plan_stage?: 'exploring' | 'investigating' | 'synthesizing' | 'ready';
+  decision_summary?: {
+    resolution_type: string;
+    decided_at: string | null;
+    outcome_check_date: string | null;
+    outcome_status: 'pending' | 'overdue' | 'positive' | 'negative' | 'neutral';
+    confidence_level: number;
+  } | null;
+  risk_indicator?: number;
 }
 
 export interface CaseAnalysisResponse {
@@ -103,8 +113,8 @@ export interface WorkingDocument {
   title: string;
   content_markdown: string;
   edit_friction: 'low' | 'high' | 'readonly';
-  ai_structure: Record<string, any>;
-  highlighted_assumptions?: any[];
+  ai_structure: Record<string, unknown>;
+  highlighted_assumptions?: Array<{ text: string; status: string; risk_level?: string }>;
   generated_by_ai: boolean;
   agent_type: string;
   times_cited: number;
@@ -317,5 +327,41 @@ export interface SectionJudgmentSummary {
   mismatches: SectionJudgmentMismatch[];
   rated_count: number;
   total_count: number;
+}
+
+// ── Decision / Resolution Types ─────────────────────────────────
+
+export type ResolutionType = 'resolved' | 'closed';
+
+export interface OutcomeNote {
+  date: string;
+  note: string;
+  sentiment: 'positive' | 'neutral' | 'negative';
+}
+
+export interface DecisionRecord {
+  id: string;
+  case: string;
+  resolution_type: ResolutionType;
+  resolution_profile: string;     // LLM-generated narrative
+  decision_text: string;
+  key_reasons: string[];
+  caveats: string;
+  linked_assumption_ids: string[];
+  decided_at: string;
+  outcome_check_date?: string;    // ISO date
+  outcome_notes: OutcomeNote[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResolutionDraft {
+  resolution_type: ResolutionType;
+  decision_text: string;
+  key_reasons: string[];
+  caveats: string;
+  linked_assumption_ids: string[];
+  outcome_check_date?: string;
+  resolution_profile: string;
 }
 

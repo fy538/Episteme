@@ -79,10 +79,10 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
         
         # Emit event for tracking
         from apps.events.services import EventService
-        from apps.events.models import ActorType
-        
+        from apps.events.models import ActorType, EventType
+
         EventService.append(
-            event_type='CONVERSATION_ANALYZED_FOR_AGENT',
+            event_type=EventType.CONVERSATION_ANALYZED_FOR_AGENT,
             payload=inflection,
             actor_type=ActorType.SYSTEM,
             thread_id=thread.id,
@@ -129,27 +129,30 @@ def assistant_response_workflow(thread_id: str, user_message_id: str):
 
 
 def _update_document_progress(doc, stage, stage_label, stage_index, counts=None,
-                               *, _last=[None], total_stages=5):
+                               *, total_stages=5):
     """Write progress to document for SSE streaming.
 
-    Deduplicates writes when stage hasn't changed (prevents hot-loop
-    DB writes if a callback fires repeatedly within the same stage).
+    Deduplicates writes when stage hasn't changed (prevents hot-loop DB
+    writes if a callback fires repeatedly within the same stage).
+    Uses the document's own persisted progress state (not module globals)
+    so Celery worker processes cannot leak cross-task progress state.
     """
-    prev = _last[0]
-    same_stage = prev and prev == (stage, stage_index)
+    existing_progress = doc.processing_progress or {}
+    same_stage = (
+        existing_progress.get('stage') == stage
+        and existing_progress.get('stage_index') == stage_index
+    )
 
     if same_stage and counts is None:
         return
 
-    _last[0] = (stage, stage_index)
-
-    started = doc.processing_progress.get('started_at', timezone.now().isoformat())
+    started = existing_progress.get('started_at', timezone.now().isoformat())
     doc.processing_progress = {
         'stage': stage,
         'stage_label': stage_label,
         'stage_index': stage_index,
         'total_stages': total_stages,
-        'counts': counts or doc.processing_progress.get('counts', {}),
+        'counts': counts or existing_progress.get('counts', {}),
         'started_at': started,
         'updated_at': timezone.now().isoformat(),
         'error': None,
@@ -160,18 +163,17 @@ def _update_document_progress(doc, stage, stage_label, stage_index, counts=None,
 @shared_task
 def process_document_workflow(document_id: str):
     """
-    Two-phase document processing pipeline.
+    Document processing pipeline.
 
-    Phase 1 (user-facing, fast — ~15-30s):
+    Stages (user-facing, fast — ~10-20s):
     0. received — Document received
     1. chunking — Chunk document
     2. embedding — Generate embeddings
-    3. extracting_graph — Extract graph nodes/edges from document
-    4. completed — Extraction complete, document structure available
+    3. completed — Processing complete
 
-    Phase 2 (background, deferred — ~30-120s):
-    Dispatched as integrate_document_workflow after Phase 1 completes.
-    Integrates extracted nodes with existing knowledge graph.
+    Background tasks dispatched after embedding:
+    - Thematic summary generation (fast first-pass, ~3s)
+    - Hierarchical clustering + insight discovery (~10-30s)
 
     Progress is written to document.processing_progress (JSONField)
     and streamed to the frontend via SSE.
@@ -181,13 +183,12 @@ def process_document_workflow(document_id: str):
     from apps.events.services import EventService
     from apps.events.models import EventType, ActorType
 
-    # Phase 1 uses 5 stages (0-4) — no integration stage shown to user
-    _last_stage = [None]
-
+    # Phase 1 uses 4 stages (0-3): received → chunking → embedding → completed
+    # (Graph extraction removed — replaced by hierarchical clustering)
     def _update_progress(doc, stage, stage_label, stage_index, counts=None):
         _update_document_progress(
             doc, stage, stage_label, stage_index, counts,
-            _last=_last_stage, total_stages=5,
+            total_stages=4,
         )
 
     try:
@@ -202,68 +203,98 @@ def process_document_workflow(document_id: str):
 
         DocumentService.process_document(document, on_progress=on_doc_progress)
 
-        # Stage 3: Extract graph nodes
-        _update_progress(
-            document, 'extracting_graph', 'Extracting structure...', 3,
-            {'chunks': document.chunk_count},
-        )
-
-        document.extraction_status = 'extracting'
-        document.extraction_error = ''
-        document.save(update_fields=['extraction_status', 'extraction_error'])
-
-        from apps.graph.extraction import extract_nodes_from_document
-
-        new_node_ids = extract_nodes_from_document(
-            document_id=str(document.id),
-            project_id=str(document.project_id),
-        )
-
-        # Count node types for progress
-        from apps.graph.models import Node
-        node_type_counts = {}
-        if new_node_ids:
-            from django.db.models import Count
-            type_qs = (
-                Node.objects.filter(id__in=new_node_ids)
-                .values('node_type')
-                .annotate(count=Count('id'))
+        # ── Thematic summary (non-blocking, parallel) ─────────
+        # Dispatch thematic summary generation as a fast first-pass (~3s).
+        # Runs as a separate Celery task so it does NOT block the main pipeline.
+        #
+        # Skip if the project already has a full/generating summary — no point
+        # in re-creating a thematic when a better one exists.
+        try:
+            from apps.graph.models import ProjectSummary, SummaryStatus
+            current_status = (
+                ProjectSummary.objects
+                .filter(project_id=document.project_id)
+                .exclude(status__in=[SummaryStatus.FAILED])
+                .order_by('-created_at')
+                .values_list('status', flat=True)
+                .first()
             )
-            node_type_counts = {row['node_type']: row['count'] for row in type_qs}
+            skip_statuses = {
+                SummaryStatus.FULL,
+                SummaryStatus.GENERATING,
+                SummaryStatus.PARTIAL,
+            }
+            if current_status and current_status in skip_statuses:
+                logger.info(
+                    "thematic_summary_skipped_existing",
+                    extra={
+                        'document_id': document_id,
+                        'project_id': str(document.project_id),
+                        'current_status': current_status,
+                    },
+                )
+            else:
+                from apps.graph.tasks import generate_thematic_summary_task
+                generate_thematic_summary_task.delay(
+                    project_id=str(document.project_id),
+                )
+                logger.info(
+                    "thematic_summary_dispatched",
+                    extra={
+                        'document_id': document_id,
+                        'project_id': str(document.project_id),
+                    },
+                )
+        except Exception:
+            # Thematic summary is best-effort; failure must not block pipeline
+            logger.warning(
+                "thematic_summary_dispatch_failed",
+                extra={'document_id': document_id},
+                exc_info=True,
+            )
 
-        graph_counts = {
-            'chunks': document.chunk_count,
-            'claims': node_type_counts.get('claim', 0),
-            'assumptions': node_type_counts.get('assumption', 0),
-            'tensions': node_type_counts.get('tension', 0),
-            'edges': 0,
-        }
+        # ── Hierarchical clustering (non-blocking, debounced) ──────
+        # Builds the multi-level cluster tree for the project landscape view.
+        # Runs in background; does NOT block the main pipeline.
+        #
+        # Plan 6: Debounce rapid uploads — schedule the hierarchy build
+        # with a 30-second countdown so rapid uploads don't trigger N
+        # separate builds. The task itself has two safety nets:
+        #   1. cache.add lock — prevents concurrent builds (skips if locked)
+        #   2. stale check — if chunks grew during the build, re-dispatches
+        # So even if multiple delayed tasks fire, only one builds, and
+        # it automatically re-triggers if it missed newly-uploaded docs.
+        HIERARCHY_REBUILD_DELAY = 30  # seconds
+        try:
+            from apps.graph.tasks import build_cluster_hierarchy_task
 
-        node_parts = []
-        if graph_counts['claims']:
-            node_parts.append(f"{graph_counts['claims']} claims")
-        if graph_counts['assumptions']:
-            node_parts.append(f"{graph_counts['assumptions']} assumptions")
-        if node_type_counts.get('evidence', 0):
-            node_parts.append(f"{node_type_counts['evidence']} evidence nodes")
-        node_summary = ', '.join(node_parts) if node_parts else f'{len(new_node_ids)} nodes'
+            build_cluster_hierarchy_task.apply_async(
+                kwargs={'project_id': str(document.project_id)},
+                countdown=HIERARCHY_REBUILD_DELAY,
+            )
+            logger.info(
+                "hierarchy_clustering_scheduled",
+                extra={
+                    'document_id': document_id,
+                    'project_id': str(document.project_id),
+                    'delay_seconds': HIERARCHY_REBUILD_DELAY,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "hierarchy_clustering_dispatch_failed",
+                extra={'document_id': document_id},
+                exc_info=True,
+            )
 
-        _update_progress(
-            document, 'extracting_graph', f'Found {node_summary}', 3, graph_counts,
-        )
-
-        logger.info(
-            "graph_phase_a_complete",
-            extra={'document_id': document_id, 'nodes_created': len(new_node_ids)},
-        )
-
-        # Mark extraction complete — user sees "done" now
-        document.extraction_status = 'extracted'
+        # Stage 3: Done — hierarchical clustering runs in background
+        # (Graph extraction removed — replaced by cluster hierarchy + insight discovery)
+        document.extraction_status = 'completed'
         document.save(update_fields=['extraction_status'])
 
-        # Stage 4: Done (from user's perspective)
         _update_progress(
-            document, 'completed', 'Processing complete', 4, graph_counts,
+            document, 'completed', 'Processing complete', 3,
+            {'chunks': document.chunk_count},
         )
 
         EventService.append(
@@ -272,25 +303,15 @@ def process_document_workflow(document_id: str):
                 'workflow': 'process_document',
                 'document_id': str(document.id),
                 'chunks': document.chunk_count,
-                'nodes_created': len(new_node_ids),
             },
             actor_type=ActorType.SYSTEM,
             case_id=document.case_id,
         )
 
-        # Dispatch Phase 2: background integration
-        new_node_id_strs = [str(nid) for nid in new_node_ids]
-        if new_node_ids:
-            integrate_document_workflow.delay(
-                document_id=document_id,
-                new_node_ids=new_node_id_strs,
-            )
-
         return {
             'status': 'completed',
             'document_id': str(document.id),
             'chunks_created': document.chunk_count,
-            'nodes_created': len(new_node_ids),
         }
 
     except Exception as e:
@@ -410,6 +431,35 @@ def integrate_document_workflow(document_id: str, new_node_ids: list):
             },
         )
 
+        # ── Auto-trigger full summary (thematic → full upgrade) ──
+        # After integration completes, check if a full summary should be
+        # generated. This upgrades the thematic summary with argumentative
+        # depth (citations, tensions, attention needed).
+        try:
+            from apps.graph.tasks import generate_project_summary
+            from apps.graph.summary_service import ProjectSummaryService
+            should, reason = ProjectSummaryService.should_generate(
+                document.project_id
+            )
+            if should:
+                generate_project_summary.delay(
+                    str(document.project_id), force=True
+                )
+                logger.info(
+                    "full_summary_generation_triggered",
+                    extra={
+                        'document_id': document_id,
+                        'project_id': str(document.project_id),
+                        'reason': reason,
+                    },
+                )
+        except Exception:
+            logger.warning(
+                "full_summary_trigger_failed",
+                extra={'document_id': document_id},
+                exc_info=True,
+            )
+
         return {
             'status': 'completed',
             'document_id': document_id,
@@ -429,7 +479,7 @@ def integrate_document_workflow(document_id: str, new_node_ids: list):
             document.save(update_fields=['extraction_status', 'extraction_error'])
         except Exception:
             logger.exception("integration_status_update_failed")
-        return {'status': 'failed', 'error': str(e)[:500]}
+        return {'status': 'failed', 'error': 'Document integration failed.'}
 
 
 @shared_task
@@ -537,7 +587,7 @@ def batch_integrate_documents(project_id: str, document_node_map: dict):
             doc.extraction_status = 'integration_failed'
             doc.extraction_error = f"Batch integration failed: {str(e)[:500]}"
             doc.save(update_fields=['extraction_status', 'extraction_error'])
-        return {'status': 'failed', 'error': str(e)[:500]}
+        return {'status': 'failed', 'error': 'Batch document integration failed.'}
 
 
 @shared_task
@@ -623,6 +673,5 @@ def generate_research_workflow(inquiry_id: str, user_id: int):
         )
         return {
             'status': 'failed',
-            'error': str(e)
+            'error': 'Research workflow generation failed.'
         }
-

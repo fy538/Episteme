@@ -58,7 +58,6 @@ export function useStreamingChat({
   const [isLoading, setIsLoading] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [pendingSince, setPendingSince] = useState<number | null>(null);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [ttft, setTtft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +97,16 @@ export function useStreamingChat({
         const msgs = await chatAPI.getMessages(threadId);
         setMessages(msgs);
         setError(null);
+
+        // Surface any pending position update proposals from loaded messages
+        for (const msg of msgs) {
+          if (msg.metadata?.position_update_proposal) {
+            streamCallbacksRef.current?.onLoadedPositionProposal?.(
+              msg.id,
+              msg.metadata.position_update_proposal,
+            );
+          }
+        }
       } catch (err) {
         console.error('Failed to load messages:', err);
         setError(err instanceof Error ? err.message : 'Failed to load messages');
@@ -113,7 +122,7 @@ export function useStreamingChat({
     setIsLoading(true);
     setIsWaitingForResponse(true);
     const requestStart = Date.now();
-    setPendingSince(requestStart);
+
     setTtft(null);
     setError(null);
     setLastFailedMessage(null);
@@ -166,6 +175,7 @@ export function useStreamingChat({
         content: '',
         event_id: '',
         metadata: { streaming: true, unified: true },
+        source_chunks: [],
         created_at: now,
       };
 
@@ -210,14 +220,51 @@ export function useStreamingChat({
             onGraphEdits: (summary) => {
               streamCallbacksRef.current?.onGraphEdits?.(summary);
             },
+            onPlanEdits: (data) => {
+              streamCallbacksRef.current?.onPlanEdits?.(data);
+            },
+            onOrientationEdits: (data) => {
+              streamCallbacksRef.current?.onOrientationEdits?.(data);
+            },
             onTitleUpdate: (title) => {
               streamCallbacksRef.current?.onTitleUpdate?.(title);
+            },
+            onCompanionStructure: (structure) => {
+              streamCallbacksRef.current?.onCompanionStructure?.(structure);
+            },
+            onResearchStarted: (data) => {
+              streamCallbacksRef.current?.onResearchStarted?.(data);
+            },
+            onSourceChunks: (chunks) => {
+              // Associate source chunks with the current assistant message
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === tempAssistantId
+                    ? { ...msg, source_chunks: chunks }
+                    : msg
+                )
+              );
+            },
+            onCaseSignal: (data) => {
+              streamCallbacksRef.current?.onCaseSignal?.(data);
+            },
+            onToolExecuted: (data) => {
+              streamCallbacksRef.current?.onToolExecuted?.(data);
+            },
+            onToolConfirmation: (data) => {
+              streamCallbacksRef.current?.onToolConfirmation?.(data);
+            },
+            onEpisodeSealed: (data) => {
+              streamCallbacksRef.current?.onEpisodeSealed?.(data);
+            },
+            onCurrentEpisodeUpdate: (info) => {
+              streamCallbacksRef.current?.onCurrentEpisodeUpdate?.(info);
             },
             onDone: (result) => {
               clearStreamTimeouts();
               setIsWaitingForResponse(false);
               setIsStreaming(false);
-              setPendingSince(null);
+
 
               // Replace temp ID with real message ID
               if (result.messageId) {
@@ -252,7 +299,6 @@ export function useStreamingChat({
           // Timeout aborts handled in timeout callbacks; user-initiated aborts are clean
           setIsStreaming(false);
           setIsWaitingForResponse(false);
-          setPendingSince(null);
           return;
         }
 
@@ -262,7 +308,6 @@ export function useStreamingChat({
         setMessages(prev => prev.filter(m => m.id !== tempAssistantId));
         setIsWaitingForResponse(false);
         setIsStreaming(false);
-        setPendingSince(null);
       }
     } catch (err) {
       console.error('[useStreamingChat] Send error:', err);
@@ -271,7 +316,6 @@ export function useStreamingChat({
       setError(err instanceof Error ? err.message : 'Failed to send message. Please try again.');
       setIsWaitingForResponse(false);
       setIsStreaming(false);
-      setPendingSince(null);
     } finally {
       setIsLoading(false);
       setAbortController(null);

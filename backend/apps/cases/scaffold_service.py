@@ -21,6 +21,7 @@ from apps.cases.scaffold_schemas import ScaffoldExtraction
 from apps.common.llm_providers import get_llm_provider
 from apps.events.services import EventService
 from apps.events.models import EventType, ActorType
+from apps.graph.models import ClusterHierarchy, ProjectInsight
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,45 @@ class CaseScaffoldService:
     """
 
     @classmethod
+    def _build_hierarchy_context(cls, project_id: uuid.UUID) -> Optional[str]:
+        """Build a brief project context string from hierarchy and insights."""
+        try:
+            hierarchy = ClusterHierarchy.objects.filter(
+                project_id=project_id, is_current=True, status='ready'
+            ).first()
+
+            themes = []
+            if hierarchy and isinstance(hierarchy.tree, dict):
+                for child in (hierarchy.tree.get('children') or []):
+                    if child.get('level') == 2 and child.get('label'):
+                        themes.append(child['label'])
+
+            insights = list(
+                ProjectInsight.objects.filter(
+                    orientation__project_id=project_id, status='active'
+                ).values_list('title', 'insight_type')[:10]
+            )
+
+            parts = []
+            if themes:
+                parts.append(f"Project themes: {', '.join(themes[:8])}")
+            if insights:
+                insight_lines = [f"- {title} ({itype})" for title, itype in insights]
+                parts.append("Key findings:\n" + "\n".join(insight_lines))
+
+            if not parts:
+                return None
+
+            return (
+                "The project's existing knowledge base has the following structure. "
+                "Use this to align your extraction with existing themes and findings.\n\n"
+                + "\n\n".join(parts)
+            )
+        except Exception as e:
+            logger.warning("Could not build project context for scaffolding: %s", e)
+            return None
+
+    @classmethod
     async def scaffold_from_chat(
         cls,
         transcript: list[dict],
@@ -97,8 +137,13 @@ class CaseScaffoldService:
         Returns:
             Dict with: case, brief, inquiries, sections, signals
         """
-        # 1. Extract structure via LLM (skill-aware if context provided)
-        extraction = await cls._extract_structure(transcript, skill_context=skill_context)
+        # 1. Extract structure via LLM (skill-aware + hierarchy-aware)
+        hierarchy_context = cls._build_hierarchy_context(project_id)
+        extraction = await cls._extract_structure(
+            transcript,
+            skill_context=skill_context,
+            hierarchy_context=hierarchy_context,
+        )
 
         # 1b. Generate a concise case title (keep extraction.decision_question intact)
         case_title = extraction.decision_question[:200] if extraction.decision_question else "Untitled Case"
@@ -224,6 +269,7 @@ class CaseScaffoldService:
         cls,
         transcript: list[dict],
         skill_context: Optional[dict] = None,
+        hierarchy_context: Optional[str] = None,
     ) -> ScaffoldExtraction:
         """
         Use LLM to extract decision structure from chat transcript.
@@ -231,6 +277,10 @@ class CaseScaffoldService:
         When skill_context is provided, domain knowledge is injected into
         the system prompt so the LLM can extract more relevant uncertainties,
         assumptions, and domain-specific constraints.
+
+        When hierarchy_context is provided, the project's existing themes and
+        findings are included so the LLM aligns its extraction with established
+        knowledge structure.
         """
         provider = get_llm_provider('fast')
 
@@ -250,6 +300,12 @@ class CaseScaffoldService:
                 "Use this knowledge to identify domain-specific uncertainties, "
                 "constraints, and assumptions that a generalist might miss.\n"
                 + skill_context['system_prompt_extension']
+            )
+        if hierarchy_context:
+            system_prompt += (
+                "\n\nThe user's project has an established knowledge base. "
+                "Align your extraction with this existing structure:\n"
+                + hierarchy_context
             )
 
         # Call LLM

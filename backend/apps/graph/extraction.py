@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import tiktoken
 from asgiref.sync import async_to_sync
 
+from apps.common.utils import parse_json_from_response
+
 from apps.common.vector_utils import (
     generate_embedding,
     generate_embeddings_batch,
@@ -25,6 +27,7 @@ from apps.common.vector_utils import (
 )
 from apps.projects.models import Document, DocumentChunk
 
+from .embedding_state import mark_embedding_failed, clear_embedding_failure
 from .models import (
     NodeType, NodeStatus, EdgeType,
     VALID_STATUSES_BY_TYPE, DEFAULT_STATUS_BY_TYPE,
@@ -219,19 +222,62 @@ def extract_nodes_from_document(
             from .models import Node
 
             needs_embedding = []
+            failed_node_ids = []
             for i, node in enumerate(created_nodes):
                 if i in cached_embeddings:
-                    node.embedding = cached_embeddings[i]
+                    cached = cached_embeddings[i]
+                    if cached is not None:
+                        node.embedding = cached
+                        node.properties = clear_embedding_failure(node.properties)
+                    else:
+                        node.embedding = None
+                        node.properties = mark_embedding_failed(
+                            node.properties, "cached_embedding_missing",
+                        )
+                        failed_node_ids.append(str(node.id))
                 else:
                     needs_embedding.append(node)
 
             if needs_embedding:
                 contents = [n.content for n in needs_embedding]
                 new_embeddings = generate_embeddings_batch(contents)
-                for node, emb in zip(needs_embedding, new_embeddings):
-                    node.embedding = emb
 
-            Node.objects.bulk_update(created_nodes, ['embedding'])
+                if len(new_embeddings) != len(needs_embedding):
+                    logger.warning(
+                        "Batch embedding result size mismatch",
+                        extra={
+                            'document_id': str(document_id),
+                            'expected': len(needs_embedding),
+                            'actual': len(new_embeddings),
+                        },
+                    )
+                    new_embeddings = (
+                        list(new_embeddings[:len(needs_embedding)])
+                        + [None] * max(0, len(needs_embedding) - len(new_embeddings))
+                    )
+
+                for node, emb in zip(needs_embedding, new_embeddings):
+                    if emb is not None:
+                        node.embedding = emb
+                        node.properties = clear_embedding_failure(node.properties)
+                    else:
+                        node.embedding = None
+                        node.properties = mark_embedding_failed(
+                            node.properties, "batch_embedding_missing",
+                        )
+                        failed_node_ids.append(str(node.id))
+
+            if failed_node_ids:
+                logger.warning(
+                    "Some nodes were created without embeddings",
+                    extra={
+                        'document_id': str(document_id),
+                        'failed_count': len(failed_node_ids),
+                        'failed_node_ids': failed_node_ids[:10],
+                    },
+                )
+
+            Node.objects.bulk_update(created_nodes, ['embedding', 'properties'])
         except Exception:
             logger.warning(
                 "Batch embedding generation failed for nodes",
@@ -589,6 +635,13 @@ def _deduplicate_nodes(
         logger.warning("Failed to generate embeddings for dedup, skipping", exc_info=True)
         return nodes, {}
 
+    if any(emb is None for emb in embeddings):
+        logger.warning(
+            "Dedup embeddings incomplete, skipping dedup",
+            extra={'missing_embeddings': sum(1 for emb in embeddings if emb is None)},
+        )
+        return nodes, {}
+
     import numpy as np
     emb_array = np.array(embeddings)
 
@@ -698,7 +751,7 @@ Output JSON:
 
     try:
         response_text = async_to_sync(_call)()
-        parsed = _parse_json_from_response(response_text)
+        parsed = parse_json_from_response(response_text)
         if parsed and isinstance(parsed, dict):
             # Apply importance updates
             updates_by_id = {
@@ -971,42 +1024,3 @@ def _match_source_chunks(
         logger.debug("Embedding fallback failed for chunk matching", exc_info=True)
 
     return []
-
-
-# ═══════════════════════════════════════════════════════════════════
-# JSON parsing (unchanged)
-# ═══════════════════════════════════════════════════════════════════
-
-def _parse_json_from_response(text: str) -> Any:
-    """Multi-strategy JSON extraction from LLM response."""
-    if not text:
-        return None
-
-    text = text.strip()
-
-    # Strategy 1: Direct parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 2: Extract from code fence
-    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Strategy 3: Find first [ to last ] (array) or { to } (object)
-    for open_char, close_char in [('[', ']'), ('{', '}')]:
-        first = text.find(open_char)
-        last = text.rfind(close_char)
-        if first != -1 and last > first:
-            try:
-                return json.loads(text[first:last + 1])
-            except json.JSONDecodeError:
-                pass
-
-    logger.warning("json_parse_failed", extra={"text_preview": text[:200]})
-    return None

@@ -65,21 +65,23 @@ export function SuggestionPopover({
             <span
               className={`text-xs px-1.5 py-0.5 rounded-full ${
                 confidencePercent >= 80
-                  ? 'bg-green-100 text-green-700'
+                  ? 'bg-success-100 text-success-700'
                   : confidencePercent >= 50
-                  ? 'bg-amber-100 text-amber-700'
+                  ? 'bg-warning-100 text-warning-700'
                   : 'bg-neutral-100 text-neutral-600'
               }`}
             >
               {confidencePercent}%
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-            className="text-neutral-400 hover:text-neutral-600 text-sm"
+            className="h-6 w-6 text-neutral-400 hover:text-neutral-600 text-sm"
           >
             &times;
-          </button>
+          </Button>
         </div>
 
         {/* Body */}
@@ -90,20 +92,20 @@ export function SuggestionPopover({
           {/* Current → Suggested diff */}
           {suggestion.current_content && suggestion.suggestion_type === 'replace' && (
             <div className="space-y-1.5">
-              <div className="bg-red-50 rounded px-2.5 py-1.5 text-sm">
-                <span className="text-xs font-medium text-red-500 block mb-0.5">Remove</span>
-                <span className="text-red-700 line-through">{suggestion.current_content}</span>
+              <div className="bg-error-50 rounded px-2.5 py-1.5 text-sm">
+                <span className="text-xs font-medium text-error-500 block mb-0.5">Remove</span>
+                <span className="text-error-700 line-through">{suggestion.current_content}</span>
               </div>
               {!isEditing ? (
-                <div className="bg-green-50 rounded px-2.5 py-1.5 text-sm">
-                  <span className="text-xs font-medium text-green-500 block mb-0.5">Add</span>
-                  <span className="text-green-800">{suggestion.suggested_content}</span>
+                <div className="bg-success-50 rounded px-2.5 py-1.5 text-sm">
+                  <span className="text-xs font-medium text-success-500 block mb-0.5">Add</span>
+                  <span className="text-success-800">{suggestion.suggested_content}</span>
                 </div>
               ) : (
                 <textarea
                   value={editedContent}
                   onChange={(e) => setEditedContent(e.target.value)}
-                  className="w-full border border-green-300 rounded px-2.5 py-1.5 text-sm text-green-800 bg-green-50 focus:outline-none focus:ring-1 focus:ring-green-400"
+                  className="w-full border border-success-300 rounded px-2.5 py-1.5 text-sm text-success-800 bg-success-50 focus:outline-none focus:ring-1 focus:ring-success-400"
                   rows={3}
                 />
               )}
@@ -112,15 +114,15 @@ export function SuggestionPopover({
 
           {/* Add-only suggestion */}
           {suggestion.suggestion_type === 'add' && (
-            <div className="bg-green-50 rounded px-2.5 py-1.5 text-sm">
-              <span className="text-xs font-medium text-green-500 block mb-0.5">Insert</span>
+            <div className="bg-success-50 rounded px-2.5 py-1.5 text-sm">
+              <span className="text-xs font-medium text-success-500 block mb-0.5">Insert</span>
               {!isEditing ? (
-                <span className="text-green-800">{suggestion.suggested_content}</span>
+                <span className="text-success-800">{suggestion.suggested_content}</span>
               ) : (
                 <textarea
                   value={editedContent}
                   onChange={(e) => setEditedContent(e.target.value)}
-                  className="w-full border border-green-300 rounded px-2.5 py-1.5 text-sm text-green-800 bg-green-50 focus:outline-none focus:ring-1 focus:ring-green-400 mt-1"
+                  className="w-full border border-success-300 rounded px-2.5 py-1.5 text-sm text-success-800 bg-success-50 focus:outline-none focus:ring-1 focus:ring-success-400 mt-1"
                   rows={3}
                 />
               )}
@@ -129,9 +131,9 @@ export function SuggestionPopover({
 
           {/* Delete suggestion */}
           {suggestion.suggestion_type === 'delete' && suggestion.current_content && (
-            <div className="bg-red-50 rounded px-2.5 py-1.5 text-sm">
-              <span className="text-xs font-medium text-red-500 block mb-0.5">Delete</span>
-              <span className="text-red-700 line-through">{suggestion.current_content}</span>
+            <div className="bg-error-50 rounded px-2.5 py-1.5 text-sm">
+              <span className="text-xs font-medium text-error-500 block mb-0.5">Delete</span>
+              <span className="text-error-700 line-through">{suggestion.current_content}</span>
             </div>
           )}
         </div>
@@ -140,12 +142,14 @@ export function SuggestionPopover({
         <div className="px-4 py-2.5 border-t border-neutral-100 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {!isEditing && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setIsEditing(true)}
-                className="text-xs text-neutral-500 hover:text-neutral-700 underline"
+                className="text-xs text-neutral-500 hover:text-neutral-700 underline h-7 px-1"
               >
                 Edit first
-              </button>
+              </Button>
             )}
           </div>
           <div className="flex items-center gap-2">

@@ -10,6 +10,7 @@
 'use client';
 
 import { MessageInput } from '@/components/chat/MessageInput';
+import { PageTitle } from '@/components/ui/headings';
 import { useHomeState } from '@/hooks/useHomeState';
 import { cn } from '@/lib/utils';
 
@@ -27,9 +28,9 @@ export default function ChatLandingPage() {
         <div className="w-full max-w-2xl space-y-4">
           {/* Welcome text */}
           <div className="text-center mb-2">
-            <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
+            <PageTitle className="font-semibold">
               What would you like to explore?
-            </h1>
+            </PageTitle>
             <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-2">
               Start a conversation, or pick one from the sidebar.
             </p>

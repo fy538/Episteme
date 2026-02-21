@@ -316,6 +316,12 @@ class GraphServiceTests(TestCase):
         self.assertEqual(health['untested_assumptions'], 1)
         self.assertIn('claim', health['nodes_by_type'])
 
+    def test_compute_graph_health_query_budget(self):
+        """Health stats should be computed with a small fixed query budget."""
+        with self.assertNumQueries(4):
+            health = GraphService.compute_graph_health(self.project.id)
+        self.assertEqual(health['total_nodes'], 0)
+
     @patch('apps.graph.services.generate_embedding', return_value=[0.1] * 384)
     def test_update_node(self, mock_embed):
         node = GraphService.create_node(
@@ -340,6 +346,62 @@ class GraphServiceTests(TestCase):
         node_id = node.id
         GraphService.remove_node(node_id)
         self.assertFalse(Node.objects.filter(id=node_id).exists())
+
+    @patch('apps.graph.services.generate_embedding', return_value=None)
+    def test_create_node_marks_embedding_failure_when_embedding_missing(self, mock_embed):
+        node = GraphService.create_node(
+            project=self.project,
+            node_type='claim',
+            content='Embedding may fail for this content',
+            source_type='user_edit',
+            status='supported',
+            created_by=self.user,
+        )
+        self.assertIsNone(node.embedding)
+        self.assertEqual(node.properties.get('_embedding_status'), 'failed')
+        self.assertIn('returned_none', node.properties.get('_embedding_error', ''))
+        mock_embed.assert_called_once()
+
+    @patch('apps.graph.services.generate_embedding', side_effect=RuntimeError('embed boom'))
+    def test_update_node_clears_stale_embedding_and_marks_failure(self, mock_embed):
+        node = Node.objects.create(
+            project=self.project,
+            node_type=NodeType.CLAIM,
+            status=NodeStatus.SUPPORTED,
+            content='Original content',
+            source_type='user_edit',
+            embedding=[0.1] * 384,
+            properties={},
+            created_by=self.user,
+        )
+
+        updated = GraphService.update_node(node_id=node.id, content='Updated content')
+        self.assertIsNone(updated.embedding)
+        self.assertEqual(updated.properties.get('_embedding_status'), 'failed')
+        self.assertIn('RuntimeError', updated.properties.get('_embedding_error', ''))
+        mock_embed.assert_called_once()
+
+    def test_cluster_project_nodes_uses_prefetched_graph(self):
+        """Passing graph avoids an extra GraphService.get_project_graph() call."""
+        from apps.graph.clustering import ClusteringService
+
+        node = Node.objects.create(
+            project=self.project,
+            node_type=NodeType.CLAIM,
+            status=NodeStatus.UNSUBSTANTIATED,
+            content='Clusterable node',
+            source_type='user_edit',
+        )
+        graph = {'nodes': [node], 'edges': []}
+
+        with patch('apps.graph.clustering.GraphService.get_project_graph') as mock_get:
+            clusters = ClusteringService.cluster_project_nodes(
+                self.project.id, min_cluster_size=1, graph=graph,
+            )
+
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]['node_ids'], [str(node.id)])
+        mock_get.assert_not_called()
 
 
 class GraphSerializationTests(TestCase):
@@ -650,6 +712,53 @@ class GraphAPITests(TestCase):
             f'/api/v2/projects/{other_project.id}/graph/orientation/'
         )
         self.assertEqual(response.status_code, 404)
+
+    @patch('apps.common.vector_utils.similarity_search', return_value=[])
+    @patch('apps.common.vector_utils.generate_embedding', return_value=[0.2] * 384)
+    def test_node_search_falls_back_to_keyword_for_nodes_without_embeddings(
+        self, mock_embed, mock_similarity,
+    ):
+        node = Node.objects.create(
+            project=self.project,
+            node_type=NodeType.CLAIM,
+            status=NodeStatus.UNSUBSTANTIATED,
+            content='Alpha keyword present',
+            source_type='user_edit',
+            embedding=None,
+            properties={'_embedding_status': 'failed'},
+            created_by=self.user,
+        )
+
+        response = self.client.get(
+            f'/api/v2/projects/{self.project.id}/nodes/search/?q=alpha&top_k=5'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['id'], str(node.id))
+        self.assertEqual(response.data['results'][0]['match_type'], 'keyword_fallback')
+        self.assertIsNone(response.data['results'][0]['similarity'])
+        self.assertEqual(response.data['warnings']['nodes_missing_embeddings'], 1)
+        mock_embed.assert_called_once()
+        mock_similarity.assert_called_once()
+
+
+class GraphJsonParsingTests(TestCase):
+    """Regression tests for shared LLM JSON response parsing."""
+
+    def test_parse_json_from_response_handles_arrays(self):
+        from apps.common.utils import parse_json_from_response
+
+        text = "notes before\n[{\"id\": \"n1\"}]\nnotes after"
+        parsed = parse_json_from_response(text)
+        self.assertEqual(parsed, [{"id": "n1"}])
+
+    def test_parse_json_from_response_handles_arrays_variant(self):
+        from apps.common.utils import parse_json_from_response
+
+        text = "notes before\n[{\"id\": \"n2\"}]\nnotes after"
+        parsed = parse_json_from_response(text)
+        self.assertEqual(parsed, [{"id": "n2"}])
 
 
 class SectionedStreamParserGraphEditsTests(TestCase):

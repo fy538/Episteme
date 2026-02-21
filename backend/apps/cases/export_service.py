@@ -122,6 +122,30 @@ class BriefExportService:
         skill_names = list(
             case.active_skills.filter(status='active').values_list('name', flat=True)
         )
+
+        # Normalize constraints: ensure all items are {type, description} dicts
+        constraints = []
+        for c in (case.constraints or []):
+            if isinstance(c, dict):
+                constraints.append({
+                    'type': c.get('type', 'general'),
+                    'description': c.get('description', c.get('text', str(c))),
+                })
+            elif isinstance(c, str) and c.strip():
+                constraints.append({'type': 'general', 'description': c})
+
+        # Normalize success_criteria: ensure all items are {criterion, ...} dicts
+        success_criteria = []
+        for sc in (case.success_criteria or []):
+            if isinstance(sc, dict):
+                success_criteria.append({
+                    'criterion': sc.get('criterion', sc.get('text', str(sc))),
+                    **(({'measurable': sc['measurable']}) if sc.get('measurable') else {}),
+                    **(({'target': sc['target']}) if sc.get('target') else {}),
+                })
+            elif isinstance(sc, str) and sc.strip():
+                success_criteria.append({'criterion': sc})
+
         return {
             'id': str(case.id),
             'title': case.title,
@@ -129,8 +153,8 @@ class BriefExportService:
             'position': case.position or '',
             'stakes': case.stakes or 'medium',
             'user_confidence': case.user_confidence,
-            'constraints': case.constraints or [],
-            'success_criteria': case.success_criteria or [],
+            'constraints': constraints,
+            'success_criteria': success_criteria,
             'stakeholders': case.stakeholders or [],
             'premortem_text': getattr(case, 'premortem_text', '') or '',
             'what_would_change_mind': getattr(case, 'what_would_change_mind', '') or '',
@@ -322,8 +346,8 @@ class BriefExportService:
                             evidence_quality['high_confidence'] += 1
                         elif conf > 0:
                             evidence_quality['low_confidence'] += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Evidence quality lookup failed: %s", e)
 
         # Use cached grounding_data if available (for evidence quality fallback)
         if evidence_quality['total'] == 0 and section.grounding_data:

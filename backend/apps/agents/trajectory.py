@@ -124,12 +124,12 @@ class TrajectoryRecorder:
         """
         try:
             from apps.events.services import EventService
-            from apps.events.models import ActorType
+            from apps.events.models import ActorType, EventType
 
             payload = self.finalize()
 
             EventService.append(
-                event_type="AGENT_TRAJECTORY",
+                event_type=EventType.AGENT_TRAJECTORY,
                 payload=payload,
                 actor_type=ActorType.SYSTEM,
                 correlation_id=self.correlation_id,
@@ -178,8 +178,8 @@ class TrajectoryRecorder:
             )
         except ImportError:
             pass
-        except Exception:
-            pass  # Langfuse push is best-effort
+        except Exception as e:
+            logger.debug("Langfuse push failed: %s", e)
 
     @property
     def events(self) -> list[TrajectoryEvent]:

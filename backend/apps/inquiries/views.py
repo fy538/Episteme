@@ -540,17 +540,18 @@ class InquiryViewSet(viewsets.ModelViewSet):
         Returns: Graph of all inquiries with their dependencies
         """
         inquiry = self.get_object()
-        case_inquiries = Inquiry.objects.filter(case=inquiry.case).prefetch_related('blocked_by')
+        case_inquiries = Inquiry.objects.filter(case=inquiry.case).prefetch_related('blocked_by', 'blocks')
 
         graph = []
         for inq in case_inquiries:
+            blockers = list(inq.blocked_by.all())
             graph.append({
                 'id': str(inq.id),
                 'title': inq.title,
                 'status': inq.status,
-                'blocked_by': [str(b.id) for b in inq.blocked_by.all()],
+                'blocked_by': [str(b.id) for b in blockers],
                 'blocks': [str(b.id) for b in inq.blocks.all()],
-                'is_blocked': inq.blocked_by.exclude(status=InquiryStatus.RESOLVED).exists(),
+                'is_blocked': any(b.status != InquiryStatus.RESOLVED for b in blockers),
             })
 
         return Response({

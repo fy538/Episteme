@@ -15,6 +15,7 @@ from apps.common.vector_utils import generate_embedding
 from apps.events.models import EventType, ActorType
 from apps.events.services import EventService
 
+from .embedding_state import clear_embedding_failure, mark_embedding_failed
 from .models import (
     Node, Edge, GraphDelta,
     NodeType, NodeStatus, EdgeType, NodeSourceType, DeltaTrigger,
@@ -31,6 +32,13 @@ def _sort_by_importance(nodes: list) -> list:
         key=lambda n: n.properties.get('importance', 2),
         reverse=True,
     )
+
+
+def _embedding_failure_reason(error: Optional[Exception] = None) -> str:
+    """Normalize embedding failure reason for node properties."""
+    if error is None:
+        return "embedding_generation_returned_none"
+    return f"{type(error).__name__}: {error}"
 
 
 class GraphService:
@@ -94,8 +102,24 @@ class GraphService:
         # Generate embedding
         if generate_embed:
             try:
-                node.embedding = generate_embedding(content)
-            except Exception:
+                embedding = generate_embedding(content)
+                if embedding is None:
+                    node.embedding = None
+                    node.properties = mark_embedding_failed(
+                        node.properties, _embedding_failure_reason(),
+                    )
+                    logger.warning(
+                        "Embedding generation returned no vector for new node",
+                        extra={'project_id': str(project.id), 'node_type': node_type},
+                    )
+                else:
+                    node.embedding = embedding
+                    node.properties = clear_embedding_failure(node.properties)
+            except Exception as exc:
+                node.embedding = None
+                node.properties = mark_embedding_failed(
+                    node.properties, _embedding_failure_reason(exc),
+                )
                 logger.warning("Failed to generate embedding for node", exc_info=True)
 
         node.save()
@@ -136,8 +160,24 @@ class GraphService:
         # Re-embed on content change
         if content_changed:
             try:
-                node.embedding = generate_embedding(node.content)
-            except Exception:
+                embedding = generate_embedding(node.content)
+                if embedding is None:
+                    node.embedding = None
+                    node.properties = mark_embedding_failed(
+                        node.properties, _embedding_failure_reason(),
+                    )
+                    logger.warning(
+                        "Embedding regeneration returned no vector",
+                        extra={'node_id': str(node_id)},
+                    )
+                else:
+                    node.embedding = embedding
+                    node.properties = clear_embedding_failure(node.properties)
+            except Exception as exc:
+                node.embedding = None
+                node.properties = mark_embedding_failed(
+                    node.properties, _embedding_failure_reason(exc),
+                )
                 logger.warning("Failed to re-embed node %s", node_id, exc_info=True)
 
         node.save()
@@ -213,17 +253,43 @@ class GraphService:
     # Graph queries
     # ───────────────────────────────────────────────────────────
 
+    GRAPH_DEFAULT_LIMIT = 2000
+    GRAPH_MAX_LIMIT = 5000
+
     @staticmethod
-    def get_project_graph(project_id: uuid.UUID) -> Dict[str, Any]:
+    def get_project_graph(
+        project_id: uuid.UUID,
+        *,
+        limit: Optional[int] = None,
+        node_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Full graph for a project — all nodes and edges.
+        Graph for a project — nodes and edges with optional limit and filtering.
+
+        Args:
+            project_id: Project UUID.
+            limit: Max nodes to return. Defaults to GRAPH_DEFAULT_LIMIT.
+            node_type: Filter to a specific node type (claim, evidence, etc.).
 
         Returns:
-            {'nodes': [Node, ...], 'edges': [Edge, ...]}
+            {
+                'nodes': [Node, ...],
+                'edges': [Edge, ...],
+                'total_node_count': int,
+                'truncated': bool,
+            }
         """
+        if limit is None:
+            limit = GraphService.GRAPH_DEFAULT_LIMIT
+        limit = min(limit, GraphService.GRAPH_MAX_LIMIT)
+
+        qs = Node.objects.filter(project_id=project_id)
+        if node_type:
+            qs = qs.filter(node_type=node_type)
+
+        total_node_count = qs.count()
         nodes = list(
-            Node.objects.filter(project_id=project_id)
-            .select_related('source_document', 'case', 'created_by')
+            qs.select_related('source_document', 'case', 'created_by')[:limit]
         )
         node_ids = {n.id for n in nodes}
         edges = list(
@@ -232,7 +298,12 @@ class GraphService:
                 target_node_id__in=node_ids,
             ).select_related('source_node', 'target_node')
         )
-        return {'nodes': nodes, 'edges': edges}
+        return {
+            'nodes': nodes,
+            'edges': edges,
+            'total_node_count': total_node_count,
+            'truncated': total_node_count > len(nodes),
+        }
 
     @staticmethod
     def get_document_subgraph(document_id: uuid.UUID) -> Dict[str, Any]:
@@ -263,6 +334,9 @@ class GraphService:
         """
         Quick health stats for the knowledge graph.
 
+        Uses conditional aggregation so node totals, type/status breakdowns,
+        and key health indicators come from one node query.
+
         Returns:
             {
                 'total_nodes': int,
@@ -278,36 +352,46 @@ class GraphService:
         """
         nodes_qs = Node.objects.filter(project_id=project_id)
 
-        # Count by type
-        type_counts = dict(
-            nodes_qs.values_list('node_type')
-            .annotate(count=Count('id'))
-            .values_list('node_type', 'count')
-        )
+        agg_spec = {
+            'total_nodes': Count('id'),
+            'untested_assumptions': Count(
+                'id', filter=Q(node_type=NodeType.ASSUMPTION, status=NodeStatus.UNTESTED)
+            ),
+            'unresolved_tensions': Count(
+                'id', filter=Q(
+                    node_type=NodeType.TENSION,
+                    status__in=[NodeStatus.SURFACED, NodeStatus.ACKNOWLEDGED],
+                )
+            ),
+            'unsubstantiated_claims': Count(
+                'id', filter=Q(node_type=NodeType.CLAIM, status=NodeStatus.UNSUBSTANTIATED)
+            ),
+        }
+        for node_type, _label in NodeType.choices:
+            agg_spec[f"type__{node_type}"] = Count(
+                'id', filter=Q(node_type=node_type),
+            )
+        for status, _label in NodeStatus.choices:
+            agg_spec[f"status__{status}"] = Count(
+                'id', filter=Q(status=status),
+            )
 
-        # Count by status
-        status_counts = dict(
-            nodes_qs.values_list('status')
-            .annotate(count=Count('id'))
-            .values_list('status', 'count')
-        )
+        agg = nodes_qs.aggregate(**agg_spec)
 
-        # Specific health indicators
-        untested = nodes_qs.filter(
-            node_type=NodeType.ASSUMPTION, status=NodeStatus.UNTESTED
-        ).count()
-        unresolved = nodes_qs.filter(
-            node_type=NodeType.TENSION,
-            status__in=[NodeStatus.SURFACED, NodeStatus.ACKNOWLEDGED],
-        ).count()
-        unsubstantiated = nodes_qs.filter(
-            node_type=NodeType.CLAIM, status=NodeStatus.UNSUBSTANTIATED
-        ).count()
+        type_counts = {
+            node_type: agg[f"type__{node_type}"]
+            for node_type, _label in NodeType.choices
+            if agg.get(f"type__{node_type}", 0)
+        }
+        status_counts = {
+            status: agg[f"status__{status}"]
+            for status, _label in NodeStatus.choices
+            if agg.get(f"status__{status}", 0)
+        }
 
-        total_nodes = nodes_qs.count()
-        node_ids = nodes_qs.values_list('id', flat=True)
+        # Edge count using FK join instead of subquery
         total_edges = Edge.objects.filter(
-            source_node_id__in=node_ids
+            source_node__project_id=project_id
         ).count()
 
         total_docs = nodes_qs.filter(
@@ -317,13 +401,13 @@ class GraphService:
         total_deltas = GraphDelta.objects.filter(project_id=project_id).count()
 
         return {
-            'total_nodes': total_nodes,
+            'total_nodes': agg['total_nodes'],
             'total_edges': total_edges,
             'nodes_by_type': type_counts,
             'nodes_by_status': status_counts,
-            'untested_assumptions': untested,
-            'unresolved_tensions': unresolved,
-            'unsubstantiated_claims': unsubstantiated,
+            'untested_assumptions': agg['untested_assumptions'],
+            'unresolved_tensions': agg['unresolved_tensions'],
+            'unsubstantiated_claims': agg['unsubstantiated_claims'],
             'total_documents': total_docs,
             'total_deltas': total_deltas,
         }
@@ -354,21 +438,39 @@ class GraphService:
         )
 
     @staticmethod
-    def get_case_graph(case_id: uuid.UUID) -> Dict[str, Any]:
+    def get_case_graph(
+        case_id: uuid.UUID,
+        *,
+        limit: Optional[int] = None,
+        node_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Composed graph for a case: case-scoped nodes + referenced project
         nodes + edges where BOTH endpoints are visible.
 
+        Args:
+            case_id: Case UUID.
+            limit: Max nodes to return. Defaults to GRAPH_DEFAULT_LIMIT.
+            node_type: Filter to a specific node type (claim, evidence, etc.).
+
         Returns:
-            {'nodes': [Node, ...], 'edges': [Edge, ...]}
+            {
+                'nodes': [Node, ...],
+                'edges': [Edge, ...],
+                'total_node_count': int,
+                'truncated': bool,
+            }
         """
         from .models import CaseNodeReference
 
+        if limit is None:
+            limit = GraphService.GRAPH_DEFAULT_LIMIT
+        limit = min(limit, GraphService.GRAPH_MAX_LIMIT)
+
         # Case's own nodes
-        case_nodes = list(
-            Node.objects.filter(case_id=case_id, scope='case')
-            .select_related('source_document', 'case', 'created_by')
-        )
+        case_qs = Node.objects.filter(case_id=case_id, scope='case')
+        if node_type:
+            case_qs = case_qs.filter(node_type=node_type)
 
         # Referenced project nodes
         ref_node_ids = list(
@@ -376,10 +478,19 @@ class GraphService:
                 case_id=case_id, excluded=False
             ).values_list('node_id', flat=True)
         )
-        referenced_nodes = list(
-            Node.objects.filter(id__in=ref_node_ids)
-            .select_related('source_document', 'case', 'created_by')
+        ref_qs = Node.objects.filter(id__in=ref_node_ids)
+        if node_type:
+            ref_qs = ref_qs.filter(node_type=node_type)
+
+        total_node_count = case_qs.count() + ref_qs.count()
+
+        case_nodes = list(
+            case_qs.select_related('source_document', 'case', 'created_by')[:limit]
         )
+        remaining = limit - len(case_nodes)
+        referenced_nodes = list(
+            ref_qs.select_related('source_document', 'case', 'created_by')[:remaining]
+        ) if remaining > 0 else []
 
         all_nodes = case_nodes + referenced_nodes
         visible_ids = {n.id for n in all_nodes}
@@ -392,7 +503,12 @@ class GraphService:
             ).select_related('source_node', 'target_node')
         )
 
-        return {'nodes': all_nodes, 'edges': edges}
+        return {
+            'nodes': all_nodes,
+            'edges': edges,
+            'total_node_count': total_node_count,
+            'truncated': total_node_count > len(all_nodes),
+        }
 
     @staticmethod
     def compute_case_graph_health(case_id: uuid.UUID) -> Dict[str, Any]:

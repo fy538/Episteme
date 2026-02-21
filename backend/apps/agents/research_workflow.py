@@ -268,9 +268,9 @@ async def generate_research_document(
         )
         try:
             from apps.events.services import EventService
-            from apps.events.models import ActorType
+            from apps.events.models import ActorType, EventType
             EventService.append(
-                event_type="AgentFailed",
+                event_type=EventType.AGENT_FAILED,
                 payload={
                     "agent_type": "research",
                     "topic": topic,
@@ -281,8 +281,8 @@ async def generate_research_document(
                 correlation_id=correlation_id,
                 case_id=case_id,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to emit error event: %s", e)
 
         if placeholder_message_id and correlation_id:
             try:
@@ -292,8 +292,8 @@ async def generate_research_document(
                     message=f'Research failed: {str(e)[:200]}',
                     placeholder_message_id=placeholder_message_id,
                 )
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug("Failed to update progress on error: %s", e2)
         return {
             'status': 'failed',
             'error': str(e)[:500],

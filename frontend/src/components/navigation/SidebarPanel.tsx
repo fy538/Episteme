@@ -1,47 +1,48 @@
 /**
  * SidebarPanel
  *
- * The 240px sidebar panel with integrated tabs, logo, and utility footer.
- * Replaces the previous IconRail + SidebarPanel two-tier architecture.
+ * The 240px sidebar with three-mode progressive zoom navigation.
+ * Replaces the previous tab-based (Decisions / Threads) architecture.
+ *
+ * Three modes:
+ *   HOME    → project list + scratch threads
+ *   PROJECT → project-scoped (landscape, threads, cases, sources)
+ *   CASE    → case structure (plan, inquiries, assumptions, criteria)
  *
  * Layout:
  *   ┌─────────────────────────┐
  *   │ E (logo)                │  Header
  *   │─────────────────────────│
- *   │ [Decisions] [Threads]   │  Tab switcher
- *   │─────────────────────────│
  *   │                         │
- *   │  (tab content area)     │  flex-1, scrollable
+ *   │  (mode content area)    │  flex-1, animated transitions
  *   │                         │
  *   │─────────────────────────│
  *   │  🔍 Search    ⚙️  [FY]  │  Footer: utilities
  *   └─────────────────────────┘
  *
- * Within the 'decisions' tab, supports a drill-down pattern:
- *   - No active case → case list (CasesPanelContent)
- *   - Active case → case structure (CaseStructurePanelContent)
- * Transitions between these with a horizontal slide animation.
+ * Transitions use horizontal slide animations matching the zoom direction:
+ *   forward (zoom in): new content slides in from right
+ *   back (zoom out): new content slides in from left
  */
 
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ConversationsPanelContent } from './panels/ConversationsPanelContent';
-import { CasesPanelContent } from './panels/CasesPanelContent';
+import { HomeSidebarContent } from './panels/HomeSidebarContent';
+import { ProjectSidebarContent } from './panels/ProjectSidebarContent';
 import { CaseStructurePanelContent } from './panels/CaseStructurePanelContent';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { useNavigation } from './NavigationProvider';
-import { useCaseWorkspaceContext } from '@/components/workspace/CaseWorkspaceProvider';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { SidebarTab, PanelMode } from '@/lib/types/navigation';
 
-/** Duration in seconds for the drill-down slide animation. */
-const DRILLDOWN_DURATION = 0.2;
+/** Duration in seconds for the mode slide animation. */
+const SLIDE_DURATION = 0.2;
 
-/** Easing curve for drill-down transitions. */
-const DRILLDOWN_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
+/** Easing curve for mode transitions. */
+const SLIDE_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
 
 interface SidebarPanelProps {
   isCollapsed: boolean;
@@ -50,11 +51,11 @@ interface SidebarPanelProps {
 }
 
 export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: SidebarPanelProps) {
-  const nav = useNavigation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userInitials, setUserInitials] = useState('U');
+  const nav = useNavigation();
 
-  // Load user info from localStorage (migrated from IconRail)
+  // Load user info from localStorage
   useEffect(() => {
     const name = localStorage.getItem('episteme_user_name') || '';
     if (name) {
@@ -96,21 +97,20 @@ export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: Sideb
             </Link>
           </div>
 
-          {/* ─── Tab Switcher ─── */}
-          <TabSwitcher activeTab={nav.activeTab} onTabChange={nav.setActiveTab} />
-
-          {/* ─── Tab Content ─── */}
+          {/* ─── Mode Content (animated) ─── */}
           <div className="flex-1 min-h-0 overflow-hidden">
-            <TabContent activeTab={nav.activeTab} panelMode={nav.panelMode} />
+            <SidebarModeContent />
           </div>
 
           {/* ─── Footer: Utilities ─── */}
           <div className="shrink-0 border-t border-neutral-200 dark:border-neutral-800 px-3 py-2 flex items-center gap-1">
             {/* Search */}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={nav.navigateToSearch}
               className={cn(
-                'flex items-center gap-1.5 px-2 py-1.5 rounded-md flex-1',
+                'flex items-center gap-1.5 px-2 py-1.5 rounded-md flex-1 h-auto',
                 'text-xs text-neutral-500 dark:text-neutral-400',
                 'hover:bg-neutral-100 dark:hover:bg-neutral-800',
                 'hover:text-neutral-700 dark:hover:text-neutral-200',
@@ -120,14 +120,16 @@ export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: Sideb
             >
               <SearchIcon className="w-3.5 h-3.5" />
               <span>Search</span>
-              <kbd className="ml-auto text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">⌘K</kbd>
-            </button>
+              <kbd className="ml-auto text-xs text-neutral-400 dark:text-neutral-500 font-mono">⌘K</kbd>
+            </Button>
 
             {/* Settings */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setSettingsOpen(true)}
               className={cn(
-                'flex items-center justify-center w-7 h-7 rounded-md',
+                'w-7 h-7',
                 'text-neutral-500 dark:text-neutral-400',
                 'hover:bg-neutral-100 dark:hover:bg-neutral-800',
                 'hover:text-neutral-700 dark:hover:text-neutral-200',
@@ -136,7 +138,7 @@ export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: Sideb
               title="Settings"
             >
               <SettingsIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
 
             {/* User avatar */}
             <div
@@ -144,7 +146,7 @@ export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: Sideb
                 'flex items-center justify-center w-7 h-7 rounded-full',
                 'bg-accent-100 dark:bg-accent-900/50',
                 'text-accent-700 dark:text-accent-300',
-                'text-[10px] font-medium'
+                'text-xs font-medium'
               )}
               title="Profile"
             >
@@ -159,140 +161,38 @@ export function SidebarPanel({ isCollapsed, onToggleCollapse, className }: Sideb
   );
 }
 
-// ─── Tab Switcher ──────────────────────────────────────────────
+// ─── Mode Content (animated three-way switch) ──────────────────
 
-const TABS: { id: SidebarTab; label: string }[] = [
-  { id: 'decisions', label: 'Decisions' },
-  { id: 'threads', label: 'Threads' },
-];
+function SidebarModeContent() {
+  const { sidebarMode, transitionDirection } = useNavigation();
 
-function TabSwitcher({
-  activeTab,
-  onTabChange,
-}: {
-  activeTab: SidebarTab;
-  onTabChange: (tab: SidebarTab) => void;
-}) {
-  return (
-    <div className="flex items-center border-b border-neutral-200 dark:border-neutral-800 px-4">
-      {TABS.map((tab) => {
-        const isActive = activeTab === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            className={cn(
-              'relative px-3 py-2 text-xs font-medium transition-colors duration-150',
-              isActive
-                ? 'text-accent-700 dark:text-accent-300'
-                : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
-            )}
-          >
-            {tab.label}
-            {/* Active underline indicator */}
-            {isActive && (
-              <motion.div
-                layoutId="sidebar-tab-indicator"
-                className="absolute bottom-0 left-3 right-3 h-[2px] bg-accent-500 rounded-full"
-                transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
-              />
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+  // Generate a unique key for AnimatePresence
+  const modeKey =
+    sidebarMode.mode === 'home'
+      ? 'home'
+      : sidebarMode.mode === 'project'
+        ? `project-${sidebarMode.projectId}`
+        : `case-${sidebarMode.caseId}`;
 
-// ─── Tab Content ──────────────────────────────────────────────
-
-function TabContent({
-  activeTab,
-  panelMode,
-}: {
-  activeTab: SidebarTab;
-  panelMode: PanelMode;
-}) {
-  switch (activeTab) {
-    case 'decisions':
-      return <CasesDrilldownContent panelMode={panelMode} />;
-
-    case 'threads':
-      return (
-        <ConversationsPanelContent
-          activeThreadId={
-            panelMode.section === 'conversations' && 'activeThreadId' in panelMode
-              ? panelMode.activeThreadId
-              : undefined
-          }
-        />
-      );
-
-    default:
-      return null;
-  }
-}
-
-// ─── Cases Drill-down ──────────────────────────────────────────
-
-/**
- * Cases section with drill-down: slides between case list and case structure.
- *
- * The back button ("← Decisions") sets showCaseList=true to slide back to the
- * case list without navigating away from the current page. When the user clicks
- * a different case from the list, the URL changes, activeCaseId updates, and
- * the override resets automatically.
- */
-function CasesDrilldownContent({ panelMode }: { panelMode: PanelMode }) {
-  const workspace = useCaseWorkspaceContext();
-  const activeCaseId = panelMode.section === 'cases' && 'activeCaseId' in panelMode ? panelMode.activeCaseId : undefined;
-
-  // Override: user clicked "← Decisions" to show case list while staying on a case page
-  const [showCaseList, setShowCaseList] = useState(false);
-
-  // Reset override when activeCaseId changes (user navigated to a different case or left)
-  const prevCaseId = useRef(activeCaseId);
-  useEffect(() => {
-    if (prevCaseId.current !== activeCaseId) {
-      setShowCaseList(false);
-      prevCaseId.current = activeCaseId;
-    }
-  }, [activeCaseId]);
-
-  const handleBack = useCallback(() => setShowCaseList(true), []);
-
-  const hasCaseData = !!(activeCaseId && workspace && (workspace.caseData || workspace.loading));
-  const isDrilldown = hasCaseData && !showCaseList;
+  // Animation direction: forward = slide from right, back = slide from left
+  const slideIn = transitionDirection === 'back' ? '-100%' : '100%';
+  const slideOut = transitionDirection === 'back' ? '100%' : '-100%';
 
   return (
     <div className="h-full relative overflow-hidden">
       <AnimatePresence mode="wait" initial={false}>
-        {isDrilldown ? (
-          <motion.div
-            key="case-structure"
-            initial={{ x: '100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '100%', opacity: 0 }}
-            transition={{ duration: DRILLDOWN_DURATION, ease: DRILLDOWN_EASE }}
-            className="absolute inset-0"
-          >
-            <CaseStructurePanelContent onBack={handleBack} />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="case-list"
-            initial={{ x: '-100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '-100%', opacity: 0 }}
-            transition={{ duration: DRILLDOWN_DURATION, ease: DRILLDOWN_EASE }}
-            className="absolute inset-0"
-          >
-            <CasesPanelContent
-              activeCaseId={activeCaseId}
-              activeProjectId={panelMode.section === 'cases' && 'activeProjectId' in panelMode ? panelMode.activeProjectId : undefined}
-            />
-          </motion.div>
-        )}
+        <motion.div
+          key={modeKey}
+          initial={{ x: slideIn, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: slideOut, opacity: 0 }}
+          transition={{ duration: SLIDE_DURATION, ease: SLIDE_EASE }}
+          className="absolute inset-0"
+        >
+          {sidebarMode.mode === 'home' && <HomeSidebarContent />}
+          {sidebarMode.mode === 'project' && <ProjectSidebarContent />}
+          {sidebarMode.mode === 'case' && <CaseStructurePanelContent />}
+        </motion.div>
       </AnimatePresence>
     </div>
   );

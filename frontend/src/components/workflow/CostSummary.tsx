@@ -133,10 +133,10 @@ export function CostSummary({ correlationId, events: propEvents, className, comp
           </div>
 
           <div className="text-left">
-            <p className="text-[13px] font-medium text-primary-900 dark:text-primary-50">
+            <p className="text-sm font-medium text-primary-900 dark:text-primary-50">
               Generation Cost
             </p>
-            <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">
               {costData.totalSteps} steps &middot; {formatDuration(costData.totalDurationMs)}
               {costData.model && <> &middot; {costData.model}</>}
             </p>
@@ -146,10 +146,10 @@ export function CostSummary({ correlationId, events: propEvents, className, comp
         {/* Total cost + tokens */}
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <p className="text-[13px] font-semibold tabular-nums text-primary-900 dark:text-primary-50">
+            <p className="text-sm font-semibold tabular-nums text-primary-900 dark:text-primary-50">
               ${costData.totalCostUsd.toFixed(4)}
             </p>
-            <p className="text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
+            <p className="text-xs tabular-nums text-neutral-400 dark:text-neutral-500">
               {formatTokens(costData.totalTokensUsed)} tokens
             </p>
           </div>
@@ -178,16 +178,16 @@ export function CostSummary({ correlationId, events: propEvents, className, comp
           <div className="border-t border-neutral-100 dark:border-neutral-800/60 pt-3">
             {/* Column headers */}
             <div className="flex items-center gap-2 mb-1.5 px-1">
-              <span className="flex-1 text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <span className="flex-1 text-xs font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 Step
               </span>
-              <span className="w-16 text-right text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <span className="w-16 text-right text-xs font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 Duration
               </span>
-              <span className="w-16 text-right text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <span className="w-16 text-right text-xs font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 Tokens
               </span>
-              <span className="w-16 text-right text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <span className="w-16 text-right text-xs font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 Cost
               </span>
             </div>
@@ -215,7 +215,7 @@ function StepCostRow({ step, total }: { step: StepCost; total: number }) {
       {/* Step name + cost bar */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-[12px] text-primary-800 dark:text-primary-200 capitalize truncate">
+          <span className="text-xs text-primary-800 dark:text-primary-200 capitalize truncate">
             {step.name}
           </span>
         </div>
@@ -229,17 +229,17 @@ function StepCostRow({ step, total }: { step: StepCost; total: number }) {
       </div>
 
       {/* Duration */}
-      <span className="w-16 text-right text-[12px] tabular-nums text-neutral-500 dark:text-neutral-400">
+      <span className="w-16 text-right text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
         {formatDuration(step.durationMs)}
       </span>
 
       {/* Tokens */}
-      <span className="w-16 text-right text-[12px] tabular-nums text-neutral-500 dark:text-neutral-400">
+      <span className="w-16 text-right text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
         {formatTokens(step.tokensUsed)}
       </span>
 
       {/* Cost */}
-      <span className="w-16 text-right text-[12px] tabular-nums text-neutral-500 dark:text-neutral-400">
+      <span className="w-16 text-right text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
         ${step.costUsd.toFixed(4)}
       </span>
     </div>

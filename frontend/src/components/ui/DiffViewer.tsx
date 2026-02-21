@@ -67,15 +67,15 @@ export function DiffViewer({
             <div className="space-y-1 font-mono text-sm">
               {diff.map((part: Change, idx: number) => {
                 const bgColor = part.added
-                  ? 'bg-green-100'
+                  ? 'bg-success-100'
                   : part.removed
-                  ? 'bg-red-100'
+                  ? 'bg-error-100'
                   : 'bg-transparent';
-                
+
                 const textColor = part.added
-                  ? 'text-green-900'
+                  ? 'text-success-900'
                   : part.removed
-                  ? 'text-red-900'
+                  ? 'text-error-900'
                   : 'text-neutral-700';
 
                 const prefix = part.added ? '+ ' : part.removed ? '- ' : '  ';
@@ -102,12 +102,12 @@ export function DiffViewer({
             <h4 className="font-medium text-accent-900 mb-2">Change Summary</h4>
             <div className="text-sm text-accent-800 space-y-1">
               <p>
-                <span className="font-medium text-green-700">
+                <span className="font-medium text-success-700">
                   +{diff.filter((p) => p.added).reduce((sum, p) => sum + p.value.split('\n').length, 0)} lines added
                 </span>
               </p>
               <p>
-                <span className="font-medium text-red-700">
+                <span className="font-medium text-error-700">
                   -{diff.filter((p) => p.removed).reduce((sum, p) => sum + p.value.split('\n').length, 0)} lines removed
                 </span>
               </p>

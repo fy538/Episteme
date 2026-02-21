@@ -11,6 +11,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { chatAPI } from '@/lib/api/chat';
 import type { HomeActionItem } from '@/hooks/useHomeDashboard';
 
@@ -89,11 +90,12 @@ export function SuggestedActions({ items }: SuggestedActionsProps) {
         const styles = VARIANT_STYLES[item.variant] ?? VARIANT_STYLES.default;
 
         return (
-          <button
+          <Button
             key={item.id}
+            variant="ghost"
             onClick={() => handleClick(item)}
             className={cn(
-              'flex flex-col items-start text-left rounded-lg border p-3',
+              'flex flex-col items-start text-left rounded-lg border p-3 h-auto',
               styles.bg,
               styles.border,
               styles.hover,
@@ -106,11 +108,11 @@ export function SuggestedActions({ items }: SuggestedActionsProps) {
               {item.title}
             </span>
             {item.description && (
-              <span className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 truncate max-w-full">
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 truncate max-w-full">
                 {item.description}
               </span>
             )}
-          </button>
+          </Button>
         );
       })}
     </div>

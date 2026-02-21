@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/components/ui/toast';
 import { documentsAPI } from '@/lib/api/documents';
 import { DocumentProcessingStream } from './DocumentProcessingStream';
@@ -248,26 +249,22 @@ export function DocumentUpload({
     <div className="space-y-3">
       {/* Mode toggle */}
       <div className="flex gap-2">
-        <button
+        <Button
+          variant={!pasteMode ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setPasteMode(false)}
-          className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
-            !pasteMode
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
-          }`}
+          className="text-xs"
         >
           Upload File
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={pasteMode ? 'default' : 'ghost'}
+          size="sm"
           onClick={() => setPasteMode(true)}
-          className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
-            pasteMode
-              ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-              : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
-          }`}
+          className="text-xs"
         >
           Paste Text
-        </button>
+        </Button>
       </div>
 
       {!pasteMode ? (
@@ -282,7 +279,7 @@ export function DocumentUpload({
             relative cursor-pointer rounded-lg border-2 border-dashed transition-all duration-200
             ${compact ? 'p-4' : 'p-8'}
             ${dragActive
-              ? 'border-blue-400 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-500'
+              ? 'border-info-400 bg-info-50/50 dark:bg-info-950/20 dark:border-info-500'
               : 'border-neutral-300 dark:border-neutral-700 hover:border-neutral-400 dark:hover:border-neutral-600 bg-neutral-50/50 dark:bg-neutral-900/50'
             }
           `}
@@ -300,7 +297,7 @@ export function DocumentUpload({
           <div className="flex flex-col items-center gap-2 text-center">
             <div className={`rounded-full p-2.5 ${
               dragActive
-                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-500'
+                ? 'bg-info-100 dark:bg-info-900/40 text-info-500'
                 : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400'
             }`}>
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -309,7 +306,7 @@ export function DocumentUpload({
             </div>
 
             {dragActive ? (
-              <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+              <p className="text-sm font-medium text-info-600 dark:text-info-400">
                 Drop files here
               </p>
             ) : (
@@ -368,7 +365,7 @@ export function DocumentUpload({
             <div key={item.id}>
               {item.status === 'uploading' && (
                 <div className="flex items-center gap-2 p-2 bg-neutral-50 dark:bg-neutral-800/50 rounded-md border border-neutral-200 dark:border-neutral-700">
-                  <div className="h-3.5 w-3.5 rounded-full border-2 border-blue-400 border-t-transparent animate-spin flex-shrink-0" />
+                  <Spinner size="sm" className="text-accent-500 flex-shrink-0" />
                   <span className="text-xs text-neutral-600 dark:text-neutral-300 truncate flex-1">
                     Uploading {item.title}...
                   </span>
@@ -392,36 +389,40 @@ export function DocumentUpload({
               )}
 
               {item.status === 'error' && (
-                <div className="flex items-center gap-2 p-2 bg-red-50 dark:bg-red-950/20 rounded-md border border-red-200 dark:border-red-800">
-                  <svg className="h-3.5 w-3.5 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex items-center gap-2 p-2 bg-error-50 dark:bg-error-950/20 rounded-md border border-error-200 dark:border-error-800">
+                  <svg className="h-3.5 w-3.5 text-error-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  <span className="text-xs text-red-600 dark:text-red-400 truncate flex-1">
+                  <span className="text-xs text-error-600 dark:text-error-400 truncate flex-1">
                     {item.title}: {item.error}
                   </span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => dismissItem(item.id)}
-                    className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-300 flex-shrink-0"
+                    className="text-xs text-error-500 hover:text-error-700 dark:hover:text-error-300 flex-shrink-0 h-auto px-1"
                   >
                     Dismiss
-                  </button>
+                  </Button>
                 </div>
               )}
 
               {item.status === 'complete' && (
-                <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 rounded-md border border-green-200 dark:border-green-800">
-                  <svg className="h-3.5 w-3.5 text-green-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex items-center gap-2 p-2 bg-success-50 dark:bg-success-950/20 rounded-md border border-success-200 dark:border-success-800">
+                  <svg className="h-3.5 w-3.5 text-success-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
-                  <span className="text-xs text-green-600 dark:text-green-400 truncate flex-1">
+                  <span className="text-xs text-success-600 dark:text-success-400 truncate flex-1">
                     {item.title}
                   </span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => dismissItem(item.id)}
-                    className="text-xs text-green-500 hover:text-green-700 dark:hover:text-green-300 flex-shrink-0"
+                    className="text-xs text-success-500 hover:text-success-700 dark:hover:text-success-300 flex-shrink-0 h-auto px-1"
                   >
                     Dismiss
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>

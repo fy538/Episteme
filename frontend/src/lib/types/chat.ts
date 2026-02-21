@@ -35,11 +35,8 @@ export interface Message {
   is_rich_content?: boolean;
   event_id: string;
   metadata: Record<string, any>;
+  source_chunks?: SourceChunk[];
   created_at: string;
-}
-
-export interface CreateMessageRequest {
-  content: string;
 }
 
 // ===== Inline Action Cards =====
@@ -53,7 +50,11 @@ export type InlineCardType =
   | 'inquiry_resolution'
   | 'research_results'
   | 'inquiry_focus_prompt'
-  | 'plan_diff_proposal';
+  | 'plan_diff_proposal'
+  | 'orientation_diff_proposal'
+  | 'position_update_proposal'
+  | 'tool_executed'
+  | 'tool_confirmation';
 
 /**
  * An action card that appears inline after a message
@@ -127,6 +128,21 @@ export interface InquiryFocusPromptData {
   aiReason?: string;
 }
 
+// ===== RAG Source Citations =====
+
+/**
+ * A document chunk used as RAG context, for citation rendering
+ */
+export interface SourceChunk {
+  index: number;          // Matches [N] in response (0-indexed)
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  chunk_index: number;
+  excerpt: string;
+  similarity?: number;
+}
+
 // ===== AI Action Hints =====
 
 /**
@@ -148,30 +164,6 @@ export interface ActionHint {
 }
 
 /**
- * Data payload for suggest_case action hint
- */
-export interface SuggestCaseHintData {
-  suggested_title?: string;
-}
-
-/**
- * Data payload for suggest_inquiry action hint
- */
-export interface SuggestInquiryHintData {
-  question: string;
-  topic?: string;
-}
-
-/**
- * Data payload for suggest_resolution action hint
- */
-export interface SuggestResolutionHintData {
-  inquiry_id: string;
-  inquiry_title?: string;
-  suggested_conclusion?: string;
-}
-
-/**
  * Data payload for plan diff proposal card
  */
 export interface PlanDiffProposalData {
@@ -186,5 +178,74 @@ export interface PlanDiffProposalData {
     updated_criteria?: Array<{ id: string; is_met: boolean }>;
     stage_change?: { from: string; to: string; rationale: string };
   };
+}
+
+/**
+ * Data payload for orientation diff proposal card
+ */
+export interface OrientationDiffProposalData {
+  orientationId: string;
+  diffSummary: string;
+  proposedState: {
+    lead_text: string;
+    lens_type: string;
+    findings: Array<{
+      id: string;
+      insight_type: string;
+      title: string;
+      content: string;
+      status: string;
+      confidence: number;
+      action_type?: string;
+    }>;
+    angles: Array<{
+      id: string;
+      title: string;
+    }>;
+  };
+  diffData: {
+    update_lead?: string;
+    suggest_lens_change?: string;
+    added_findings?: Array<{ type: string; title: string; content: string; action_type?: string }>;
+    updated_findings?: Array<{ id: string; title?: string; content?: string; status?: string }>;
+    removed_finding_ids?: string[];
+    added_angles?: Array<{ title: string }>;
+    removed_angle_ids?: string[];
+  };
+}
+
+/**
+ * Data payload for position update proposal card
+ */
+export interface PositionUpdateProposalData {
+  proposals: Array<{ fact: string; reason: string }>;
+  caseId: string;
+  currentPosition: string;
+  /** Message ID where the proposal is stored (for cleanup on accept/dismiss) */
+  messageId?: string;
+}
+
+// ===== Tool Action Cards =====
+
+/**
+ * Data payload for tool_executed card (auto-executed tools)
+ */
+export interface ToolExecutedData {
+  tool: string;
+  displayName: string;
+  success: boolean;
+  output: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * Data payload for tool_confirmation card (requires user approval)
+ */
+export interface ToolConfirmationData {
+  tool: string;
+  displayName: string;
+  params: Record<string, unknown>;
+  reason: string;
+  confirmationId: string;
 }
 

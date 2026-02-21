@@ -10,6 +10,7 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { easingCurves, transitionDurations, springConfig } from '@/lib/motion-config';
 
@@ -170,14 +171,16 @@ function ToastItem({
       </div>
 
       {/* Close button */}
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={() => onRemove(toast.id)}
-        className="flex-shrink-0 text-primary-400 hover:text-primary-600 dark:text-primary-500 dark:hover:text-primary-300 transition-colors"
+        className="flex-shrink-0 h-auto w-auto text-primary-400 hover:text-primary-600 dark:text-primary-500 dark:hover:text-primary-300"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
-      </button>
+      </Button>
     </div>
   );
 

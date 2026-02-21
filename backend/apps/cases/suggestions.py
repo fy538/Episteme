@@ -211,61 +211,6 @@ Return as JSON array:
 Return ONLY the JSON array, no other text."""
 
 
-def generate_inline_suggestions(
-    brief_content: str,
-    cursor_position: int,
-    context_before: str,
-    context_after: str
-) -> List[Dict[str, str]]:
-    """
-    Generate inline suggestions for a specific cursor position.
-    Used for ghost text / tab completion.
-
-    Returns list of possible completions.
-    """
-    provider = get_llm_provider('fast')
-
-    prompt = f"""You are helping write a decision brief. The user's cursor is at [CURSOR].
-
-Context:
-{context_before}[CURSOR]{context_after}
-
-Suggest 1-3 natural completions for the text at the cursor position.
-Consider:
-- What the user is likely trying to write
-- The document's existing style and tone
-- Completions that add value (evidence, structure, clarity)
-
-Return JSON array of completions:
-[
-  {{"text": "completion text", "confidence": 0.9}},
-  {{"text": "alternative completion", "confidence": 0.7}}
-]
-
-Return ONLY the JSON array."""
-
-    async def generate():
-        full_response = ""
-        async for chunk in provider.stream_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt="You suggest inline text completions for documents."
-        ):
-            full_response += chunk.content
-
-        try:
-            response_text = full_response.strip()
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
-            return json.loads(response_text)
-        except Exception:
-            return []
-
-    return async_to_sync(generate)()
-
-
 def get_inline_completion(
     context_before: str,
     context_after: str,

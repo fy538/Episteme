@@ -165,10 +165,33 @@ class ChatService:
         context_messages = ChatService._get_context_messages(thread)
         conversation_context = ChatService._format_conversation_context(context_messages)
 
+        # Inject project summary context if thread is linked to a project
+        project_summary_context = ""
+        if thread.project_id:
+            try:
+                from apps.graph.summary_service import ProjectSummaryService
+                from .prompts import format_summary_for_chat
+
+                summary = ProjectSummaryService.get_current_summary(thread.project_id)
+                if summary and summary.sections:
+                    project_summary_context = format_summary_for_chat(summary.sections)
+            except Exception:
+                logger.debug("Could not load project summary for chat context", exc_info=True)
+
+        # Get companion context for the clarifying loop
+        companion_context = ""
+        try:
+            from .companion_service import CompanionService
+            companion_context = CompanionService.get_chat_context(thread_id)
+        except Exception:
+            logger.debug("Could not load companion context", exc_info=True)
+
         # Build prompt
         prompt = get_assistant_response_prompt(
             user_message=user_message.content,
             conversation_context=conversation_context,
+            project_summary_context=project_summary_context,
+            companion_context=companion_context,
         )
 
         # Get user's preferred model (from preferences or fallback to settings)

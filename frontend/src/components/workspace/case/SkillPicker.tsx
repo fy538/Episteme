@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { skillPacksAPI, skillsAPI } from '@/lib/api/skills';
 import type { SkillPackListItem, Skill } from '@/lib/types/skill';
 
@@ -76,15 +77,17 @@ export function SkillPicker({
         className={cn('flex flex-col items-center gap-3 py-12', className)}
         role="alert"
       >
-        <p className="text-sm text-red-500">
+        <p className="text-sm text-error-500">
           {(error as Error).message || 'Failed to load templates'}
         </p>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onSkip}
-          className="text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 rounded"
+          className="text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 underline"
         >
           Start from scratch instead
-        </button>
+        </Button>
       </div>
     );
   }
@@ -120,15 +123,16 @@ export function SkillPicker({
       {/* Packs */}
       {hasPacks && (
         <div className="flex flex-col gap-2 px-4" role="group" aria-label="Starter Packs">
-          <span className="text-[10px] uppercase tracking-wider font-medium text-neutral-400 dark:text-neutral-500">
+          <span className="text-xs uppercase tracking-wider font-medium text-neutral-400 dark:text-neutral-500">
             Starter Packs
           </span>
           {packs.map(pack => (
-            <button
+            <Button
               key={pack.slug}
+              variant="ghost"
               onClick={() => onSelectPack(pack.slug)}
               aria-label={`Use ${pack.name} with ${pack.skill_count} skills`}
-              className="flex items-start gap-3 p-3 text-left rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-accent-300 dark:hover:border-accent-700 hover:bg-accent-50/30 dark:hover:bg-accent-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 transition-colors group"
+              className="flex items-start gap-3 p-3 text-left h-auto rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-accent-300 dark:hover:border-accent-700 hover:bg-accent-50/30 dark:hover:bg-accent-900/10 group"
             >
               <span className="text-lg leading-none mt-0.5" aria-hidden="true">{pack.icon || '\uD83D\uDCE6'}</span>
               <div className="flex-1 min-w-0">
@@ -136,7 +140,7 @@ export function SkillPicker({
                   <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200 group-hover:text-accent-700 dark:group-hover:text-accent-300 transition-colors">
                     {pack.name}
                   </span>
-                  <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                  <span className="text-xs text-neutral-400 dark:text-neutral-500">
                     {pack.skill_count} skill{pack.skill_count !== 1 ? 's' : ''}
                   </span>
                 </div>
@@ -147,7 +151,7 @@ export function SkillPicker({
               <span className="text-xs font-medium text-accent-500 dark:text-accent-400 opacity-0 group-hover:opacity-100 transition-opacity self-center" aria-hidden="true">
                 Use
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -155,36 +159,40 @@ export function SkillPicker({
       {/* Individual Skills */}
       {hasSkills && (
         <div className="flex flex-col gap-2 px-4" role="group" aria-label="Individual Skills">
-          <span className="text-[10px] uppercase tracking-wider font-medium text-neutral-400 dark:text-neutral-500">
+          <span className="text-xs uppercase tracking-wider font-medium text-neutral-400 dark:text-neutral-500">
             Individual Skills
           </span>
           <div className="grid grid-cols-1 gap-1.5">
             {visibleSkills.map(skill => (
-              <button
+              <Button
                 key={skill.id}
+                variant="ghost"
+                size="sm"
                 onClick={() => onSelectSkill(skill.id)}
                 aria-label={`Use ${skill.name}${skill.domain ? ` (${skill.domain})` : ''}`}
-                className="flex items-center gap-2 px-3 py-2 text-left rounded-lg border border-neutral-200/60 dark:border-neutral-800/60 hover:border-accent-300 dark:hover:border-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 transition-colors group"
+                className="flex items-center gap-2 px-3 py-2 justify-start text-left h-auto rounded-lg border border-neutral-200/60 dark:border-neutral-800/60 hover:border-accent-300 dark:hover:border-accent-700 group w-full"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 dark:bg-neutral-600 group-hover:bg-accent-400 transition-colors flex-shrink-0" aria-hidden="true" />
                 <span className="text-sm text-neutral-700 dark:text-neutral-300 group-hover:text-accent-700 dark:group-hover:text-accent-300 transition-colors truncate flex-1">
                   {skill.name}
                 </span>
                 {skill.domain && (
-                  <span className="text-[10px] text-neutral-400 dark:text-neutral-500 flex-shrink-0">
+                  <span className="text-xs text-neutral-400 dark:text-neutral-500 flex-shrink-0">
                     {skill.domain}
                   </span>
                 )}
-              </button>
+              </Button>
             ))}
           </div>
           {hasMoreSkills && !showAllSkills && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAllSkills(true)}
-              className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 rounded py-1 transition-colors"
+              className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 py-1 h-auto"
             >
               Show {skills.length - INITIAL_SKILLS_SHOWN} more skills
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -192,17 +200,18 @@ export function SkillPicker({
       {/* Divider + Start from scratch */}
       <div className="flex items-center gap-3 px-4" aria-hidden="true">
         <div className="flex-1 border-t border-neutral-200 dark:border-neutral-800" />
-        <span className="text-[10px] text-neutral-400 dark:text-neutral-500">or</span>
+        <span className="text-xs text-neutral-400 dark:text-neutral-500">or</span>
         <div className="flex-1 border-t border-neutral-200 dark:border-neutral-800" />
       </div>
 
       <div className="px-4">
-        <button
+        <Button
+          variant="outline"
           onClick={onSkip}
-          className="w-full py-2.5 text-sm font-medium text-neutral-600 dark:text-neutral-400 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 hover:border-neutral-400 dark:hover:border-neutral-600 hover:text-neutral-800 dark:hover:text-neutral-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 transition-colors"
+          className="w-full py-2.5 h-auto text-sm font-medium text-neutral-600 dark:text-neutral-400 rounded-xl border-dashed border-neutral-300 dark:border-neutral-700 hover:border-neutral-400 dark:hover:border-neutral-600 hover:text-neutral-800 dark:hover:text-neutral-200"
         >
           Start from scratch
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -15,14 +15,18 @@
 
 import { memo } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { theme, isTerminalTheme } from '@/lib/theme/companionTheme';
 import { ThinkingSection } from './ThinkingSection';
 import { StatusSection } from './StatusSection';
 import { SessionReceiptsSection } from './SessionReceiptsSection';
 import { CaseStateSection } from './CaseStateSection';
+import { ConversationStructureSection } from './ConversationStructureSection';
+import { EpisodeTimelineSection } from './EpisodeTimelineSection';
+import { CompanionSkeleton } from './CompanionSkeleton';
 import { getActionHintIcon, getActionHintLabel } from '@/lib/utils/action-hints';
 import type { CompanionSectionId } from '@/lib/utils/companion-ranking';
-import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState } from '@/lib/types/companion';
+import type { ChatMode, BackgroundWorkItem, SessionReceipt, CaseState, ConversationStructure, ConversationEpisode, CurrentEpisodeInfo } from '@/lib/types/companion';
 import type { ActionHint } from '@/lib/types/chat';
 
 interface CompanionPanelProps {
@@ -36,6 +40,13 @@ interface CompanionPanelProps {
   status?: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts?: SessionReceipt[];
   caseState?: CaseState;
+  conversationStructure?: ConversationStructure;
+  /** Whether the structure is currently being regenerated (assistant is streaming) */
+  isStructureUpdating?: boolean;
+  /** Whether the assistant is currently processing/streaming (for skeleton state) */
+  isProcessing?: boolean;
+  episodeHistory?: ConversationEpisode[];
+  currentEpisode?: CurrentEpisodeInfo;
 
   // Ranking
   rankedSections: CompanionSectionId[];
@@ -54,9 +65,10 @@ interface CompanionPanelProps {
 
 const MODE_DOTS: Record<ChatMode, string> = {
   casual: 'bg-cyan-400',
-  case: 'bg-amber-400',
-  inquiry_focus: 'bg-purple-400',
+  case: 'bg-warning-400',
+  inquiry_focus: 'bg-accent-400',
   graph: 'bg-teal-400',
+  orientation: 'bg-indigo-400',
 };
 
 export function CompanionPanel({
@@ -67,6 +79,11 @@ export function CompanionPanel({
   status = { inProgress: [], justCompleted: [] },
   sessionReceipts = [],
   caseState,
+  conversationStructure,
+  isStructureUpdating = false,
+  isProcessing = false,
+  episodeHistory = [],
+  currentEpisode,
   rankedSections,
   pinnedSection,
   onPinSection,
@@ -111,22 +128,26 @@ export function CompanionPanel({
         </div>
         <div className="flex items-center gap-1">
           {onTogglePosition && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onTogglePosition}
-              className={cn('p-1 rounded transition-colors text-xs', theme.panel.header, 'opacity-60 hover:opacity-100')}
+              className={cn('p-1 h-auto w-auto rounded transition-colors text-xs', theme.panel.header, 'opacity-60 hover:opacity-100')}
               aria-label={position === 'sidebar' ? 'Move to bottom' : 'Move to sidebar'}
             >
               {position === 'sidebar' ? '⊥' : '⊢'}
-            </button>
+            </Button>
           )}
           {onClose && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onClose}
-              className={cn('p-1 rounded transition-colors text-xs', theme.panel.header, 'opacity-60 hover:opacity-100')}
+              className={cn('p-1 h-auto w-auto rounded transition-colors text-xs', theme.panel.header, 'opacity-60 hover:opacity-100')}
               aria-label="Hide companion"
             >
               ×
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -140,15 +161,19 @@ export function CompanionPanel({
         )}
       >
         {visibleSections.length === 0 && (
-          <div className={cn('px-3 py-4 text-xs text-center', theme.thinking.textSubtle)}>
-            {mode === 'case' ? (
-              caseState
-                ? `${caseState.caseName} · ${caseState.inquiries.open} open inquiries, ${caseState.assumptions.unvalidated} untested assumptions`
-                : 'Chat about your decision to explore your thinking'
-            ) : mode === 'inquiry_focus'
-              ? 'Chat about this inquiry to surface insights'
-              : 'Send a message to see your reasoning structure'}
-          </div>
+          isProcessing ? (
+            <CompanionSkeleton />
+          ) : (
+            <div className={cn('px-3 py-4 text-xs text-center', theme.thinking.textSubtle)}>
+              {mode === 'case' ? (
+                caseState
+                  ? `${caseState.caseName} · ${caseState.inquiries.open} open inquiries, ${caseState.assumptions.unvalidated} untested assumptions`
+                  : 'Chat about your decision to explore your thinking'
+              ) : mode === 'inquiry_focus'
+                ? 'Chat about this inquiry to surface insights'
+                : 'Your reasoning companion is forming...'}
+            </div>
+          )
         )}
 
         {visibleSections.map((sectionId, index) => (
@@ -169,6 +194,10 @@ export function CompanionPanel({
               status={sectionId === 'status' ? status : undefined}
               sessionReceipts={sectionId === 'receipts' ? sessionReceipts : undefined}
               caseState={sectionId === 'case_state' ? caseState : undefined}
+              conversationStructure={sectionId === 'conversation_structure' ? conversationStructure : undefined}
+              isStructureUpdating={sectionId === 'conversation_structure' ? isStructureUpdating : undefined}
+              episodeHistory={sectionId === 'episode_timeline' ? episodeHistory : undefined}
+              currentEpisode={sectionId === 'episode_timeline' ? currentEpisode : undefined}
               onActionHint={sectionId === 'action_hints' ? onActionHint : undefined}
               onDismissCompleted={sectionId === 'status' ? onDismissCompleted : undefined}
               onViewCase={sectionId === 'case_state' ? onViewCase : undefined}
@@ -206,6 +235,10 @@ interface SectionRendererProps {
   status?: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts?: SessionReceipt[];
   caseState?: CaseState;
+  conversationStructure?: ConversationStructure;
+  isStructureUpdating?: boolean;
+  episodeHistory?: ConversationEpisode[];
+  currentEpisode?: CurrentEpisodeInfo;
   onActionHint?: (hint: ActionHint) => void;
   onDismissCompleted?: (id: string) => void;
   onViewCase?: () => void;
@@ -222,6 +255,10 @@ const SectionRenderer = memo(function SectionRenderer({
   status,
   sessionReceipts,
   caseState,
+  conversationStructure,
+  isStructureUpdating,
+  episodeHistory,
+  currentEpisode,
   onActionHint,
   onDismissCompleted,
   onViewCase,
@@ -253,11 +290,13 @@ const SectionRenderer = memo(function SectionRenderer({
           </div>
           <div className="px-3 pb-3 flex flex-wrap gap-1.5">
             {actionHints.map((hint) => (
-              <button
+              <Button
                 key={`${hint.type}-${hint.reason}`}
+                variant="ghost"
+                size="sm"
                 onClick={() => onActionHint?.(hint)}
                 className={cn(
-                  'inline-flex items-center gap-1 px-2 py-1 text-xs rounded',
+                  'inline-flex items-center gap-1 px-2 py-1 h-auto text-xs rounded',
                   'border transition-colors',
                   theme.thinking.border,
                   theme.thinking.bg,
@@ -268,7 +307,7 @@ const SectionRenderer = memo(function SectionRenderer({
               >
                 <span aria-hidden="true">{getActionHintIcon(hint.type)}</span>
                 <span>{getActionHintLabel(hint.type, hint.data)}</span>
-              </button>
+              </Button>
             ))}
           </div>
         </section>
@@ -291,6 +330,24 @@ const SectionRenderer = memo(function SectionRenderer({
     case 'case_state':
       return caseState ? (
         <CaseStateSection caseState={caseState} onViewCase={onViewCase} onViewInquiries={onViewInquiries} />
+      ) : null;
+
+    case 'conversation_structure':
+      return conversationStructure ? (
+        <ConversationStructureSection
+          structure={conversationStructure}
+          collapsed={!expanded}
+          isUpdating={isStructureUpdating}
+        />
+      ) : null;
+
+    case 'episode_timeline':
+      return episodeHistory && episodeHistory.length > 0 ? (
+        <EpisodeTimelineSection
+          episodes={episodeHistory}
+          currentEpisode={currentEpisode}
+          collapsed={!expanded}
+        />
       ) : null;
 
     default:

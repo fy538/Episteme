@@ -26,13 +26,13 @@ class Migration(migrations.Migration):
             model_name="skillpack",
             name="skills",
         ),
-        migrations.RemoveField(
-            model_name="skillpackmembership",
-            name="pack",
-        ),
         migrations.AlterUniqueTogether(
             name="skillpackmembership",
             unique_together=None,
+        ),
+        migrations.RemoveField(
+            model_name="skillpackmembership",
+            name="pack",
         ),
         migrations.RemoveField(
             model_name="skillpackmembership",

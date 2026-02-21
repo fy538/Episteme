@@ -3,7 +3,10 @@ Graph serializers — DRF serializers for Node, Edge, GraphDelta, and views.
 """
 from rest_framework import serializers
 
-from .models import Node, Edge, GraphDelta, CaseNodeReference, ProjectSummary
+from .models import (
+    Node, Edge, GraphDelta, CaseNodeReference, ProjectSummary,
+    ClusterHierarchy, ProjectInsight, ProjectOrientation,
+)
 
 
 class NodeSerializer(serializers.ModelSerializer):
@@ -99,22 +102,26 @@ class NodeDetailSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
+    def _get_cached_edges(self, obj):
+        """Fetch edges once and cache on the serializer instance."""
+        if not hasattr(self, '_edges_cache'):
+            from django.db.models import Q
+            self._edges_cache = list(
+                Edge.objects.filter(
+                    Q(source_node=obj) | Q(target_node=obj)
+                ).select_related('source_node', 'target_node')
+            )
+        return self._edges_cache
+
     def get_edges(self, obj):
         """Get all edges connected to this node."""
-        from django.db.models import Q
-        edges = Edge.objects.filter(
-            Q(source_node=obj) | Q(target_node=obj)
-        ).select_related('source_node', 'target_node')
-        return EdgeSerializer(edges, many=True).data
+        return EdgeSerializer(self._get_cached_edges(obj), many=True).data
 
     def get_neighbors(self, obj):
-        """Get 1-hop neighbor nodes."""
-        from django.db.models import Q
-        edge_qs = Edge.objects.filter(
-            Q(source_node=obj) | Q(target_node=obj)
-        )
+        """Get 1-hop neighbor nodes (reuses cached edges — single query)."""
+        edges = self._get_cached_edges(obj)
         neighbor_ids = set()
-        for edge in edge_qs:
+        for edge in edges:
             if edge.source_node_id != obj.id:
                 neighbor_ids.add(edge.source_node_id)
             if edge.target_node_id != obj.id:
@@ -214,3 +221,122 @@ class ProjectSummarySerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ClusterHierarchySerializer(serializers.ModelSerializer):
+    """Serializer for ClusterHierarchy — hierarchical cluster tree."""
+
+    diff_summary = serializers.SerializerMethodField()
+    metadata = serializers.SerializerMethodField()
+
+    def get_diff_summary(self, obj) -> str | None:
+        """Human-readable summary of changes from the previous hierarchy version (Plan 6)."""
+        meta = obj.metadata or {}
+        return meta.get('diff_summary', None)
+
+    def get_metadata(self, obj) -> dict:
+        """Return metadata without internal-only fields.
+
+        Strips `document_manifest` (used only for backend diff computation)
+        to keep the API payload lean. The `diff` object and basic stats
+        are preserved for the frontend.
+        """
+        meta = obj.metadata or {}
+        return {
+            'total_chunks': meta.get('total_chunks', 0),
+            'total_clusters': meta.get('total_clusters', 0),
+            'levels': meta.get('levels', 0),
+            'duration_ms': meta.get('duration_ms', 0),
+            'document_count': meta.get('document_count', 0),
+            'diff': meta.get('diff'),
+            'diff_summary': meta.get('diff_summary'),
+        }
+
+    class Meta:
+        model = ClusterHierarchy
+        fields = [
+            'id',
+            'project',
+            'version',
+            'status',
+            'tree',
+            'metadata',
+            'is_current',
+            'diff_summary',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'project', 'version', 'tree', 'metadata', 'is_current', 'diff_summary', 'created_at', 'updated_at']
+
+
+class ProjectInsightSerializer(serializers.ModelSerializer):
+    """Serializer for ProjectInsight — agent-discovered observations."""
+
+    class Meta:
+        model = ProjectInsight
+        fields = [
+            'id',
+            'project',
+            'insight_type',
+            'title',
+            'content',
+            'source_type',
+            'source_cluster_ids',
+            'source_case',
+            'status',
+            'confidence',
+            'metadata',
+            'orientation',
+            'display_order',
+            'action_type',
+            'linked_thread',
+            'research_result',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'project', 'insight_type', 'title', 'content',
+            'source_type', 'source_cluster_ids', 'source_case',
+            'confidence', 'metadata', 'orientation', 'display_order',
+            'action_type', 'linked_thread', 'research_result',
+            'created_at', 'updated_at',
+        ]
+
+
+class ProjectOrientationSerializer(serializers.ModelSerializer):
+    """Serializer for ProjectOrientation — lens-based project analysis."""
+
+    findings = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectOrientation
+        fields = [
+            'id',
+            'project',
+            'status',
+            'lens_type',
+            'lead_text',
+            'lens_scores',
+            'secondary_lens',
+            'secondary_lens_reason',
+            'is_current',
+            'generation_metadata',
+            'findings',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'project', 'status', 'lens_type', 'lead_text',
+            'lens_scores', 'secondary_lens', 'secondary_lens_reason',
+            'is_current', 'generation_metadata',
+            'created_at', 'updated_at',
+        ]
+
+    def get_findings(self, obj):
+        """Return non-superseded insights ordered by display_order."""
+        insights = (
+            obj.findings
+            .exclude(status='superseded')
+            .order_by('display_order')
+        )
+        return ProjectInsightSerializer(insights, many=True).data

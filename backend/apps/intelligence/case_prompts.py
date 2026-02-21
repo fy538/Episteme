@@ -36,14 +36,20 @@ def build_case_context_prompt(case) -> str:
     if case.constraints:
         sections.append("\n**Constraints:**")
         for c in case.constraints:
-            sections.append(f"- {c.get('type', 'General')}: {c.get('description', '')}")
+            if isinstance(c, dict):
+                sections.append(f"- {c.get('type', 'General')}: {c.get('description', '')}")
+            else:
+                sections.append(f"- General: {c}")
 
     # Success criteria
     if case.success_criteria:
         sections.append("\n**Success Criteria:**")
         for sc in case.success_criteria:
-            measurable = f" ({sc.get('measurable')})" if sc.get('measurable') else ""
-            sections.append(f"- {sc.get('criterion', '')}{measurable}")
+            if isinstance(sc, dict):
+                measurable = f" ({sc.get('measurable')})" if sc.get('measurable') else ""
+                sections.append(f"- {sc.get('criterion', '')}{measurable}")
+            else:
+                sections.append(f"- {sc}")
 
     # Stakeholders
     if case.stakeholders:
@@ -259,111 +265,6 @@ Format as JSON array:
     },
     ...
 ]"""
-
-    return prompt
-
-
-def build_brief_suggestion_prompt(case, brief_content: str) -> str:
-    """
-    Build a prompt to suggest improvements to a case brief.
-    """
-    context = build_case_context_prompt(case)
-
-    prompt = f"""{context}
-
----
-
-## Current Brief Content
-
-{brief_content[:3000]}  # Limit to avoid token overflow
-
----
-
-## Task: Suggest Brief Improvements
-
-Analyze this case brief and suggest specific improvements:
-
-1. **Content Gaps**: What important information is missing?
-2. **Clarity Issues**: What sections are unclear or could be better explained?
-3. **Structure Suggestions**: How could the brief be better organized?
-4. **Evidence Links**: What claims need evidence or citations?
-
-For each suggestion, provide:
-- section_id: Which section to modify (or "new" for new sections)
-- suggestion_type: "add" | "clarify" | "restructure" | "cite"
-- content: The specific change or addition
-- reason: Why this improves the brief
-
-Format as JSON array:
-[
-    {{
-        "section_id": "summary",
-        "suggestion_type": "add",
-        "content": "Add a sentence about...",
-        "reason": "This context is important because..."
-    }},
-    ...
-]"""
-
-    return prompt
-
-
-def build_decision_frame_suggestion_prompt(
-    title: str,
-    position: str,
-    conversation_context: Optional[str] = None
-) -> str:
-    """
-    Build a prompt to suggest decision frame components.
-
-    Used when creating a new case or refining an existing one.
-    """
-    prompt = f"""## Context
-Title: {title}
-Current Position: {position or 'Not yet defined'}
-
-"""
-    if conversation_context:
-        prompt += f"""### Conversation Context
-{conversation_context[:2000]}
-
-"""
-
-    prompt += """## Task: Suggest Decision Frame
-
-Help define the decision frame by suggesting:
-
-1. **Decision Question**: A clear, answerable question that captures the core decision
-   - Should be specific enough to act on
-   - Should capture the stakes and scope
-
-2. **Constraints** (2-4): Limitations or boundaries on the decision
-   - Budget, timeline, resources, legal, technical constraints
-
-3. **Success Criteria** (2-4): How we'll know if the decision was good
-   - Should be measurable where possible
-   - Should align with stakeholder interests
-
-4. **Key Stakeholders** (2-4): Who has interest in this decision
-   - What they care about
-   - Their level of influence
-
-Format as JSON:
-{
-    "decision_question": "Should we...",
-    "constraints": [
-        {"type": "budget", "description": "..."},
-        ...
-    ],
-    "success_criteria": [
-        {"criterion": "...", "measurable": "..."},
-        ...
-    ],
-    "stakeholders": [
-        {"name": "...", "interest": "...", "influence": "high|medium|low"},
-        ...
-    ]
-}"""
 
     return prompt
 

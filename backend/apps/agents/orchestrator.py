@@ -85,7 +85,7 @@ class AgentOrchestrator:
         
         # Step 2: Emit workflow start event
         start_event = await sync_to_async(EventService.append)(
-            event_type='AGENT_WORKFLOW_STARTED',
+            event_type=EventType.AGENT_WORKFLOW_STARTED,
             payload={
                 'agent_type': agent_type,
                 'thread_id': str(thread.id),
@@ -118,16 +118,10 @@ class AgentOrchestrator:
         }
 
         # Inject case-scoped graph context so agents are graph-aware
-        try:
-            from apps.graph.serialization import GraphSerializationService
-            project_id = await sync_to_async(lambda: case.project_id)()
-            graph_context, _ = await sync_to_async(
-                GraphSerializationService.serialize_for_llm
-            )(project_id, case_id=case.id)
-            if graph_context and 'No knowledge graph nodes yet' not in graph_context:
-                task_kwargs['graph_context'] = graph_context
-        except Exception:
-            pass  # Best-effort — agents work without graph context
+        from apps.chat.context_assembly import ContextAssemblyService
+        assembled = await ContextAssemblyService().assemble_for_agent(thread, case)
+        if assembled.retrieval_context:
+            task_kwargs['graph_context'] = assembled.retrieval_context
 
         # Agent-specific param mapping
         if agent_type == 'research':
@@ -207,7 +201,7 @@ class AgentOrchestrator:
         """
         # Emit progress event
         await sync_to_async(EventService.append)(
-            event_type='AGENT_PROGRESS',
+            event_type=EventType.AGENT_PROGRESS,
             payload={
                 'step': step,
                 'message': message,
@@ -260,7 +254,7 @@ class AgentOrchestrator:
         """
         # Emit completion event
         await sync_to_async(EventService.append)(
-            event_type='AGENT_COMPLETED',
+            event_type=EventType.AGENT_COMPLETED,
             payload={
                 'document_id': document_id,
                 'blocks_count': len(blocks),

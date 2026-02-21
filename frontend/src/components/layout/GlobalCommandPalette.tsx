@@ -38,6 +38,13 @@ export function GlobalCommandPalette({ children }: GlobalCommandPaletteProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Listen for custom event from sidebar search icon
+  useEffect(() => {
+    const handler = () => setIsOpen(true);
+    window.addEventListener('episteme:open-command-palette', handler);
+    return () => window.removeEventListener('episteme:open-command-palette', handler);
+  }, []);
+
   return (
     <>
       {children}

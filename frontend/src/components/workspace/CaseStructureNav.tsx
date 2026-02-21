@@ -15,6 +15,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { transitionDurations } from '@/lib/motion-config';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import {
+  CircleSmall as CircleIcon,
+  CheckCircleSmall as CheckCircleIcon,
+  CheckIcon,
+  WarningIcon,
+  ChevronRightIcon as ChevronIcon,
+  CloseIcon as XIcon,
+  QuestionMarkIcon as QuestionIcon,
+} from '@/components/ui/icons';
 import type { InvestigationPlan } from '@/lib/types/plan';
 import type { Inquiry } from '@/lib/types/case';
 import type { ActiveSkillSummary } from '@/lib/types/skill';
@@ -98,7 +109,7 @@ export function CaseStructureNav({
           {caseTitle}
         </h2>
         {plan && (
-          <span className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mt-0.5 block">
+          <span className="text-xs uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mt-0.5 block">
             {plan.stage}
           </span>
         )}
@@ -109,7 +120,7 @@ export function CaseStructureNav({
               <span
                 key={skill.id}
                 title={skill.name}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md bg-accent-50 dark:bg-accent-900/20 text-accent-600 dark:text-accent-400 border border-accent-200/50 dark:border-accent-800/50 truncate max-w-[120px]"
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs font-medium rounded-md bg-accent-50 dark:bg-accent-900/20 text-accent-600 dark:text-accent-400 border border-accent-200/50 dark:border-accent-800/50 truncate max-w-[120px]"
               >
                 <span className="w-1 h-1 rounded-full bg-accent-400 dark:bg-accent-500 flex-shrink-0" />
                 {skill.name}
@@ -160,7 +171,7 @@ export function CaseStructureNav({
               {expandedSections.has('phases') && phases.map(phase => (
                 <motion.div key={phase.id} {...motionProps} className="overflow-hidden">
                   <div className="px-3 py-1">
-                    <span className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500 font-medium">
+                    <span className="text-xs uppercase tracking-wider text-neutral-400 dark:text-neutral-500 font-medium">
                       {phase.title}
                     </span>
                   </div>
@@ -246,7 +257,7 @@ export function CaseStructureNav({
                         >
                           <span className={cn(
                             'mt-0.5 shrink-0',
-                            c.is_met ? 'text-emerald-500' : 'text-neutral-300 dark:text-neutral-600'
+                            c.is_met ? 'text-success-500' : 'text-neutral-300 dark:text-neutral-600'
                           )}>
                             {c.is_met ? (
                               <CheckIcon className="w-3.5 h-3.5" />
@@ -310,6 +321,12 @@ export function CaseStructureNav({
           onClick={() => onNavigate('inquiry-dashboard')}
         />
         <NavItem
+          icon={<GraphNavIcon />}
+          label="Graph"
+          isActive={viewMode === 'graph'}
+          onClick={() => onNavigate('graph')}
+        />
+        <NavItem
           icon={<ReadinessIcon />}
           label="Readiness"
           isActive={viewMode === 'readiness'}
@@ -319,13 +336,16 @@ export function CaseStructureNav({
 
       {/* Collapse toggle */}
       {!hideCollapseToggle && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onToggleCollapse}
-          className="flex items-center justify-center py-2 border-t border-neutral-200/60 dark:border-neutral-800/60 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          className="flex items-center justify-center w-full rounded-none py-2 border-t border-neutral-200/60 dark:border-neutral-800/60 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 h-auto"
           title={isCollapsed ? 'Expand nav' : 'Collapse nav'}
+          aria-label={isCollapsed ? 'Expand nav' : 'Collapse nav'}
         >
           <CollapseIcon className="w-4 h-4" />
-        </button>
+        </Button>
       )}
     </nav>
   );
@@ -349,10 +369,12 @@ function NavItem({
   indent?: boolean;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2 w-full text-left text-xs py-1.5 rounded-md transition-colors',
+        'flex items-center gap-2 w-full justify-start text-left text-xs py-1.5 rounded-md h-auto',
         indent ? 'px-5' : 'px-3',
         isActive
           ? 'bg-accent-100/60 dark:bg-accent-900/20 text-accent-700 dark:text-accent-300 font-medium'
@@ -362,11 +384,11 @@ function NavItem({
       <span className="shrink-0">{icon}</span>
       <span className="truncate flex-1">{label}</span>
       {badge !== undefined && (
-        <span className="text-[10px] text-neutral-400 dark:text-neutral-500 tabular-nums">
+        <span className="text-xs text-neutral-400 dark:text-neutral-500 tabular-nums">
           {badge}
         </span>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -380,23 +402,25 @@ function SectionHeader({
   onToggle: () => void;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onToggle}
       aria-expanded={isExpanded}
-      className="flex items-center gap-1.5 w-full px-3 py-1.5 text-left text-[10px] uppercase tracking-wider font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 rounded transition-colors"
+      className="flex items-center gap-1.5 w-full justify-start px-3 py-1.5 text-left text-xs uppercase tracking-wider font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 rounded h-auto"
     >
       <ChevronIcon className={cn('w-3 h-3 transition-transform', isExpanded && 'rotate-90')} />
       {label}
-    </button>
+    </Button>
   );
 }
 
 function InquiryStatusIcon({ status }: { status: string }) {
   if (status === 'resolved') {
-    return <CheckCircleIcon className="w-3.5 h-3.5 text-emerald-500" />;
+    return <CheckCircleIcon className="w-3.5 h-3.5 text-success-500" />;
   }
   if (status === 'investigating') {
-    return <LoadingIcon className="w-3.5 h-3.5 text-accent-500" />;
+    return <Spinner size="sm" className="text-accent-500" />;
   }
   return <CircleIcon className="w-3.5 h-3.5 text-neutral-300 dark:text-neutral-600" />;
 }
@@ -404,11 +428,11 @@ function InquiryStatusIcon({ status }: { status: string }) {
 function AssumptionStatusIcon({ status }: { status: string }) {
   switch (status) {
     case 'confirmed':
-      return <CheckIcon className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />;
+      return <CheckIcon className="w-3.5 h-3.5 text-success-500 shrink-0 mt-0.5" />;
     case 'challenged':
-      return <WarningIcon className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />;
+      return <WarningIcon className="w-3.5 h-3.5 text-warning-500 shrink-0 mt-0.5" />;
     case 'refuted':
-      return <XIcon className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />;
+      return <XIcon className="w-3.5 h-3.5 text-error-500 shrink-0 mt-0.5" />;
     default: // untested
       return <QuestionIcon className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" />;
   }
@@ -462,10 +486,14 @@ function ReadinessIcon() {
   );
 }
 
-function ChevronIcon({ className }: { className?: string }) {
+function GraphNavIcon() {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <line x1="8.59" y1="7.41" x2="15.42" y2="14.24" strokeLinecap="round" />
+      <line x1="15" y1="6" x2="9" y2="6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -479,66 +507,4 @@ function CollapseIcon({ className }: { className?: string }) {
   );
 }
 
-function CheckCircleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CircleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-    </svg>
-  );
-}
-
-function LoadingIcon({ className }: { className?: string }) {
-  return (
-    <svg className={cn(className, 'animate-spin')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-      <path d="M12 2a10 10 0 019.17 6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function WarningIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" strokeLinecap="round" />
-      <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-      <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function QuestionIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round" />
-    </svg>
-  );
-}
 

@@ -4,6 +4,7 @@ Graph URL routing — v2 API endpoints for the knowledge graph.
 from django.urls import path
 
 from . import views
+from . import streaming_views
 
 app_name = 'graph'
 
@@ -103,5 +104,73 @@ urlpatterns = [
         'projects/<uuid:project_id>/summary/regenerate/',
         views.project_summary_regenerate_view,
         name='project-summary-regenerate',
+    ),
+    path(
+        'projects/<uuid:project_id>/summary/stream/',
+        streaming_views.summary_generation_stream,
+        name='project-summary-stream',
+    ),
+
+    # ── Hierarchical Clustering ───────────────────────────────
+    path(
+        'projects/<uuid:project_id>/hierarchy/',
+        views.project_hierarchy_view,
+        name='project-hierarchy',
+    ),
+    path(
+        'projects/<uuid:project_id>/hierarchy/rebuild/',
+        views.project_hierarchy_rebuild_view,
+        name='project-hierarchy-rebuild',
+    ),
+    path(
+        'projects/<uuid:project_id>/hierarchy/search/',
+        views.hierarchy_chunk_search_view,
+        name='hierarchy-chunk-search',
+    ),
+
+    # ── Project Insights ──────────────────────────────────────
+    path(
+        'projects/<uuid:project_id>/insights/',
+        views.project_insights_view,
+        name='project-insights',
+    ),
+    path(
+        'projects/<uuid:project_id>/insights/<uuid:insight_id>/',
+        views.project_insight_update_view,
+        name='project-insight-update',
+    ),
+
+    # ── Project Orientation ───────────────────────────────────
+    path(
+        'projects/<uuid:project_id>/orientation/',
+        views.project_orientation_view,
+        name='project-orientation',
+    ),
+    path(
+        'projects/<uuid:project_id>/orientation/regenerate/',
+        views.project_orientation_regenerate_view,
+        name='project-orientation-regenerate',
+    ),
+    path(
+        'projects/<uuid:project_id>/orientation/stream/',
+        streaming_views.orientation_generation_stream,
+        name='project-orientation-stream',
+    ),
+    path(
+        'projects/<uuid:project_id>/orientation/accept-diff/',
+        views.orientation_accept_diff_view,
+        name='project-orientation-accept-diff',
+    ),
+
+    # ── Insight Actions (orientation exit ramps) ──────────────
+    path(
+        'projects/<uuid:project_id>/insights/<uuid:insight_id>/generate/',
+        views.exploration_angle_generate_view,
+        name='insight-generate-angle',
+    ),
+    path(
+        'projects/<uuid:project_id>/insights/<uuid:insight_id>/research/',
+        views.research_insight_view,
+        name='insight-research',
     ),
 ]

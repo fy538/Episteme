@@ -134,28 +134,32 @@ export function InquiryWorkspaceView({
     <div className="max-w-5xl mx-auto p-8">
       {/* Error banner */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
-          <p className="text-sm text-red-700">{error}</p>
-          <button
+        <div className="mb-4 p-3 bg-error-50 border border-error-200 rounded-lg flex items-center justify-between">
+          <p className="text-sm text-error-700">{error}</p>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setError(null)}
-            className="text-red-500 hover:text-red-700 text-sm font-medium"
+            className="text-error-500 hover:text-error-700"
           >
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Inquiry Header */}
       <div className="mb-6">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onBack}
-          className="text-sm text-accent-600 hover:text-accent-700 mb-3 flex items-center gap-1"
+          className="text-accent-600 hover:text-accent-700 mb-3 gap-1 px-0"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           Back to Case
-        </button>
+        </Button>
 
         {isEditingTitle ? (
           <div className="flex items-center gap-2 mb-3">
@@ -177,12 +181,13 @@ export function InquiryWorkspaceView({
             />
           </div>
         ) : (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => setIsEditingTitle(true)}
-            className="text-3xl tracking-tight font-bold text-neutral-900 hover:text-accent-600 transition-colors mb-3 text-left"
+            className="text-3xl tracking-tight font-bold text-neutral-900 hover:text-accent-600 mb-3 text-left h-auto px-0"
           >
             {inquiry.title}
-          </button>
+          </Button>
         )}
 
         {inquiry.description && (
@@ -194,8 +199,8 @@ export function InquiryWorkspaceView({
           <div className="flex items-center gap-3">
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${
               inquiry.status === 'resolved'
-                ? 'bg-green-100 text-green-700'
-                : 'bg-purple-100 text-purple-700'
+                ? 'bg-success-100 text-success-700'
+                : 'bg-accent-100 text-accent-700'
             }`}>
               {inquiry.status}
             </span>
@@ -207,7 +212,7 @@ export function InquiryWorkspaceView({
             disabled={deleting}
             size="sm"
             variant="outline"
-            className="text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            className="text-error-600 hover:bg-error-50 dark:text-error-400 dark:hover:bg-error-900/20"
           >
             {deleting ? 'Deleting...' : 'Delete Inquiry'}
           </Button>
@@ -217,26 +222,30 @@ export function InquiryWorkspaceView({
       {/* Tabs */}
       <div className="border-b border-neutral-200 dark:border-neutral-800 mb-6">
         <div className="flex gap-6">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setActiveTab('objections')}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`pb-3 px-1 rounded-none border-b-2 font-medium text-sm h-auto ${
               activeTab === 'objections'
                 ? 'border-accent-600 text-accent-600'
                 : 'border-transparent text-neutral-500 hover:text-neutral-700'
             }`}
           >
             Objections ({objections.length})
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setActiveTab('brief')}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+            className={`pb-3 px-1 rounded-none border-b-2 font-medium text-sm h-auto ${
               activeTab === 'brief'
                 ? 'border-accent-600 text-accent-600'
                 : 'border-transparent text-neutral-500 hover:text-neutral-700'
             }`}
           >
             Brief
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -251,10 +260,10 @@ export function InquiryWorkspaceView({
           ) : (
             <div className="space-y-3">
               {objections.map(obj => (
-                <div key={obj.id} className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div key={obj.id} className="p-4 bg-warning-50 border border-warning-200 rounded-lg">
                   <p className="font-medium text-neutral-900 mb-2">{obj.content}</p>
                   {obj.response && (
-                    <div className="mt-3 pt-3 border-t border-yellow-200">
+                    <div className="mt-3 pt-3 border-t border-warning-200">
                       <p className="text-sm text-neutral-700">
                         <span className="font-medium">Response:</span> {obj.response}
                       </p>
@@ -263,10 +272,10 @@ export function InquiryWorkspaceView({
                   <div className="mt-2 flex gap-2">
                     <span className={`text-xs px-2 py-1 rounded ${
                       obj.status === 'addressed'
-                        ? 'bg-green-100 text-green-700'
+                        ? 'bg-success-100 text-success-700'
                         : obj.status === 'dismissed'
                         ? 'bg-neutral-100 text-neutral-600'
-                        : 'bg-yellow-100 text-yellow-700'
+                        : 'bg-warning-100 text-warning-700'
                     }`}>
                       {obj.status}
                     </span>

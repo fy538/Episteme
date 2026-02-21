@@ -1,40 +1,33 @@
 /**
  * Navigation type definitions for the sidebar architecture.
  *
- * Sidebar tabs represent the top-level navigation modes (Decisions / Threads).
- * Panel modes represent the contextual content shown in the sidebar panel.
- *
- * Consolidated to 2 primary sections:
- *   - decisions (cases): Cases grouped by project
- *   - threads (conversations): Chat threads
+ * Three-mode progressive zoom sidebar:
+ *   - home: All projects + scratch threads
+ *   - project: Scoped to one project (landscape, threads, cases, sources)
+ *   - case: Scoped to one case (plan, inquiries, assumptions, criteria)
  */
 
-// --- Sidebar Tab ---
+// --- Sidebar Mode (new primary system) ---
 
-/** The two tabs shown in the sidebar panel header. */
-export type SidebarTab = 'decisions' | 'threads';
+/** The three sidebar modes representing progressive zoom levels. */
+export type SidebarMode =
+  | { mode: 'home' }
+  | { mode: 'project'; projectId: string }
+  | { mode: 'case'; caseId: string; projectId?: string };
 
-/** @deprecated Use SidebarTab instead. Kept for migration compatibility. */
-export type RailSection = 'conversations' | 'cases';
-
-// --- Panel ---
-
-export type PanelMode =
-  | { section: 'conversations'; activeThreadId?: string }
-  | { section: 'cases'; activeCaseId?: string; activeProjectId?: string }
-  | { section: 'none' };
+/** Direction of sidebar transition animation. */
+export type TransitionDirection = 'forward' | 'back' | null;
 
 // --- Navigation State ---
 
 export interface NavigationState {
-  /** Currently active sidebar tab */
-  activeTab: SidebarTab;
-  /** @deprecated Use activeTab. Derived from URL for backwards compat. */
-  railSection: RailSection;
-  /** Panel content mode (derived from tab + route params) */
-  panelMode: PanelMode;
+  /** Current sidebar mode — derived from URL */
+  sidebarMode: SidebarMode;
+  /** Direction of last mode transition (for slide animation) */
+  transitionDirection: TransitionDirection;
   /** Whether the context panel is collapsed */
   isPanelCollapsed: boolean;
-  /** Whether a tab transition animation is in progress */
+  /** Whether a mode transition animation is in progress */
   isTransitioning: boolean;
 }
+

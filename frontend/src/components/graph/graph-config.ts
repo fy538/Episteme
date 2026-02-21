@@ -155,6 +155,7 @@ export const CLUSTER_CONFIG = {
   /** Super-node sizing for collapsed clusters */
   superNodeMinWidth: 180,
   superNodeMinHeight: 120,
+  superNodeSummaryHeight: 160,
   superNodeMaxWidth: 300,
 } as const;
 

@@ -28,12 +28,13 @@ class CaseService:
         stakes: StakesLevel = StakesLevel.MEDIUM,
         thread_id: Optional[uuid.UUID] = None,
         project_id: Optional[uuid.UUID] = None,  # Phase 2
+        decision_question: str = "",
     ) -> tuple[Case, 'WorkingDocument']:
         """
         Create a new case with auto-generated brief.
-        
+
         Phase 2A: Now creates case brief automatically.
-        
+
         Args:
             user: User creating the case
             title: Case title
@@ -41,7 +42,8 @@ class CaseService:
             stakes: Stakes level
             thread_id: Optional linked thread
             project_id: Optional project
-        
+            decision_question: Core question being decided
+
         Returns:
             Tuple of (case, case_brief)
         """
@@ -75,6 +77,11 @@ class CaseService:
             created_from_event_id=event.id,
         )
         
+        # 2b. Set decision_question if provided
+        if decision_question:
+            case.decision_question = decision_question
+            case.save(update_fields=['decision_question'])
+
         # 3. If linked to thread, emit linking event
         if thread_id:
             EventService.append(
@@ -90,12 +97,41 @@ class CaseService:
                 thread_id=thread_id,
             )
         
-        # Auto-pull relevant project graph nodes into case (best-effort)
-        try:
-            from apps.graph.services import GraphService
-            GraphService.auto_pull_project_nodes(case)
-        except Exception:
-            logger.warning("Auto-pull failed for case %s", case.id, exc_info=True)
+        # Auto-pull or extract graph nodes for the case
+        from django.conf import settings
+        extraction_settings = getattr(settings, 'CASE_EXTRACTION_SETTINGS', {})
+
+        if extraction_settings.get('enabled', False) and case.decision_question:
+            # NEW: Dispatch async case extraction pipeline
+            # Use transaction.on_commit to avoid race where Celery picks up
+            # the task before the transaction creating the case has committed.
+            try:
+                from django.db import transaction as db_transaction
+                from apps.cases.tasks import run_case_extraction_pipeline
+                case.metadata = case.metadata or {}
+                case.metadata['extraction_status'] = 'pending'
+                case.save(update_fields=['metadata'])
+                case_id_str = str(case.id)
+                db_transaction.on_commit(
+                    lambda: run_case_extraction_pipeline.delay(case_id_str)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to dispatch case extraction for %s, falling back to auto_pull",
+                    case.id, exc_info=True,
+                )
+                try:
+                    from apps.graph.services import GraphService
+                    GraphService.auto_pull_project_nodes(case)
+                except Exception:
+                    logger.warning("Auto-pull fallback also failed for case %s", case.id, exc_info=True)
+        else:
+            # LEGACY: Pull pre-extracted project nodes by similarity
+            try:
+                from apps.graph.services import GraphService
+                GraphService.auto_pull_project_nodes(case)
+            except Exception:
+                logger.warning("Auto-pull failed for case %s", case.id, exc_info=True)
 
         return case, case_brief
 
@@ -223,17 +259,41 @@ class CaseService:
         from apps.inquiries.models import ElevationReason
         
         # Apply user edits
-        title = user_edits.get('title') if user_edits else analysis['suggested_title']
+        title = (user_edits.get('title') if user_edits else None) or analysis['suggested_title']
         position = analysis['position_draft']
-        
+
+        # Determine decision question from user_edits or analysis
+        decision_question = ''
+        if user_edits and 'decision_question' in user_edits:
+            decision_question = user_edits['decision_question']
+        elif analysis.get('suggested_question'):
+            decision_question = analysis['suggested_question']
+
+        # Resolve user-edited questions/assumptions/criteria (or fallback to analysis)
+        key_questions = analysis.get('key_questions', [])
+        if user_edits and 'key_questions' in user_edits:
+            key_questions = user_edits['key_questions']
+
+        assumptions = analysis.get('assumptions', [])
+        if user_edits and 'assumptions' in user_edits:
+            assumptions = user_edits['assumptions']
+
         # Create case (emits CASE_CREATED event internally)
         case, _ = cls.create_case(
             user=user,
             title=title,
             position=position,
-            thread_id=thread_id
+            thread_id=thread_id,
+            decision_question=decision_question,
         )
-        
+
+        # Transfer companion state for case extraction context
+        companion_state = analysis.get('companion_state', {})
+        if companion_state:
+            case.metadata = case.metadata or {}
+            case.metadata['companion_origin'] = companion_state
+            case.save(update_fields=['metadata'])
+
         # Emit analysis-based creation event
         EventService.append(
             event_type=EventType.CASE_CREATED_FROM_ANALYSIS,
@@ -253,7 +313,7 @@ class CaseService:
             correlation_id=correlation_id
         )
         
-        # Pre-populate brief with analysis content
+        # Pre-populate brief with analysis content (uses resolved questions/assumptions)
         brief_content = f"""# {title}
 
 ## Background
@@ -263,22 +323,22 @@ class CaseService:
 {position}
 
 ## Key Assumptions
-{chr(10).join(f"- {a}" for a in analysis.get('assumptions', []))}
+{chr(10).join(f"- {a}" for a in assumptions)}
 
 ## Open Questions
-{chr(10).join(f"- {q}" for q in analysis.get('key_questions', []))}
+{chr(10).join(f"- {q}" for q in key_questions)}
 
 ---
 *Auto-generated from conversation. Edit freely.*
 """
-        
+
         # Update the brief that was auto-created
         brief = case.main_brief
         if brief:
             brief.content_markdown = brief_content
-            
+
             # Store assumptions as metadata for highlighting
-            if analysis.get('assumptions'):
+            if assumptions:
                 brief.ai_structure = {
                     'assumptions': [
                         {
@@ -287,14 +347,14 @@ class CaseService:
                             'risk_level': 'medium',
                             'source': 'conversation_analysis'
                         }
-                        for a in analysis['assumptions']
+                        for a in assumptions
                     ]
                 }
             brief.save(update_fields=['content_markdown', 'ai_structure', 'updated_at'])
-        
-        # Auto-create inquiries from questions
+
+        # Auto-create inquiries from questions (uses resolved key_questions)
         inquiries = []
-        for question in analysis.get('key_questions', []):
+        for question in key_questions:
             inquiry = InquiryService.create_inquiry(
                 case=case,
                 title=question,
@@ -318,12 +378,57 @@ class CaseService:
             )
 
         # Create initial investigation plan
+        # Override criteria in analysis if user edited them
         from apps.cases.plan_service import PlanService
+        if user_edits and 'decision_criteria' in user_edits:
+            analysis_for_plan = {**analysis, 'decision_criteria': user_edits['decision_criteria']}
+        else:
+            analysis_for_plan = analysis
+
         plan, _plan_version = PlanService.create_initial_plan(
             case=case,
-            analysis=analysis,
+            analysis=analysis_for_plan,
             inquiries=inquiries,
             correlation_id=correlation_id,
         )
+
+        # Transfer companion state if available
+        companion_state = analysis.get('companion_state')
+        if companion_state:
+            case.metadata = case.metadata or {}
+            case.metadata['companion_origin'] = {
+                'established': companion_state.get('established', []),
+                'open_questions': companion_state.get('open_questions', []),
+                'eliminated': companion_state.get('eliminated', []),
+                'structure_type': companion_state.get('structure_type', ''),
+                'structure_snapshot': companion_state.get('structure_snapshot', {}),
+            }
+            case.save(update_fields=['metadata'])
+
+            # Transfer completed research results as working documents
+            try:
+                from apps.chat.models import ResearchResult
+                research_results = ResearchResult.objects.filter(
+                    thread_id=thread_id,
+                    status='complete',
+                )
+                for rr in research_results:
+                    research_md = f"""# Research: {rr.question}
+
+{rr.answer}
+
+## Sources
+{chr(10).join(f"- {s.get('title', 'Source')}: {s.get('snippet', '')[:200]}" for s in rr.sources) if rr.sources else "No external sources."}
+
+---
+*Auto-researched by companion during conversation.*
+"""
+                    WorkingDocumentService.create_working_document(
+                        case=case,
+                        title=f"Research: {rr.question[:80]}",
+                        content_markdown=research_md,
+                    )
+            except Exception:
+                logger.debug("Could not transfer research results to case", exc_info=True)
 
         return case, brief, inquiries, plan

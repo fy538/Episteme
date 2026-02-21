@@ -3,8 +3,11 @@ Skill preview service
 
 Analyzes a case to preview what skill would be created from it.
 """
+import logging
 from typing import Dict, List, Any
 from apps.cases.models import Case
+
+logger = logging.getLogger(__name__)
 
 
 class SkillPreviewService:
@@ -39,9 +42,8 @@ class SkillPreviewService:
             'stats': {}
         }
         
-        # Signal model has been removed. Signal type patterns are no longer available.
-        # TODO: Extract patterns from graph nodes instead.
-        
+        # Signal model was removed; evidence patterns are now extracted from graph nodes below.
+
         # Extract evidence patterns from graph nodes
         try:
             from apps.graph.models import Node, NodeType
@@ -122,8 +124,8 @@ class SkillPreviewService:
         
         try:
             preview['stats']['total_artifacts'] = case.artifacts.count()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Artifact count failed: %s", e)
         
         return preview
     

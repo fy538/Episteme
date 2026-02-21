@@ -106,6 +106,20 @@ export interface CaseHomeCaseSummary {
   what_changed_mind_response_at?: string;
   user_confidence?: number;
   user_confidence_updated_at?: string;
+  /** Case metadata including extraction pipeline status and analysis results */
+  metadata?: {
+    extraction_status?: string;
+    extraction_started_at?: string;
+    extraction_completed_at?: string;
+    extraction_error?: string;
+    extraction_result?: {
+      node_count: number;
+      edge_count: number;
+      chunk_count: number;
+    };
+    analysis?: Record<string, unknown>;
+    companion_origin?: Record<string, unknown>;
+  };
 }
 
 export interface CaseHomeData {

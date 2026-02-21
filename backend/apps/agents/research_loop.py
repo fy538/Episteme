@@ -880,8 +880,8 @@ class ResearchLoop:
                 if span:
                     try:
                         span.end(output={"response_length": len(response)})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Span end failed: %s", e)
 
                 # Record cost estimate (best-effort from text lengths)
                 if self._cost_tracker and step_name:
@@ -926,8 +926,8 @@ class ResearchLoop:
         if span:
             try:
                 span.end(level="ERROR", status_message=str(last_error))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Span error-end failed: %s", e)
         logger.exception(
             "research_llm_call_failed",
             extra={"error": str(last_error), "step": step_name, "attempts": attempt + 1},
@@ -941,8 +941,8 @@ class ResearchLoop:
         if self.progress_callback:
             try:
                 await self.progress_callback(step, message)
-            except Exception:
-                pass  # Progress is best-effort
+            except Exception as e:
+                logger.debug("Progress callback failed: %s", e)
 
     def _record_trajectory(
         self,
@@ -977,8 +977,8 @@ class ResearchLoop:
                 tokens_used=tokens_used,
                 cost_usd=cost_usd,
             )
-        except Exception:
-            pass  # Trajectory is best-effort
+        except Exception as e:
+            logger.debug("Trajectory recording failed: %s", e)
 
     async def _emit_checkpoint(
         self,
@@ -1019,8 +1019,8 @@ class ResearchLoop:
                 context_dict=context.to_dict(),
             )
             await asyncio.to_thread(self.checkpoint_callback, checkpoint)
-        except Exception:
-            pass  # Checkpoint is best-effort
+        except Exception as e:
+            logger.debug("Checkpoint emit failed: %s", e)
 
     # ── Resume from Checkpoint ────────────────────────────────────────────
 
@@ -1150,37 +1150,13 @@ def _mask_sources(findings: list) -> None:
 
 def _parse_json_from_response(text: str) -> dict:
     """
-    Extract JSON from an LLM response that may contain markdown code fences.
-    Robust to common LLM response patterns.
+    Extract JSON from an LLM response. Returns {} on failure.
+
+    Delegates to the shared utility in apps.common.utils.
     """
-    if not text:
-        return {}
-
-    # Try direct parse first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Try extracting from code fence
-    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Try finding first { to last }
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace > first_brace:
-        try:
-            return json.loads(text[first_brace : last_brace + 1])
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("json_parse_failed", extra={"text_preview": text[:200]})
-    return {}
+    from apps.common.utils import parse_json_from_response
+    result = parse_json_from_response(text)
+    return result if isinstance(result, dict) else (result or {})
 
 
 def _target_length_to_tokens(target: str) -> int:

@@ -3,10 +3,13 @@ Agent suggestion message creation helpers
 
 Creates inline agent suggestion messages in chat.
 """
+import logging
 from typing import Dict
 from django.utils import timezone
 from apps.chat.models import ChatThread
 from apps.chat.services import ChatService
+
+logger = logging.getLogger(__name__)
 
 
 async def create_agent_suggestion_message(
@@ -114,9 +117,9 @@ def _build_suggestion_text(
 
             if skill_names:
                 suggestion += f"\n**Using skills**: {', '.join(skill_names)}\n"
-        except Exception:
+        except Exception as e:
             # Skill names are optional enhancement, continue without them
-            pass
+            logger.warning("Could not fetch skill names: %s", e)
 
     # Add confidence and reasoning
     confidence_pct = int(inflection['confidence'] * 100)

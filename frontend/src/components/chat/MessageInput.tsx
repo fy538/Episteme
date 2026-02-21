@@ -12,11 +12,14 @@
  */
 
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
 import { UI } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import { ArrowUpIcon, StopIcon, ChatBubbleIcon as ModeIcon, ChevronDownIcon as ChevronIcon } from '@/components/ui/icons';
 
-type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph';
+type ChatMode = 'casual' | 'case' | 'inquiry_focus' | 'graph' | 'orientation';
 
 interface MessageInputProps {
   onSend: (content: string) => void;
@@ -41,6 +44,7 @@ const MODE_LABELS: Record<ChatMode, string> = {
   case: 'Case',
   inquiry_focus: 'Inquiry',
   graph: 'Graph',
+  orientation: 'Orientation',
 };
 
 // Get context-aware placeholder text
@@ -172,7 +176,7 @@ export function MessageInput({
               placeholder={placeholderText}
               disabled={disabled || isStreaming || isWaitingForFirstToken}
               rows={1}
-              className="w-full resize-none overflow-hidden min-h-[38px] max-h-[200px] border-0 bg-transparent text-[14px] placeholder:text-neutral-400 dark:placeholder:text-neutral-500 dark:text-neutral-100 focus:outline-none focus:ring-0 px-1 py-1"
+              className="w-full resize-none overflow-hidden min-h-[38px] max-h-[200px] border-0 bg-transparent text-sm placeholder:text-neutral-400 dark:placeholder:text-neutral-500 dark:text-neutral-100 focus:outline-none focus:ring-0 px-1 py-1"
             />
           </div>
           {/* Bottom toolbar */}
@@ -180,8 +184,10 @@ export function MessageInput({
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-400">Chat</span>
             </div>
-            <button
+            <Button
               type="submit"
+              variant="ghost"
+              size="icon"
               disabled={!canSend}
               className={cn(
                 'w-7 h-7 rounded flex items-center justify-center transition-colors',
@@ -191,7 +197,7 @@ export function MessageInput({
               )}
             >
               <ArrowUpIcon className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         </div>
       </form>
@@ -225,25 +231,21 @@ export function MessageInput({
             )}
           </div>
           {isStreaming && onStop ? (
-            <button type="button" onClick={onStop} className="px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+            <Button type="button" variant="outline" size="sm" onClick={onStop}>
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 bg-error-500 rounded-sm" />
                 Stop
               </span>
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               type="submit"
+              variant="default"
+              size="sm"
               disabled={!canSend}
-              className={cn(
-                'px-3 py-2 text-sm rounded-md transition-colors',
-                canSend
-                  ? 'bg-accent-600 text-white hover:bg-accent-700'
-                  : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-400 cursor-not-allowed'
-              )}
             >
               Send
-            </button>
+            </Button>
           )}
         </div>
       </form>
@@ -266,7 +268,7 @@ export function MessageInput({
             placeholder={placeholderText}
             disabled={disabled || isStreaming || isWaitingForFirstToken}
             rows={1}
-            className="w-full resize-none overflow-hidden min-h-[36px] max-h-[200px] border-0 bg-transparent text-[14px] leading-relaxed placeholder:text-neutral-400 dark:placeholder:text-neutral-500 dark:text-neutral-100 focus:outline-none focus:ring-0 p-0"
+            className="w-full resize-none overflow-hidden min-h-[36px] max-h-[200px] border-0 bg-transparent text-sm leading-relaxed placeholder:text-neutral-400 dark:placeholder:text-neutral-500 dark:text-neutral-100 focus:outline-none focus:ring-0 p-0"
           />
         </div>
 
@@ -276,25 +278,29 @@ export function MessageInput({
           <div className="flex items-center gap-1">
             {/* Mode dropdown */}
             <div className="relative" ref={modeMenuRef}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowModeMenu(!showModeMenu)}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors"
+                className="gap-1 px-2 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
               >
                 <ModeIcon className="w-3.5 h-3.5" />
                 <span>{MODE_LABELS[mode]}</span>
                 <ChevronIcon className="w-3 h-3" />
-              </button>
+              </Button>
 
               {/* Dropdown menu (opens upward) */}
               {showModeMenu && (
                 <div className="absolute bottom-full left-0 mb-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 z-50">
                   {(Object.keys(MODE_LABELS) as ChatMode[]).map((m) => (
-                    <button
+                    <Button
                       key={m}
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       className={cn(
-                        'w-full text-left px-3 py-1.5 text-xs transition-colors',
+                        'w-full justify-start rounded-none px-3 py-1.5 text-xs transition-colors',
                         m === mode
                           ? 'bg-neutral-100 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100'
                           : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-750'
@@ -305,7 +311,7 @@ export function MessageInput({
                       }}
                     >
                       {MODE_LABELS[m]}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}
@@ -326,16 +332,20 @@ export function MessageInput({
             )}
 
             {isStreaming && onStop ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={onStop}
-                className="w-7 h-7 rounded flex items-center justify-center bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
+                className="w-7 h-7 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
               >
                 <StopIcon className="w-3 h-3 text-neutral-600 dark:text-neutral-300" />
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="submit"
+                variant="ghost"
+                size="icon"
                 disabled={!canSend}
                 className={cn(
                   'w-7 h-7 rounded flex items-center justify-center transition-colors',
@@ -345,11 +355,11 @@ export function MessageInput({
                 )}
               >
                 {(isWaitingForFirstToken || isProcessing) ? (
-                  <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                  <Spinner size="sm" />
                 ) : (
                   <ArrowUpIcon className="w-3.5 h-3.5" />
                 )}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -358,36 +368,3 @@ export function MessageInput({
   );
 }
 
-// ─── Icons ──────────────────────────────────────────────────────
-
-function ArrowUpIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function StopIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
-function ModeIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}

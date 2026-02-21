@@ -18,8 +18,3 @@ class InvalidEventPayload(APIException):
     default_code = 'invalid_event_payload'
 
 
-class CaseNotFound(APIException):
-    """Raised when case is not found"""
-    status_code = 404
-    default_detail = 'Case not found'
-    default_code = 'case_not_found'

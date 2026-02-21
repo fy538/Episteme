@@ -6,12 +6,15 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
 
+from pgvector.django import VectorField
+
 from apps.common.models import TimestampedModel, UUIDModel
 
 
 class CaseStatus(models.TextChoices):
     DRAFT = 'draft', 'Draft'
     ACTIVE = 'active', 'Active'
+    DECIDED = 'decided', 'Decided'
     ARCHIVED = 'archived', 'Archived'
 
 
@@ -43,6 +46,12 @@ class CaseStage(models.TextChoices):
     INVESTIGATING = 'investigating', 'Investigating'
     SYNTHESIZING = 'synthesizing', 'Synthesizing'
     READY = 'ready', 'Ready'
+
+
+class ResolutionType(models.TextChoices):
+    """How a case was resolved."""
+    RESOLVED = 'resolved', 'Resolved'   # "I have an answer"
+    CLOSED = 'closed', 'Closed'         # "Closing without resolving"
 
 
 class Case(UUIDModel, TimestampedModel):
@@ -205,10 +214,18 @@ class Case(UUIDModel, TimestampedModel):
     )
 
     # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
-    embedding = models.JSONField(
+    embedding = VectorField(
+        dimensions=384,
         null=True,
         blank=True,
-        help_text="Pre-computed embedding vector for semantic search"
+        help_text="384-dim embedding from sentence-transformers"
+    )
+
+    # Flexible metadata store for extraction pipeline state, analysis results, etc.
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Flexible metadata: extraction status, analysis results, companion origin, etc."
     )
 
     class Meta:
@@ -518,6 +535,32 @@ class PlanVersion(UUIDModel):
         help_text="Event that triggered this version"
     )
 
+    TRIGGER_TYPE_CHOICES = [
+        ('initial', 'Initial generation'),
+        ('user_edit', 'User manual edit'),
+        ('chat_edit', 'Chat-based edit'),
+        ('ai_proposal_accepted', 'AI proposal accepted'),
+        ('extraction_complete', 'Extraction pipeline'),
+        ('research_complete', 'Research complete'),
+        ('document_added', 'Document added'),
+        ('regeneration', 'Plan regeneration'),
+        ('stage_change', 'Stage change'),
+        ('restore', 'Version restore'),
+    ]
+
+    trigger_type = models.CharField(
+        max_length=30,
+        choices=TRIGGER_TYPE_CHOICES,
+        default='initial',
+        blank=True,
+        help_text="What triggered this version creation"
+    )
+
+    generation_context = models.JSONField(
+        default=dict, blank=True,
+        help_text="Context that influenced this version: thread_id, message excerpt, research results, etc."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -532,7 +575,8 @@ class PlanVersion(UUIDModel):
         return f"v{self.version_number} of plan for {self.plan.case.title} ({self.created_by})"
 
     @classmethod
-    def create_snapshot(cls, plan, content, created_by, diff_summary='', diff_data=None):
+    def create_snapshot(cls, plan, content, created_by, diff_summary='', diff_data=None,
+                        trigger_type='initial', generation_context=None):
         """Create a new version snapshot. Mirrors WorkingDocumentVersion.create_snapshot."""
         from django.db import transaction
 
@@ -552,6 +596,8 @@ class PlanVersion(UUIDModel):
                 created_by=created_by,
                 diff_summary=diff_summary,
                 diff_data=diff_data,
+                trigger_type=trigger_type,
+                generation_context=generation_context or {},
             )
 
         # Update the plan's current version pointer
@@ -633,3 +679,84 @@ class CaseActiveSkill(models.Model):
 
     def __str__(self):
         return f"{self.case.title[:30]} <- {self.skill.name} (order={self.order})"
+
+
+class DecisionRecord(UUIDModel, TimestampedModel):
+    """
+    Records the user's final decision for a case.
+
+    Created when user transitions from investigating to decided.
+    Tracks the decision rationale, confidence, and long-term outcomes.
+    """
+    case = models.OneToOneField(
+        Case,
+        on_delete=models.CASCADE,
+        related_name='decision'
+    )
+    decision_text = models.TextField(
+        help_text="What was decided — the actual decision statement"
+    )
+    key_reasons = models.JSONField(
+        default=list,
+        help_text="List of reason strings: why this decision was made"
+    )
+    confidence_level = models.IntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Decision confidence 0-100"
+    )
+    caveats = models.TextField(
+        blank=True,
+        help_text="Known risks, conditions, or things to watch for"
+    )
+    resolution_type = models.CharField(
+        max_length=20,
+        choices=ResolutionType.choices,
+        default=ResolutionType.RESOLVED,
+        help_text="How this case was resolved"
+    )
+    resolution_profile = models.TextField(
+        blank=True,
+        default='',
+        help_text="LLM-generated narrative characterization of the resolution quality"
+    )
+    linked_assumption_ids = models.JSONField(
+        default=list,
+        help_text="UUIDs of assumptions the user marked as validated during decision"
+    )
+    decided_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the decision was formally recorded"
+    )
+    outcome_check_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When to check back on how the decision played out"
+    )
+    outcome_notes = models.JSONField(
+        default=list,
+        help_text="List of outcome observations: [{date, note, sentiment}]"
+    )
+
+    # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
+    embedding = VectorField(
+        dimensions=384,
+        null=True,
+        blank=True,
+        help_text="384-dim embedding from sentence-transformers"
+    )
+
+    # Flexible metadata: premortem comparison, analysis results, etc.
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Flexible metadata: premortem comparison, analysis results, etc."
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['case']),
+            models.Index(fields=['outcome_check_date']),
+        ]
+
+    def __str__(self):
+        return f"Decision for: {self.case.title[:50]}"

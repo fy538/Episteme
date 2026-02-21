@@ -10,6 +10,7 @@
 
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import type { GraphNode, NodeType } from '@/lib/types/graph';
 import { NODE_TYPE_CONFIG } from './graph-config';
 import type { LayoutMode } from './useGraphLayout';
@@ -70,12 +71,14 @@ export function GraphFilterBar({
         const isActive = isAllVisible || activeTypes!.includes(type);
 
         return (
-          <button
+          <Button
             key={type}
+            variant="ghost"
+            size="sm"
             onClick={() => toggleType(type)}
             className={cn(
-              'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium',
-              'border transition-all',
+              'inline-flex items-center gap-1 px-2 py-1 h-auto text-xs font-medium',
+              'border',
               isActive
                 ? cn(config.badgeBg, config.badgeText, config.borderClass)
                 : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 border-neutral-200 dark:border-neutral-700 opacity-50',
@@ -84,12 +87,12 @@ export function GraphFilterBar({
           >
             {config.label}
             <span className={cn(
-              'ml-0.5 text-[9px]',
+              'ml-0.5 text-xs',
               isActive ? 'opacity-70' : 'opacity-40',
             )}>
               {count}
             </span>
-          </button>
+          </Button>
         );
       })}
 
@@ -97,13 +100,15 @@ export function GraphFilterBar({
       <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700 mx-1" />
 
       {/* Layout mode toggle */}
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onLayoutToggle}
         className={cn(
-          'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium',
+          'inline-flex items-center gap-1 px-2 py-1 h-auto text-xs font-medium',
           'border border-neutral-200 dark:border-neutral-700',
           'bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400',
-          'hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors',
+          'hover:bg-neutral-50 dark:hover:bg-neutral-700',
         )}
         title={`Switch to ${layoutMode === 'clustered' ? 'tree' : 'clustered'} layout`}
       >
@@ -118,15 +123,17 @@ export function GraphFilterBar({
             Tree
           </>
         )}
-      </button>
+      </Button>
 
       {/* Cluster hull toggle (only in clustered mode) */}
       {layoutMode === 'clustered' && onClusterToggle && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onClusterToggle}
           className={cn(
-            'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium',
-            'border transition-colors',
+            'inline-flex items-center gap-1 px-2 py-1 h-auto text-xs font-medium',
+            'border',
             showClusters
               ? 'border-accent-300 dark:border-accent-700 bg-accent-50 dark:bg-accent-950/40 text-accent-700 dark:text-accent-300'
               : 'border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500',
@@ -135,7 +142,7 @@ export function GraphFilterBar({
         >
           <HullIcon className="w-3.5 h-3.5" />
           Clusters
-        </button>
+        </Button>
       )}
     </div>
   );

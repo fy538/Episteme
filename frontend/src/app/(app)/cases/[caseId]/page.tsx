@@ -36,6 +36,7 @@ import { DiffViewer } from '@/components/ui/DiffViewer';
 import { Button } from '@/components/ui/button';
 import { ReadinessChecklist } from '@/components/readiness';
 import { DocumentListView } from '@/components/documents/DocumentListView';
+import { CaseGraphView } from '@/components/workspace/case/CaseGraphView';
 import { useQueryClient } from '@tanstack/react-query';
 import { documentsAPI } from '@/lib/api/documents';
 import { plansAPI } from '@/lib/api/plans';
@@ -50,7 +51,8 @@ import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { transitionDurations, easingCurves } from '@/lib/motion-config';
 import type { ViewMode } from '@/hooks/useCaseWorkspace';
 import type { ChatThread } from '@/lib/types/chat';
-import { ChatBubbleIcon } from '@/components/ui/icons';
+import { ChatBubbleIcon, QuestionMarkIcon } from '@/components/ui/icons';
+import { PageTitle } from '@/components/ui/headings';
 
 export default function CaseWorkspacePage({
   params,
@@ -114,6 +116,38 @@ export default function CaseWorkspacePage({
     }
   }, [params.caseId, queryClient, ws]);
 
+  // Handle accepting a position update from inline card
+  // Uses params.caseId for both API call and query invalidation for consistency
+  const handleAcceptPositionUpdate = useCallback(async (
+    _caseId: string,
+    newPosition: string,
+    reason: string,
+    messageId?: string,
+  ) => {
+    try {
+      await casesAPI.acceptPositionUpdate(params.caseId, newPosition, reason, messageId);
+      queryClient.invalidateQueries({ queryKey: ['case-home', params.caseId] });
+      ws.loadWorkspace();
+    } catch (error) {
+      console.error('Failed to accept position update:', error);
+      throw error; // Rethrow so card can show error UI
+    }
+  }, [params.caseId, queryClient, ws]);
+
+  // Handle dismissing a position update from inline card
+  const handleDismissPositionUpdate = useCallback(async (
+    _caseId: string,
+    messageId?: string,
+  ) => {
+    try {
+      if (messageId) {
+        await casesAPI.dismissPositionUpdate(params.caseId, messageId);
+      }
+    } catch (error) {
+      console.error('Failed to dismiss position update:', error);
+    }
+  }, [params.caseId]);
+
   // Reduced motion preference (used for view transitions)
   const prefersReducedMotion = useReducedMotion();
 
@@ -135,9 +169,10 @@ export default function CaseWorkspacePage({
     if (!enterFocus && ws.isChatCollapsed) ws.toggleChat();
   }, [nav, ws]);
 
-  // Keyboard shortcuts for chat panel and focus mode
+  // Keyboard shortcuts for chat panel, focus mode, and graph view
   useKeyboardShortcut(['Cmd', '/'], () => ws.toggleChat(), { enabled: !ws.loading });
   useKeyboardShortcut(['Cmd', '\\'], () => toggleFocusMode(), { enabled: !ws.loading });
+  useKeyboardShortcut(['Cmd', 'g'], () => ws.setViewMode('graph'), { enabled: !ws.loading });
 
   if (ws.loading || !ws.caseData) {
     return (
@@ -204,6 +239,14 @@ export default function CaseWorkspacePage({
       category: 'navigation',
       keywords: ['documents', 'upload', 'files', 'pdf'],
       action: () => ws.setViewMode('document'),
+    },
+    {
+      id: 'view-graph',
+      label: 'View investigation graph',
+      category: 'navigation',
+      keywords: ['graph', 'investigation', 'claims', 'evidence', 'CEAT', 'network', 'nodes'],
+      action: () => ws.setViewMode('graph'),
+      shortcut: 'Cmd+G',
     },
     {
       id: 'view-research',
@@ -364,6 +407,7 @@ export default function CaseWorkspacePage({
     'inquiry-dashboard': 'Research',
     readiness: 'Readiness',
     document: 'Documents',
+    graph: 'Investigation Graph',
   };
   const currentViewLabel = VIEW_LABELS[ws.viewMode];
 
@@ -375,6 +419,7 @@ export default function CaseWorkspacePage({
           <motion.div key="home" className="h-full" {...viewTransition}>
             <CaseHome
               caseId={params.caseId}
+              projectId={ws.caseData?.project ?? undefined}
               onViewInquiry={ws.handleOpenInquiry}
               onViewAll={() => ws.setViewMode('inquiry-dashboard')}
               onChatAbout={(payload) => {
@@ -382,6 +427,7 @@ export default function CaseWorkspacePage({
                 setChatSource({ source_type: payload.source_type, source_id: payload.source_id });
               }}
               onGeneratePlan={handleGeneratePlan}
+              onViewGraph={() => ws.setViewMode('graph')}
             />
           </motion.div>
         );
@@ -406,9 +452,9 @@ export default function CaseWorkspacePage({
             <div className="mb-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-2xl tracking-tight font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+                  <PageTitle className="font-semibold mb-2">
                     Decision Readiness
-                  </h1>
+                  </PageTitle>
                   <p className="text-neutral-600 dark:text-neutral-400">
                     Complete these items before deciding with confidence
                   </p>
@@ -433,9 +479,9 @@ export default function CaseWorkspacePage({
             <div className="mb-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-2xl tracking-tight font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+                  <PageTitle className="font-semibold mb-2">
                     Investigation Dashboard
-                  </h1>
+                  </PageTitle>
                   <p className="text-neutral-600 dark:text-neutral-400">
                     Overview of all inquiries and investigation progress
                   </p>
@@ -461,6 +507,27 @@ export default function CaseWorkspacePage({
               projectId={ws.caseData!.project ?? ''}
               documents={ws.documents}
               onRefresh={ws.loadWorkspace}
+            />
+          </motion.div>
+        );
+
+      case 'graph':
+        return (
+          <motion.div key="graph" className="h-full" {...viewTransition}>
+            <CaseGraphView
+              projectId={ws.caseData?.project ?? ''}
+              caseId={params.caseId}
+              decisionQuestion={ws.caseData?.decision_question}
+              onAskAboutNode={(node) => {
+                const prompt = node.node_type === 'assumption'
+                  ? `How can we test this assumption: "${node.content}"?`
+                  : node.node_type === 'tension'
+                  ? `How should we resolve this tension: "${node.content}"?`
+                  : `Tell me more about: "${node.content}"`;
+                setChatPrefill(prompt);
+                setChatSource({ source_type: node.node_type, source_id: node.id });
+              }}
+              onViewDocuments={() => ws.setViewMode('document')}
             />
           </motion.div>
         );
@@ -492,6 +559,8 @@ export default function CaseWorkspacePage({
     status: ws.companionState.status,
     sessionReceipts: ws.companionState.sessionReceipts,
     caseState: ws.companionState.caseState,
+    episodeHistory: ws.episodeHistory,
+    currentEpisode: ws.currentEpisode,
     rankedSections: ws.rankedSections,
     pinnedSection: ws.pinnedSection,
     onPinSection: ws.setPinnedSection,
@@ -526,24 +595,31 @@ export default function CaseWorkspacePage({
             Home
           </Link>
           <ChevronRight />
-          {projectName && (
+          {projectName && ws.caseData.project && (
             <>
-              <span className="text-xs text-neutral-400 dark:text-neutral-500">{projectName}</span>
+              <Link
+                href={`/projects/${ws.caseData.project}`}
+                className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors truncate max-w-[160px]"
+              >
+                {projectName}
+              </Link>
               <ChevronRight />
             </>
           )}
           {/* Case title — clickable to navigate back to case home */}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={ws.handleViewHome}
             className={cn(
-              'text-xs truncate max-w-[240px] transition-colors',
+              'text-xs truncate max-w-[240px] transition-colors h-auto px-1 py-0',
               ws.viewMode === 'home'
                 ? 'font-medium text-neutral-700 dark:text-neutral-200'
                 : 'text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300'
             )}
           >
             {ws.caseData.title}
-          </button>
+          </Button>
 
           {/* Animated view label */}
           <AnimatePresence mode="wait">
@@ -570,23 +646,27 @@ export default function CaseWorkspacePage({
           {/* Chat toggle button (shown when collapsed) */}
           {ws.isChatCollapsed && (
             <Tooltip content={<span className="flex items-center gap-2">Show chat <KeyboardShortcut keys={['⌘', '/']} /></span>} side="bottom">
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={ws.toggleChat}
-                className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                className="p-1 h-auto w-auto text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
               >
                 <ChatBubbleIcon className="w-3.5 h-3.5" />
-              </button>
+              </Button>
             </Tooltip>
           )}
 
           {/* Help button */}
           <Tooltip content={<span className="flex items-center gap-2">Shortcuts <KeyboardShortcut keys={['⌘', '⇧', '?']} /></span>} side="bottom">
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => window.dispatchEvent(new CustomEvent('show-keyboard-help'))}
-              className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+              className="p-1 h-auto w-auto text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
             >
               <QuestionMarkIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
         </div>
 
@@ -595,7 +675,7 @@ export default function CaseWorkspacePage({
           {/* Main Content */}
           <main className={cn(
             'flex-1 min-h-0',
-            ws.viewMode === 'brief' ? 'overflow-hidden' : 'overflow-y-auto',
+            (ws.viewMode === 'brief' || ws.viewMode === 'graph') ? 'overflow-hidden' : 'overflow-y-auto',
           )}>
             <AnimatePresence mode="wait" initial={false}>
               {renderMainContent()}
@@ -606,12 +686,14 @@ export default function CaseWorkspacePage({
           {ws.isChatCollapsed ? (
             <aside className="w-10 border-l border-neutral-200/60 dark:border-neutral-800/60 shrink-0 flex flex-col items-center pt-3">
               <Tooltip content={<span className="flex items-center gap-2">Open chat <KeyboardShortcut keys={['⌘', '/']} /></span>} side="left">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={ws.toggleChat}
-                  className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                  className="p-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
                 >
                   <ChatBubbleIcon className="w-4 h-4" />
-                </button>
+                </Button>
               </Tooltip>
             </aside>
           ) : (
@@ -637,6 +719,8 @@ export default function CaseWorkspacePage({
                   onPrefillConsumed={() => { setChatPrefill(null); setChatSource(null); }}
                   chatSource={chatSource}
                   onAcceptPlanDiff={handleAcceptPlanDiff}
+                  onAcceptPositionUpdate={handleAcceptPositionUpdate}
+                  onDismissPositionUpdate={handleDismissPositionUpdate}
                 />
               </div>
             </aside>
@@ -688,12 +772,3 @@ function ChevronRight() {
   );
 }
 
-function QuestionMarkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round" />
-    </svg>
-  );
-}

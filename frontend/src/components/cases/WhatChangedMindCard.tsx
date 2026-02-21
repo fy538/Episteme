@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
 import { casesAPI } from '@/lib/api/cases';
 
 type ResponseOption = 'updated_view' | 'proceeding_anyway' | 'not_materialized';
@@ -19,8 +20,8 @@ const RESPONSE_OPTIONS: { value: ResponseOption; label: string; icon: string }[]
 ];
 
 const RESPONSE_LABELS: Record<string, { label: string; color: string }> = {
-  'updated_view': { label: 'You updated your view', color: 'text-emerald-600 dark:text-emerald-400' },
-  'proceeding_anyway': { label: 'Acknowledged but proceeding', color: 'text-amber-600 dark:text-amber-400' },
+  'updated_view': { label: 'You updated your view', color: 'text-success-600 dark:text-success-400' },
+  'proceeding_anyway': { label: 'Acknowledged but proceeding', color: 'text-warning-600 dark:text-warning-400' },
   'not_materialized': { label: 'None materialized', color: 'text-neutral-500 dark:text-neutral-400' },
 };
 
@@ -66,7 +67,7 @@ export function WhatChangedMindCard({
 
   // Not yet responded — show the prompt
   return (
-    <div className="p-4 rounded-lg border border-blue-200/80 dark:border-blue-800/80 bg-blue-50/50 dark:bg-blue-900/20 space-y-3">
+    <div className="p-4 rounded-lg border border-info-200/80 dark:border-info-800/80 bg-info-50/50 dark:bg-info-900/20 space-y-3">
       <div>
         <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
           Earlier, you said this would change your mind:
@@ -82,21 +83,22 @@ export function WhatChangedMindCard({
 
       <div className="flex flex-col gap-2">
         {RESPONSE_OPTIONS.map(opt => (
-          <button
+          <Button
             key={opt.value}
+            variant="outline"
             onClick={() => handleRespond(opt.value)}
             disabled={isSaving}
             aria-label={opt.label}
-            className="flex items-center gap-2 px-3 py-2 text-sm text-left rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-2 h-auto text-sm text-left justify-start"
           >
             <span>{opt.icon}</span>
             <span>{opt.label}</span>
-          </button>
+          </Button>
         ))}
       </div>
 
       {error && (
-        <p className="text-xs text-red-500 mt-2" role="alert">{error}</p>
+        <p className="text-xs text-error-500 mt-2" role="alert">{error}</p>
       )}
     </div>
   );

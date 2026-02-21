@@ -97,10 +97,10 @@ function SectionDetail({
           </h4>
         </div>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
+          <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             {SECTION_TYPE_LABELS[section.section_type]}
           </span>
-          <span className={cn('text-[10px] font-medium', config.color)}>
+          <span className={cn('text-xs font-medium', config.color)}>
             {config.label}
           </span>
         </div>
@@ -109,23 +109,23 @@ function SectionDetail({
       {/* Grounding data */}
       {section.is_linked && grounding_data.evidence_count !== undefined && (
         <div className="px-3">
-          <h5 className="text-[10px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1.5">
+          <h5 className="text-xs font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1.5">
             Evidence
           </h5>
           <div className="space-y-1">
-            <EvidenceBar label="Supporting" count={grounding_data.supporting ?? 0} color="bg-emerald-400" />
-            <EvidenceBar label="Contradicting" count={grounding_data.contradicting ?? 0} color="bg-red-400" />
+            <EvidenceBar label="Supporting" count={grounding_data.supporting ?? 0} color="bg-success-400" />
+            <EvidenceBar label="Contradicting" count={grounding_data.contradicting ?? 0} color="bg-error-400" />
             <EvidenceBar label="Neutral" count={grounding_data.neutral ?? 0} color="bg-neutral-300" />
           </div>
-          <div className="flex items-center gap-3 mt-2 text-[10px] text-neutral-500 dark:text-neutral-400">
+          <div className="flex items-center gap-3 mt-2 text-xs text-neutral-500 dark:text-neutral-400">
             <span>{grounding_data.evidence_count} total</span>
             {(grounding_data.tensions_count ?? 0) > 0 && (
-              <span className="text-red-500">
+              <span className="text-error-500">
                 {grounding_data.tensions_count} tension{(grounding_data.tensions_count ?? 0) !== 1 ? 's' : ''}
               </span>
             )}
             {(grounding_data.unvalidated_assumptions ?? 0) > 0 && (
-              <span className="text-amber-500">
+              <span className="text-warning-500">
                 {grounding_data.unvalidated_assumptions} unvalidated
               </span>
             )}
@@ -136,22 +136,24 @@ function SectionDetail({
       {/* Linked inquiry */}
       {section.inquiry_title && (
         <div className="px-3">
-          <h5 className="text-[10px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1">
+          <h5 className="text-xs font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1">
             Linked Inquiry
           </h5>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => section.inquiry && onNavigateToInquiry?.(section.inquiry)}
-            className="text-xs text-accent-600 dark:text-accent-400 hover:underline"
+            className="text-xs text-accent-600 dark:text-accent-400 hover:underline h-auto p-0"
           >
             {section.inquiry_title}
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Annotations */}
       {section.annotations.length > 0 && (
         <div className="px-3">
-          <h5 className="text-[10px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1.5">
+          <h5 className="text-xs font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500 mb-1.5">
             Annotations ({section.annotations.length})
           </h5>
           <div className="space-y-2">
@@ -174,7 +176,7 @@ function SectionDetail({
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-[10px]"
+          className="h-6 px-2 text-xs"
           onClick={() => onStartChat?.(
             `Let's discuss ${section.heading}${section.inquiry_title ? ` (${section.inquiry_title})` : ''}`
           )}
@@ -185,7 +187,7 @@ function SectionDetail({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[10px]"
+            className="h-6 px-2 text-xs"
             onClick={() => section.inquiry && onNavigateToInquiry?.(section.inquiry)}
           >
             View inquiry
@@ -195,7 +197,7 @@ function SectionDetail({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[10px]"
+            className="h-6 px-2 text-xs"
             onClick={() => onCreateInquiry?.(
               `Investigate: ${section.heading}`,
               section.id
@@ -246,7 +248,7 @@ function OverallSummary({
               strokeLinecap="round"
             />
           </svg>
-          <span className={cn('absolute text-[10px] font-bold', scoreColor)}>
+          <span className={cn('absolute text-xs font-bold', scoreColor)}>
             {overallGrounding}
           </span>
         </div>
@@ -260,7 +262,7 @@ function OverallSummary({
               .map(([status, count]) => (
                 <span
                   key={status}
-                  className={cn('flex items-center gap-0.5 text-[10px]', GROUNDING_SUMMARY[status].color)}
+                  className={cn('flex items-center gap-0.5 text-xs', GROUNDING_SUMMARY[status].color)}
                 >
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
                   {count}
@@ -273,7 +275,7 @@ function OverallSummary({
       {/* Blocking annotations */}
       {blockingAnnotations.length > 0 && (
         <div className="px-3">
-          <h5 className="text-[10px] font-medium uppercase tracking-wider text-red-500 dark:text-red-400 mb-1.5">
+          <h5 className="text-xs font-medium uppercase tracking-wider text-error-500 dark:text-error-400 mb-1.5">
             Blocking Issues ({blockingAnnotations.length})
           </h5>
           <div className="space-y-1.5">
@@ -291,7 +293,7 @@ function OverallSummary({
               );
             })}
             {blockingAnnotations.length > 5 && (
-              <p className="text-[10px] text-neutral-400">
+              <p className="text-xs text-neutral-400">
                 +{blockingAnnotations.length - 5} more
               </p>
             )}
@@ -324,7 +326,7 @@ function EvidenceBar({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-neutral-500 dark:text-neutral-400 w-20 text-right">
+      <span className="text-xs text-neutral-500 dark:text-neutral-400 w-20 text-right">
         {label}
       </span>
       <div className="flex-1 h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden">
@@ -335,7 +337,7 @@ function EvidenceBar({
           />
         )}
       </div>
-      <span className="text-[10px] text-neutral-500 w-4 text-center">{count}</span>
+      <span className="text-xs text-neutral-500 w-4 text-center">{count}</span>
     </div>
   );
 }
@@ -358,17 +360,19 @@ function AnnotationItem({
 
   return (
     <div className="flex items-start gap-1.5 text-xs group/ann">
-      <span className={cn('flex-shrink-0 mt-0.5 text-[10px]', config.color)}>
+      <span className={cn('flex-shrink-0 mt-0.5 text-xs', config.color)}>
         {config.icon}
       </span>
       <div className="flex-1 min-w-0">
-        <span className="text-neutral-700 dark:text-neutral-300 text-[11px] leading-tight">
+        <span className="text-neutral-700 dark:text-neutral-300 text-xs leading-tight">
           {annotation.description}
         </span>
         {actionConfig && onCreateInquiry && (
           <div className="mt-0.5 opacity-0 group-hover/ann:opacity-100 transition-opacity">
-            <button
-              className="text-[9px] px-1.5 py-0.5 rounded border border-accent-200 text-accent-600 hover:bg-accent-50 dark:border-accent-800 dark:text-accent-400 dark:hover:bg-accent-900/20"
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs px-1.5 py-0.5 h-auto border-accent-200 text-accent-600 hover:bg-accent-50 dark:border-accent-800 dark:text-accent-400 dark:hover:bg-accent-900/20"
               onClick={() => {
                 const title = actionConfig.actionType === 'investigate'
                   ? `Investigate: ${annotation.description.slice(0, 80)}`
@@ -379,18 +383,20 @@ function AnnotationItem({
               }}
             >
               {actionConfig.label}
-            </button>
+            </Button>
           </div>
         )}
       </div>
       {onDismiss && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => onDismiss(sectionId, annotation.id)}
-          className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 flex-shrink-0 opacity-0 group-hover/ann:opacity-100 transition-opacity"
+          className="h-5 w-5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 flex-shrink-0 opacity-0 group-hover/ann:opacity-100 transition-opacity"
           title="Dismiss"
         >
           &times;
-        </button>
+        </Button>
       )}
     </div>
   );

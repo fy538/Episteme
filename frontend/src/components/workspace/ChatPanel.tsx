@@ -26,6 +26,8 @@ import { useRouter } from 'next/navigation';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { ChatModeHeader } from '@/components/chat/ChatModeHeader';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { documentsAPI } from '@/lib/api/documents';
 import { chatAPI } from '@/lib/api/chat';
 import { useState } from 'react';
@@ -62,6 +64,12 @@ interface ChatPanelProps {
   chatSource?: { source_type: string; source_id: string } | null;
   /** Handle accepting a plan diff proposal from inline card */
   onAcceptPlanDiff?: (proposedContent: Record<string, unknown>, diffSummary: string, diffData: Record<string, unknown>) => void;
+  /** Handle accepting an orientation diff proposal from inline card */
+  onAcceptOrientationDiff?: (orientationId: string, proposedState: Record<string, unknown>, diffSummary: string, diffData: Record<string, unknown>) => void;
+  /** Handle accepting a position update proposal from inline card */
+  onAcceptPositionUpdate?: (caseId: string, newPosition: string, reason: string, messageId?: string) => Promise<void> | void;
+  /** Handle dismissing a position update proposal from inline card */
+  onDismissPositionUpdate?: (caseId: string, messageId?: string) => Promise<void> | void;
 }
 
 export function ChatPanel({
@@ -81,6 +89,9 @@ export function ChatPanel({
   onPrefillConsumed,
   chatSource,
   onAcceptPlanDiff,
+  onAcceptOrientationDiff,
+  onAcceptPositionUpdate,
+  onDismissPositionUpdate,
 }: ChatPanelProps) {
   const router = useRouter();
   const state = useChatPanelState({
@@ -126,7 +137,12 @@ export function ChatPanel({
       const lastUserMessage = userMessages[userMessages.length - 1];
       const userFocus = lastUserMessage?.content;
 
-      const analysis = await chatAPI.analyzeForCase(threadId, userFocus);
+      // Forward finding context when discussion originated from orientation
+      const insightId = chatSource?.source_type === 'orientation_finding'
+        ? chatSource.source_id
+        : undefined;
+
+      const analysis = await chatAPI.analyzeForCase(threadId, userFocus, insightId);
 
       // Add a case_preview card after the latest assistant message
       const assistantMessages = state.messages.filter(m => m.role === 'assistant');
@@ -159,10 +175,11 @@ export function ChatPanel({
   }
 
   // When the preview card's "Create This Case" is clicked:
-  async function handleCreateCaseFromPreview(analysis: Record<string, unknown>, title: string) {
+  async function handleCreateCaseFromPreview(analysis: Record<string, unknown>, title: string, userEdits?: Record<string, unknown>) {
     state.setCreatingCase(true);
     try {
-      const result = await chatAPI.createCaseFromAnalysis(threadId, analysis, { title });
+      const edits = userEdits || { title };
+      const result = await chatAPI.createCaseFromAnalysis(threadId, analysis, edits);
       router.push(`/cases/${result.case.id}`);
     } catch (error) {
       console.error('Failed to create case:', error);
@@ -182,10 +199,14 @@ export function ChatPanel({
     onCreateCaseFromPreview: handleCreateCaseFromPreview,
     onAdjustCasePreview: handleAdjustCasePreview,
     onAcceptPlanDiff: onAcceptPlanDiff,
+    onAcceptOrientationDiff: onAcceptOrientationDiff,
+    onAcceptPositionUpdate: onAcceptPositionUpdate,
+    onDismissPositionUpdate: onDismissPositionUpdate,
+    onConfirmToolAction: state.confirmToolAction,
     isCreatingCase: state.creatingCase,
     onDismissCard: state.dismissCard,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [threadId, state.messages.length, onAcceptPlanDiff, state.creatingCase]);
+  }), [threadId, state.messages.length, onAcceptPlanDiff, onAcceptOrientationDiff, onAcceptPositionUpdate, onDismissPositionUpdate, state.creatingCase, state.dismissCard, state.confirmToolAction]);
 
   // Determine if we should show mode-aware header vs static label
   const showModeHeader = mode && mode.mode !== 'casual';
@@ -194,15 +215,16 @@ export function ChatPanel({
   if (!isFull && state.isCollapsed && !hideCollapse) {
     return (
       <div className="w-16 flex flex-col items-center py-4 bg-neutral-50 animate-fade-in">
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => state.setIsCollapsed(false)}
-          className="p-2 hover:bg-neutral-200 rounded-lg transition-colors"
           aria-label="Expand chat"
         >
           <svg className="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-        </button>
+        </Button>
       </div>
     );
   }
@@ -217,15 +239,17 @@ export function ChatPanel({
             {showModeHeader ? 'Chat' : contextLabel}
           </h3>
           {!hideCollapse && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => state.setIsCollapsed(true)}
-              className="p-1 hover:bg-neutral-100 rounded transition-colors"
+              className="h-7 w-7"
               aria-label="Collapse chat"
             >
               <svg className="w-4 h-4 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-            </button>
+            </Button>
           )}
         </div>
 
@@ -234,17 +258,17 @@ export function ChatPanel({
         )}
 
         {state.error && (
-          <div className="bg-red-50 border-l-4 border-red-500 p-3 mx-3 mt-2">
+          <div className="bg-error-50 border-l-4 border-error-500 p-3 mx-3 mt-2">
             <div className="flex items-start">
               <div className="flex-1">
-                <p className="text-xs text-red-700">{state.error}</p>
+                <p className="text-xs text-error-700">{state.error}</p>
                 {state.lastFailedMessage && (
-                  <button onClick={state.handleRetry} className="mt-1 text-xs font-medium text-red-700 hover:text-red-900 underline">
+                  <Button variant="ghost" size="sm" onClick={state.handleRetry} className="mt-1 text-xs font-medium text-error-700 hover:text-error-900 underline px-0 h-auto">
                     Retry message
-                  </button>
+                  </Button>
                 )}
               </div>
-              <button onClick={state.clearError} className="ml-2 text-red-700 hover:text-red-900 text-xs">✕</button>
+              <Button variant="ghost" size="icon" onClick={state.clearError} className="ml-2 text-error-700 hover:text-error-900 h-6 w-6" aria-label="Dismiss error">✕</Button>
             </div>
           </div>
         )}
@@ -294,12 +318,12 @@ export function ChatPanel({
                 <div className="flex-1">
                   <p className="text-sm text-error-700">{state.error}</p>
                   {state.lastFailedMessage && (
-                    <button onClick={state.handleRetry} className="mt-2 text-sm font-medium text-error-700 hover:text-error-900 underline">
+                    <Button variant="ghost" size="sm" onClick={state.handleRetry} className="mt-2 text-sm font-medium text-error-700 hover:text-error-900 underline px-0 h-auto">
                       Retry message
-                    </button>
+                    </Button>
                   )}
                 </div>
-                <button onClick={state.clearError} className="ml-4 text-error-700 hover:text-error-900">✕</button>
+                <Button variant="ghost" size="icon" onClick={state.clearError} className="ml-4 text-error-700 hover:text-error-900 h-7 w-7" aria-label="Dismiss error">✕</Button>
               </div>
             </div>
           </div>
@@ -321,17 +345,16 @@ export function ChatPanel({
       {state.messages.some(m => m.role === 'user') && state.messages.some(m => m.role === 'assistant') && (!mode || mode.mode === 'casual') && (
         <div className="flex justify-center">
           <div className="w-full max-w-2xl px-6">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => handleCreateCase()}
               disabled={state.creatingCase}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
+              className="gap-1.5 px-2 py-1 h-auto text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
             >
               {state.creatingCase ? (
                 <>
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  <Spinner size="sm" />
                   <span>Analyzing…</span>
                 </>
               ) : (
@@ -342,7 +365,7 @@ export function ChatPanel({
                   <span>Structure as Case</span>
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </div>
       )}

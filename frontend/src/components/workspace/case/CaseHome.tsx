@@ -16,14 +16,25 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { plansAPI } from '@/lib/api/plans';
 import { useCaseHome } from '@/hooks/useCaseHome';
 import { useOptimisticPlanUpdate } from '@/hooks/useOptimisticPlanUpdate';
 import type { CaseStage, CaseHomeInquiry, PlanAssumption, DecisionCriterion } from '@/lib/types/plan';
 import { PremortemModal } from '@/components/cases/PremortemModal';
+import { ResolutionTypePicker } from '@/components/cases/ResolutionTypePicker';
+import { DecisionSummaryView } from '@/components/cases/DecisionSummaryView';
+import { OutcomeCheckBanner, useOutcomeCheckDismiss } from '@/components/cases/OutcomeCheckBanner';
 import { WhatChangedMindCard } from '@/components/cases/WhatChangedMindCard';
 import { JudgmentSummaryCard } from '@/components/cases/JudgmentSummaryCard';
 import { CheckCircleSmall, CircleSmall, SpinnerSmall, ChatBubbleIcon } from '@/components/ui/icons';
+import { CaseExtractionProgress } from './CaseExtractionProgress';
+import { casesAPI } from '@/lib/api/cases';
+import type { DecisionRecord } from '@/lib/types/case';
+import { ReadinessChecklist } from '@/components/readiness';
+import type { ReadinessChecklistItemData, ChecklistProgress } from '@/components/readiness';
+import type { ExtractionPhase } from '@/lib/types/case-extraction';
 
 export interface ChatAboutPayload {
   text: string;
@@ -33,14 +44,16 @@ export interface ChatAboutPayload {
 
 interface CaseHomeProps {
   caseId: string;
+  projectId?: string;
   onViewInquiry: (inquiryId: string) => void;
   onViewAll: () => void;
   onChatAbout?: (payload: ChatAboutPayload) => void;
   onGeneratePlan?: () => void;
+  onViewGraph?: () => void;
   className?: string;
 }
 
-export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGeneratePlan, className }: CaseHomeProps) {
+export function CaseHome({ caseId, projectId, onViewInquiry, onViewAll, onChatAbout, onGeneratePlan, onViewGraph, className }: CaseHomeProps) {
   const queryClient = useQueryClient();
   const {
     data,
@@ -51,6 +64,41 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
   } = useCaseHome(caseId);
 
   const [showPremortem, setShowPremortem] = useState(false);
+  const [decision, setDecision] = useState<DecisionRecord | null>(null);
+  const { isDismissed: bannerDismissed, dismiss: dismissBanner } = useOutcomeCheckDismiss(caseId);
+
+  // Fetch decision record when case is decided
+  useEffect(() => {
+    if (data?.case.status === 'decided') {
+      casesAPI.getDecision(caseId)
+        .then(setDecision)
+        .catch(() => {}); // Silently fail — decision might not exist yet
+    }
+  }, [data?.case.status, caseId]);
+
+  // Handle auto-resolution from ResolutionTypePicker
+  const handleResolved = useCallback((record: DecisionRecord) => {
+    setDecision(record);
+    queryClient.invalidateQueries({ queryKey: ['case-home', caseId] });
+  }, [queryClient, caseId]);
+
+  const handleAddOutcomeNote = useCallback(async (note: string, sentiment: string) => {
+    const updated = await casesAPI.addOutcomeNote(caseId, {
+      note,
+      sentiment: sentiment as 'positive' | 'neutral' | 'negative',
+    });
+    setDecision(updated);
+  }, [caseId]);
+
+  // Stable callback for extraction completion — invalidates case + graph queries
+  const handleExtractionComplete = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['case-home', caseId] });
+    if (projectId) {
+      queryClient.invalidateQueries({ queryKey: ['project-graph', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project-summary', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project-deltas', projectId] });
+    }
+  }, [queryClient, caseId, projectId]);
 
   // Auto-generate plan when CaseHome mounts with no plan
   const autoGenAttemptedRef = useRef(false);
@@ -190,6 +238,24 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
           </section>
         )}
 
+        {/* Extraction Progress — may run before plan exists */}
+        {data.case.metadata?.extraction_status &&
+          data.case.metadata.extraction_status !== 'none' && (
+          <CaseExtractionProgress
+            caseId={caseId}
+            initialStatus={{
+              extraction_status: data.case.metadata.extraction_status as ExtractionPhase,
+              extraction_started_at: data.case.metadata.extraction_started_at,
+              extraction_completed_at: data.case.metadata.extraction_completed_at,
+              extraction_error: data.case.metadata.extraction_error,
+              extraction_result: data.case.metadata.extraction_result,
+            }}
+            onComplete={handleExtractionComplete}
+            onChatAbout={onChatAbout}
+            onViewGraph={onViewGraph}
+          />
+        )}
+
         {/* Investigation Timeline (may already have inquiries) */}
         <InvestigationTimeline
           inquiries={data.inquiries}
@@ -205,7 +271,7 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
                 Plan generation failed. You can try again.
               </p>
               {onGeneratePlan && (
-                <button
+                <Button
                   onClick={() => {
                     setAutoGenFailed(false);
                     setAutoGenInProgress(true);
@@ -222,19 +288,15 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
                       setAutoGenFailed(true);
                     }
                   }}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-accent-600 text-white text-sm font-medium rounded-lg hover:bg-accent-700 transition-colors"
                 >
                   Retry
-                </button>
+                </Button>
               )}
             </>
           ) : autoGenInProgress ? (
             <>
               <div className="w-10 h-10 mx-auto rounded-full bg-accent-100 dark:bg-accent-900/30 flex items-center justify-center">
-                <svg className="w-5 h-5 text-accent-600 dark:text-accent-400 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
+                <Spinner size="md" className="text-accent-600 dark:text-accent-400" />
               </div>
               <p className="text-sm text-neutral-600 dark:text-neutral-400">
                 Setting up investigation plan…
@@ -255,10 +317,28 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
   return (
     <div className={cn('max-w-3xl mx-auto py-8 px-6 space-y-8', className)}>
       {planError && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 flex items-center justify-between" role="alert">
-          <p className="text-sm text-red-700 dark:text-red-300">{planError}</p>
-          <button onClick={clearPlanError} className="text-xs text-red-500 hover:text-red-700">Dismiss</button>
+        <div className="bg-error-50 dark:bg-error-900/20 border border-error-200 dark:border-error-800 rounded-lg p-3 flex items-center justify-between" role="alert">
+          <p className="text-sm text-error-700 dark:text-error-300">{planError}</p>
+          <Button variant="ghost" size="sm" onClick={clearPlanError} className="text-xs text-error-500 hover:text-error-700">Dismiss</Button>
         </div>
+      )}
+
+      {/* Extraction Progress — shown when case has active or completed extraction */}
+      {data.case.metadata?.extraction_status &&
+        data.case.metadata.extraction_status !== 'none' && (
+        <CaseExtractionProgress
+          caseId={caseId}
+          initialStatus={{
+            extraction_status: data.case.metadata.extraction_status as ExtractionPhase,
+            extraction_started_at: data.case.metadata.extraction_started_at,
+            extraction_completed_at: data.case.metadata.extraction_completed_at,
+            extraction_error: data.case.metadata.extraction_error,
+            extraction_result: data.case.metadata.extraction_result,
+          }}
+          onComplete={handleExtractionComplete}
+          onChatAbout={onChatAbout}
+          onViewGraph={onViewGraph}
+        />
       )}
 
       {/* Zone 1: Stage Header */}
@@ -277,22 +357,47 @@ export function CaseHome({ caseId, onViewInquiry, onViewAll, onChatAbout, onGene
         onViewAll={onViewAll}
       />
 
-      {/* Zone 3: Context Panel (stage-adaptive, interactive) */}
-      <ContextPanel
-        stage={stage}
-        stageRationale={content?.stage_rationale ?? ''}
-        assumptions={content?.assumptions ?? []}
-        criteria={content?.decision_criteria ?? []}
-        assumptionSummary={assumptionSummary}
-        criteriaProgress={criteriaProgress}
-        onUpdateAssumption={handleUpdateAssumption}
-        onUpdateCriterion={handleUpdateCriterion}
-        onChatAbout={onChatAbout}
-        premortemText={data.case.premortem_text ?? ''}
-        caseId={caseId}
-        whatWouldChangeMind={data.case.what_would_change_mind ?? ''}
-        whatChangedMindResponse={data.case.what_changed_mind_response ?? ''}
-      />
+      {/* Zone 3: Context Panel or Decision Summary */}
+      {data.case.status === 'decided' && decision ? (
+        <>
+          {/* Outcome check reminder banner */}
+          {decision.outcome_check_date && !bannerDismissed && (
+            <OutcomeCheckBanner
+              caseTitle={data.case.title}
+              outcomeCheckDate={decision.outcome_check_date}
+              onAddNote={() => {
+                // Scroll to the outcome timeline (it's in DecisionSummaryView)
+                const el = document.querySelector('[data-outcome-timeline]');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              onDismiss={dismissBanner}
+            />
+          )}
+          <DecisionSummaryView
+            decision={decision}
+            assumptions={content?.assumptions ?? []}
+            onAddOutcomeNote={handleAddOutcomeNote}
+          />
+        </>
+      ) : (
+        <ContextPanel
+          stage={stage}
+          stageRationale={content?.stage_rationale ?? ''}
+          assumptions={content?.assumptions ?? []}
+          criteria={content?.decision_criteria ?? []}
+          assumptionSummary={assumptionSummary}
+          criteriaProgress={criteriaProgress}
+          onUpdateAssumption={handleUpdateAssumption}
+          onUpdateCriterion={handleUpdateCriterion}
+          onChatAbout={onChatAbout}
+          premortemText={data.case.premortem_text ?? ''}
+          caseId={caseId}
+          whatWouldChangeMind={data.case.what_would_change_mind ?? ''}
+          whatChangedMindResponse={data.case.what_changed_mind_response ?? ''}
+          isReady={stage === 'ready'}
+          onResolved={handleResolved}
+        />
+      )}
 
       <PremortemModal
         caseId={caseId}
@@ -354,14 +459,16 @@ function StageHeader({
               {idx > 0 && (
                 <div className={cn(
                   'w-8 h-px',
-                  isCompleted ? 'bg-emerald-400' : 'bg-neutral-200 dark:bg-neutral-700'
+                  isCompleted ? 'bg-success-400' : 'bg-neutral-200 dark:bg-neutral-700'
                 )} />
               )}
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => canTransition && onStageChange?.(s.key)}
                 disabled={!canTransition}
                 className={cn(
-                  'flex items-center gap-1.5 transition-opacity',
+                  'flex items-center gap-1.5 h-auto px-1 py-0',
                   canTransition
                     ? 'cursor-pointer hover:opacity-70'
                     : 'cursor-default'
@@ -370,7 +477,7 @@ function StageHeader({
               >
                 <div className={cn(
                   'w-2.5 h-2.5 rounded-full border-2 transition-colors',
-                  isCompleted && 'border-emerald-500 bg-emerald-500',
+                  isCompleted && 'border-success-500 bg-success-500',
                   isCurrent && 'border-accent-500 bg-accent-500',
                   !isCompleted && !isCurrent && 'border-neutral-300 dark:border-neutral-600 bg-transparent'
                 )} />
@@ -379,12 +486,12 @@ function StageHeader({
                   isCurrent
                     ? 'text-accent-600 dark:text-accent-400 font-medium'
                     : isCompleted
-                      ? 'text-emerald-600 dark:text-emerald-400'
+                      ? 'text-success-600 dark:text-success-400'
                       : 'text-neutral-400 dark:text-neutral-500'
                 )}>
                   {s.label}
                 </span>
-              </button>
+              </Button>
             </div>
           );
         })}
@@ -451,12 +558,14 @@ function InvestigationTimeline({
         )}
       </div>
 
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onViewAll}
-        className="text-xs text-accent-600 dark:text-accent-400 hover:underline mt-2 inline-block"
+        className="text-xs text-accent-600 dark:text-accent-400 hover:underline mt-2 px-0 h-auto"
       >
         View all research →
-      </button>
+      </Button>
     </section>
   );
 }
@@ -472,14 +581,15 @@ function InquiryTimelineItem({
   const isInvestigating = inquiry.status === 'investigating';
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onClick}
-      className="flex items-start gap-3 w-full text-left p-3 hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition-colors"
+      className="flex items-start gap-3 w-full justify-start text-left p-3 h-auto rounded-none hover:bg-neutral-50 dark:hover:bg-neutral-800/30"
     >
       {/* Status icon */}
       <span className="mt-0.5 shrink-0">
         {isResolved ? (
-          <CheckCircleSmall className="w-4 h-4 text-emerald-500" />
+          <CheckCircleSmall className="w-4 h-4 text-success-500" />
         ) : isInvestigating ? (
           <SpinnerSmall className="w-4 h-4 text-accent-500" />
         ) : (
@@ -498,7 +608,7 @@ function InquiryTimelineItem({
             {inquiry.title}
           </span>
           {inquiry.evidence_count > 0 && (
-            <span className="text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 px-1.5 py-0.5 rounded-full shrink-0">
+            <span className="text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 px-1.5 py-0.5 rounded-full shrink-0">
               {inquiry.evidence_count}
             </span>
           )}
@@ -511,12 +621,12 @@ function InquiryTimelineItem({
         )}
 
         {inquiry.conclusion && isResolved && (
-          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 line-clamp-1">
+          <p className="text-xs text-success-600 dark:text-success-400 mt-0.5 line-clamp-1">
             {inquiry.conclusion}
           </p>
         )}
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -538,6 +648,8 @@ function ContextPanel({
   caseId,
   whatWouldChangeMind,
   whatChangedMindResponse,
+  isReady,
+  onResolved,
 }: {
   stage: CaseStage;
   stageRationale: string;
@@ -552,6 +664,8 @@ function ContextPanel({
   caseId?: string;
   whatWouldChangeMind?: string;
   whatChangedMindResponse?: string;
+  isReady?: boolean;
+  onResolved?: (record: DecisionRecord) => void;
 }) {
   return (
     <section className="space-y-6">
@@ -581,7 +695,18 @@ function ContextPanel({
           caseId={caseId}
           whatWouldChangeMind={whatWouldChangeMind}
           whatChangedMindResponse={whatChangedMindResponse}
+          isReady={isReady}
+          onResolved={onResolved}
         />
+      )}
+
+      {/* Subtle resolve picker — only at exploring stage for shelve/reframe.
+          At investigating, users should focus on testing assumptions.
+          At synthesizing/ready, the prominent picker is shown inside SynthesizingContext. */}
+      {caseId && stage === 'exploring' && (
+        <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800">
+          <ResolutionTypePicker caseId={caseId} onResolved={onResolved} isProminent={false} />
+        </div>
       )}
     </section>
   );
@@ -632,14 +757,14 @@ function InvestigatingContext({
     <div>
       <div className="flex items-center justify-between mb-3">
         <SectionTitle noMargin>Assumption Tracker</SectionTitle>
-        <div className="flex items-center gap-2 text-[10px]">
+        <div className="flex items-center gap-2 text-xs">
           {assumptionSummary.confirmed > 0 && (
-            <span className="text-emerald-600 dark:text-emerald-400">
+            <span className="text-success-600 dark:text-success-400">
               {assumptionSummary.confirmed} confirmed
             </span>
           )}
           {assumptionSummary.challenged > 0 && (
-            <span className="text-amber-600 dark:text-amber-400">
+            <span className="text-warning-600 dark:text-warning-400">
               {assumptionSummary.challenged} challenged
             </span>
           )}
@@ -657,21 +782,23 @@ function InvestigatingContext({
             key={a.id}
             className={cn(
               'rounded-lg border transition-colors',
-              a.status === 'confirmed' && 'border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-900/10',
-              a.status === 'challenged' && 'border-amber-200 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-900/10',
-              a.status === 'refuted' && 'border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10',
+              a.status === 'confirmed' && 'border-success-200 dark:border-success-800/50 bg-success-50/50 dark:bg-success-900/10',
+              a.status === 'challenged' && 'border-warning-200 dark:border-warning-800/50 bg-warning-50/50 dark:bg-warning-900/10',
+              a.status === 'refuted' && 'border-error-200 dark:border-error-800/50 bg-error-50/50 dark:bg-error-900/10',
               a.status === 'untested' && 'border-neutral-200/80 dark:border-neutral-800/80 bg-white dark:bg-neutral-900/50',
             )}
           >
             <div className="group flex items-start gap-2 p-3">
               {/* Clickable status badge */}
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setExpandedId(expandedId === a.id ? null : a.id)}
-                className="shrink-0 mt-0.5 transition-transform hover:scale-110"
+                className="shrink-0 mt-0.5 h-auto w-auto hover:scale-110"
                 title="Change status"
               >
                 <AssumptionBadge status={a.status} />
-              </button>
+              </Button>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-neutral-700 dark:text-neutral-300">{a.text}</p>
                 {a.evidence_summary && (
@@ -687,18 +814,20 @@ function InvestigatingContext({
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {onChatAbout && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onChatAbout({ text: `Tell me more about the assumption: "${a.text}". What evidence do we have?`, source_type: 'assumption', source_id: a.id })}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7"
                     title="Discuss in chat"
                   >
                     <ChatBubbleIcon className="w-4 h-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300" />
-                  </button>
+                  </Button>
                 )}
                 <span className={cn(
-                  'text-[10px] px-1.5 py-0.5 rounded-full uppercase',
-                  a.risk_level === 'high' && 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-                  a.risk_level === 'medium' && 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
+                  'text-xs px-1.5 py-0.5 rounded-full uppercase',
+                  a.risk_level === 'high' && 'bg-error-100 dark:bg-error-900/30 text-error-600 dark:text-error-400',
+                  a.risk_level === 'medium' && 'bg-warning-100 dark:bg-warning-900/30 text-warning-600 dark:text-warning-400',
                   a.risk_level === 'low' && 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400',
                 )}>
                   {a.risk_level}
@@ -717,27 +846,29 @@ function InvestigatingContext({
                   className="overflow-hidden"
                 >
                   <div className="flex items-center gap-1.5 px-3 pb-3 pt-1">
-                    <span className="text-[10px] text-neutral-500 dark:text-neutral-400 mr-1">Set status:</span>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400 mr-1">Set status:</span>
                     {ASSUMPTION_STATUSES.map(status => (
-                      <button
+                      <Button
                         key={status}
+                        variant="ghost"
+                        size="sm"
                         onClick={() => {
                           onUpdateAssumption(a.id, status);
                           setExpandedId(null);
                         }}
                         className={cn(
-                          'text-[10px] px-2 py-1 rounded-full transition-colors capitalize',
+                          'text-xs px-2 py-1 h-auto rounded-full capitalize',
                           a.status === status
                             ? 'ring-2 ring-accent-400 ring-offset-1 dark:ring-offset-neutral-900'
                             : '',
                           status === 'untested' && 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700',
-                          status === 'confirmed' && 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50',
-                          status === 'challenged' && 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50',
-                          status === 'refuted' && 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50',
+                          status === 'confirmed' && 'bg-success-100 dark:bg-success-900/30 text-success-600 dark:text-success-400 hover:bg-success-200 dark:hover:bg-success-900/50',
+                          status === 'challenged' && 'bg-warning-100 dark:bg-warning-900/30 text-warning-600 dark:text-warning-400 hover:bg-warning-200 dark:hover:bg-warning-900/50',
+                          status === 'refuted' && 'bg-error-100 dark:bg-error-900/30 text-error-600 dark:text-error-400 hover:bg-error-200 dark:hover:bg-error-900/50',
                         )}
                       >
                         {status}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </motion.div>
@@ -761,6 +892,8 @@ function SynthesizingContext({
   caseId,
   whatWouldChangeMind,
   whatChangedMindResponse,
+  isReady,
+  onResolved,
 }: {
   criteria: DecisionCriterion[];
   criteriaProgress: { met: number; total: number };
@@ -772,9 +905,53 @@ function SynthesizingContext({
   caseId?: string;
   whatWouldChangeMind?: string;
   whatChangedMindResponse?: string;
+  isReady?: boolean;
+  onResolved?: (record: DecisionRecord) => void;
 }) {
+  // Inline readiness checklist data loading
+  const [checklistItems, setChecklistItems] = useState<ReadinessChecklistItemData[]>([]);
+  const [checklistProgress, setChecklistProgress] = useState<ChecklistProgress>({
+    completed: 0, required: 0, required_completed: 0, total: 0,
+  });
+  const loadChecklist = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const res = await fetch(`/api/cases/${caseId}/readiness-checklist/`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setChecklistItems(data.items || []);
+      setChecklistProgress(data.progress || { completed: 0, required: 0, required_completed: 0, total: 0 });
+    } catch { /* graceful — no checklist items generated yet */ }
+  }, [caseId]);
+  useEffect(() => { loadChecklist(); }, [loadChecklist]);
+
   return (
     <>
+      {/* Readiness checklist — soft gate for decision recording */}
+      {caseId && checklistItems.length > 0 && (
+        <div className="mb-4">
+          <ReadinessChecklist
+            caseId={caseId}
+            items={checklistItems}
+            progress={checklistProgress}
+            onRefresh={loadChecklist}
+          />
+        </div>
+      )}
+
+      {/* Resolve Case — prominent picker at synthesizing/ready stage */}
+      {caseId && (
+        <div className="p-4 rounded-lg border-2 border-accent-200 dark:border-accent-800 bg-accent-50/50 dark:bg-accent-900/10">
+          {checklistProgress.required > 0 &&
+           checklistProgress.required_completed < checklistProgress.required && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+              {checklistProgress.required_completed}/{checklistProgress.required} required checklist items completed
+            </p>
+          )}
+          <ResolutionTypePicker caseId={caseId} onResolved={onResolved} isProminent />
+        </div>
+      )}
+
       {/* "What would change your mind" resurface card */}
       {caseId && whatWouldChangeMind && (
         <WhatChangedMindCard
@@ -805,17 +982,19 @@ function SynthesizingContext({
                 className={cn(
                   'group flex items-start gap-2.5 p-2.5 rounded-lg transition-colors',
                   c.is_met
-                    ? 'bg-emerald-50/50 dark:bg-emerald-900/10'
+                    ? 'bg-success-50/50 dark:bg-success-900/10'
                     : 'bg-neutral-50/50 dark:bg-neutral-900/30'
                 )}
               >
                 {/* Clickable toggle */}
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => onUpdateCriterion?.(c.id, !c.is_met)}
                   className={cn(
-                    'mt-0.5 shrink-0 transition-colors',
+                    'mt-0.5 shrink-0 h-auto w-auto',
                     c.is_met
-                      ? 'text-emerald-500 hover:text-emerald-600'
+                      ? 'text-success-500 hover:text-success-600'
                       : 'text-neutral-300 dark:text-neutral-600 hover:text-neutral-400 dark:hover:text-neutral-500'
                   )}
                   title={c.is_met ? 'Mark as not met' : 'Mark as met'}
@@ -825,23 +1004,25 @@ function SynthesizingContext({
                   ) : (
                     <CircleSmall className="w-4 h-4" />
                   )}
-                </button>
+                </Button>
                 <span className={cn(
                   'text-sm flex-1',
                   c.is_met
-                    ? 'text-emerald-700 dark:text-emerald-300'
+                    ? 'text-success-700 dark:text-success-300'
                     : 'text-neutral-700 dark:text-neutral-300'
                 )}>
                   {c.text}
                 </span>
                 {onChatAbout && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onChatAbout({ text: `How can we verify whether this criterion is met: "${c.text}"?`, source_type: 'criterion', source_id: c.id })}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 shrink-0"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 shrink-0"
                     title="Discuss in chat"
                   >
                     <ChatBubbleIcon className="w-4 h-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300" />
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}
@@ -853,7 +1034,7 @@ function SynthesizingContext({
           <div className="mt-3">
             <div className="h-1.5 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden">
               <div
-                className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                className="h-full bg-success-500 rounded-full transition-all duration-500"
                 style={{ width: `${(criteriaProgress.met / criteriaProgress.total) * 100}%` }}
               />
             </div>
@@ -902,11 +1083,11 @@ function SynthesizingContext({
       {premortemText && (
         <div>
           <SectionTitle>Premortem</SectionTitle>
-          <div className="p-3 rounded-lg border border-amber-200/80 dark:border-amber-800/80 bg-amber-50/50 dark:bg-amber-900/20">
-            <p className="text-sm text-amber-800 dark:text-amber-200 italic">
+          <div className="p-3 rounded-lg border border-warning-200/80 dark:border-warning-800/80 bg-warning-50/50 dark:bg-warning-900/20">
+            <p className="text-sm text-warning-800 dark:text-warning-200 italic">
               &ldquo;{premortemText}&rdquo;
             </p>
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            <p className="text-xs text-warning-600 dark:text-warning-400 mt-1">
               Your imagined reason for failure
             </p>
           </div>
@@ -932,14 +1113,14 @@ function SectionTitle({ children, noMargin }: { children: React.ReactNode; noMar
 function AssumptionBadge({ status }: { status: string }) {
   const config: Record<string, { color: string; label: string }> = {
     untested: { color: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500', label: 'untested' },
-    confirmed: { color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', label: 'confirmed' },
-    challenged: { color: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400', label: 'challenged' },
-    refuted: { color: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400', label: 'refuted' },
+    confirmed: { color: 'bg-success-100 dark:bg-success-900/30 text-success-600 dark:text-success-400', label: 'confirmed' },
+    challenged: { color: 'bg-warning-100 dark:bg-warning-900/30 text-warning-600 dark:text-warning-400', label: 'challenged' },
+    refuted: { color: 'bg-error-100 dark:bg-error-900/30 text-error-600 dark:text-error-400', label: 'refuted' },
   };
 
   const c = config[status] ?? config.untested;
   return (
-    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full uppercase shrink-0 mt-0.5', c.color)}>
+    <span className={cn('text-xs px-1.5 py-0.5 rounded-full uppercase shrink-0 mt-0.5', c.color)}>
       {c.label}
     </span>
   );
@@ -947,9 +1128,9 @@ function AssumptionBadge({ status }: { status: string }) {
 
 function MetricCard({ label, value, color }: { label: string; value: number; color: string }) {
   const colorMap: Record<string, string> = {
-    emerald: 'text-emerald-600 dark:text-emerald-400',
-    amber: 'text-amber-600 dark:text-amber-400',
-    red: 'text-red-600 dark:text-red-400',
+    emerald: 'text-success-600 dark:text-success-400',
+    amber: 'text-warning-600 dark:text-warning-400',
+    red: 'text-error-600 dark:text-error-400',
     neutral: 'text-neutral-500 dark:text-neutral-400',
   };
 
@@ -958,7 +1139,7 @@ function MetricCard({ label, value, color }: { label: string; value: number; col
       <div className={cn('text-lg font-semibold', colorMap[color] ?? colorMap.neutral)}>
         {value}
       </div>
-      <div className="text-[10px] text-neutral-500 dark:text-neutral-400 uppercase">
+      <div className="text-xs text-neutral-500 dark:text-neutral-400 uppercase">
         {label}
       </div>
     </div>

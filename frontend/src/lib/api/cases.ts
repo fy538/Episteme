@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import type { SSEEventData } from './sse-parser';
 import type {
   Case,
   WorkingDocument,
@@ -20,6 +21,9 @@ import type {
   UpdateBriefSectionData,
   ScaffoldResult,
   SectionJudgmentSummary,
+  DecisionRecord,
+  ResolutionType,
+  ResolutionDraft,
 } from '../types/case';
 
 // Re-export types that were previously defined in this file
@@ -31,12 +35,29 @@ interface CreateCaseResponse {
   main_brief: WorkingDocument;
 }
 
+interface CaseHomeResponse {
+  plan?: {
+    stage?: string;
+    position_statement?: string;
+    current_content?: {
+      assumptions?: Array<{ text: string; status: string; evidence_summary?: string }>;
+      decision_criteria?: Array<{ text: string; is_met: boolean }>;
+    };
+  };
+}
+
 export const casesAPI = {
-  async createCase(title: string, projectId?: string): Promise<CreateCaseResponse> {
+  async createCase(
+    title: string,
+    projectId?: string,
+    options?: { decision_question?: string; stakes?: string }
+  ): Promise<CreateCaseResponse> {
     return apiClient.post<CreateCaseResponse>('/cases/', {
       title,
       project_id: projectId,
       position: '',
+      ...(options?.decision_question ? { decision_question: options.decision_question } : {}),
+      ...(options?.stakes ? { stakes: options.stakes } : {}),
     });
   },
 
@@ -46,6 +67,12 @@ export const casesAPI = {
 
   async listCases(): Promise<Case[]> {
     const response = await apiClient.get<{ results: Case[] }>('/cases/');
+    return response.results || [];
+  },
+
+  /** List cases for a specific project (includes decision lifecycle data). */
+  async listProjectCases(projectId: string): Promise<Case[]> {
+    const response = await apiClient.get<{ results: Case[] }>(`/cases/?project=${projectId}`);
     return response.results || [];
   },
 
@@ -289,7 +316,7 @@ export const casesAPI = {
     const [caseData, sections, home] = await Promise.all([
       this.getCase(caseId),
       this.getBriefSections(caseId).catch(() => ({ sections: [] })),
-      apiClient.get(`/cases/${caseId}/home/`).catch(() => null) as Promise<any>,
+      apiClient.get<CaseHomeResponse>(`/cases/${caseId}/home/`).catch(() => null),
     ]);
 
     const lines: string[] = [];
@@ -313,14 +340,14 @@ export const casesAPI = {
     }
 
     // Brief sections
-    const sectionList = (sections as any)?.sections ?? [];
+    const sectionList = sections?.sections ?? [];
     if (sectionList.length > 0) {
       lines.push('## Brief');
       lines.push('');
       for (const section of sectionList) {
         lines.push(`### ${section.heading}`);
         lines.push('');
-        lines.push(section.content || '');
+        lines.push(section.content_preview || '');
         lines.push('');
       }
     }
@@ -361,6 +388,144 @@ export const casesAPI = {
    */
   async exportJSON(caseId: string): Promise<Record<string, unknown>> {
     return apiClient.get(`/cases/${caseId}/export/?type=full`);
+  },
+
+  // ── Case Extraction Pipeline ──────────────────────────────────
+
+  /**
+   * Get current extraction pipeline status
+   */
+  async getExtractionStatus(caseId: string): Promise<import('../types/case-extraction').ExtractionStatus> {
+    return apiClient.get(`/cases/${caseId}/extraction-status/`);
+  },
+
+  /**
+   * Get analysis results (blind spots, assumptions, tensions, readiness)
+   */
+  async getAnalysis(caseId: string): Promise<import('../types/case-extraction').CaseAnalysis> {
+    return apiClient.get(`/cases/${caseId}/analysis/`);
+  },
+
+  /**
+   * Re-run extraction pipeline with current chunks + any new documents
+   */
+  async reExtract(caseId: string): Promise<void> {
+    await apiClient.post(`/cases/${caseId}/re-extract/`, {});
+  },
+
+  /**
+   * Incremental extraction — expand chunk search
+   */
+  async extractAdditional(caseId: string, opts?: { maxChunks?: number }): Promise<void> {
+    await apiClient.post(`/cases/${caseId}/extract-additional/`, opts || {});
+  },
+
+  /**
+   * Stream extraction progress via SSE
+   */
+  streamExtraction(
+    caseId: string,
+    onEvent: (event: { event: string; data: SSEEventData }) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return apiClient.streamGet(
+      `/cases/${caseId}/extraction/stream/`,
+      onEvent,
+      signal,
+    );
+  },
+
+  // ── Decision Capture / Resolution ──────────────────────────────
+
+  /**
+   * Resolve a case (new auto-resolution flow).
+   * Only resolution_type is required — everything else is auto-generated.
+   */
+  async resolveCase(
+    caseId: string,
+    resolutionType: ResolutionType,
+  ): Promise<DecisionRecord> {
+    return apiClient.post<DecisionRecord>(`/cases/${caseId}/record-decision/`, {
+      resolution_type: resolutionType,
+    });
+  },
+
+  /**
+   * Preview auto-generated resolution without creating anything.
+   * Currently unused on frontend — available for future preview feature.
+   */
+  async getResolutionDraft(
+    caseId: string,
+    type: ResolutionType = 'resolved',
+  ): Promise<ResolutionDraft> {
+    return apiClient.get<ResolutionDraft>(
+      `/cases/${caseId}/resolution-draft/?type=${type}`,
+    );
+  },
+
+  /**
+   * Update editable fields on an existing resolution
+   */
+  async updateResolution(
+    caseId: string,
+    updates: Partial<{
+      decision_text: string;
+      key_reasons: string[];
+      caveats: string;
+      outcome_check_date: string | null;
+    }>,
+  ): Promise<DecisionRecord> {
+    return apiClient.patch<DecisionRecord>(
+      `/cases/${caseId}/update-resolution/`,
+      updates,
+    );
+  },
+
+  /**
+   * Get the decision record for a case
+   */
+  async getDecision(caseId: string): Promise<DecisionRecord> {
+    return apiClient.get<DecisionRecord>(`/cases/${caseId}/decision/`);
+  },
+
+  /**
+   * Add an outcome observation note to a decision
+   */
+  async addOutcomeNote(caseId: string, data: {
+    note: string;
+    sentiment?: 'positive' | 'neutral' | 'negative';
+  }): Promise<DecisionRecord> {
+    return apiClient.post<DecisionRecord>(`/cases/${caseId}/outcome-note/`, data);
+  },
+
+  /**
+   * Accept a position update proposal from fact promotion.
+   * Updates Case.position and InvestigationPlan.position_statement.
+   */
+  async acceptPositionUpdate(
+    caseId: string,
+    newPosition: string,
+    reason: string,
+    messageId?: string,
+  ): Promise<Case> {
+    return apiClient.post<Case>(`/cases/${caseId}/accept-position-update/`, {
+      new_position: newPosition,
+      reason,
+      message_id: messageId,
+    });
+  },
+
+  /**
+   * Dismiss a position update proposal without applying it.
+   * Clears the proposal from the source message metadata.
+   */
+  async dismissPositionUpdate(
+    caseId: string,
+    messageId: string,
+  ): Promise<{ status: string }> {
+    return apiClient.post<{ status: string }>(`/cases/${caseId}/dismiss-position-update/`, {
+      message_id: messageId,
+    });
   },
 };
 

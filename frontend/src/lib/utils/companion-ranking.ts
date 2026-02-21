@@ -15,6 +15,8 @@ import type {
   BackgroundWorkItem,
   SessionReceipt,
   CaseState,
+  ConversationStructure,
+  ConversationEpisode,
 } from '@/lib/types/companion';
 
 export type CompanionSectionId =
@@ -22,7 +24,9 @@ export type CompanionSectionId =
   | 'action_hints'
   | 'status'
   | 'receipts'
-  | 'case_state';
+  | 'case_state'
+  | 'conversation_structure'
+  | 'episode_timeline';
 
 export interface SectionRankingInput {
   thinking: { content: string; isStreaming: boolean };
@@ -30,9 +34,13 @@ export interface SectionRankingInput {
   status: { inProgress: BackgroundWorkItem[]; justCompleted: BackgroundWorkItem[] };
   sessionReceipts: SessionReceipt[];
   caseState?: CaseState;
+  conversationStructure?: ConversationStructure;
+  episodeHistory?: ConversationEpisode[];
   mode: ChatMode;
   pinnedSection?: CompanionSectionId | null;
   lastUpdated: Partial<Record<CompanionSectionId, number>>;
+  /** Number of completed assistant responses this session. Used for early-turn thinking boost. */
+  turnCount?: number;
 }
 
 const SCORE_STREAMING = 100;
@@ -40,6 +48,7 @@ const SCORE_JUST_ARRIVED = 50;
 const SCORE_PINNED = 30;
 const SCORE_MODE_MATCH = 25;
 const SCORE_HAS_CONTENT = 20;
+const SCORE_EARLY_TURN_BOOST = 35;
 const SCORE_STALE_PENALTY = -10;
 const JUST_ARRIVED_MS = 5000;
 const STALE_MS = 60000;
@@ -56,13 +65,17 @@ function hasContent(id: CompanionSectionId, input: SectionRankingInput): boolean
       return input.sessionReceipts.length > 0;
     case 'case_state':
       return input.caseState != null;
+    case 'conversation_structure':
+      return input.conversationStructure != null;
+    case 'episode_timeline':
+      return (input.episodeHistory ?? []).length > 0;
   }
 }
 
 export function rankSections(input: SectionRankingInput): CompanionSectionId[] {
   const now = Date.now();
   const allSections: CompanionSectionId[] = [
-    'thinking', 'action_hints', 'status', 'receipts', 'case_state',
+    'conversation_structure', 'episode_timeline', 'thinking', 'action_hints', 'status', 'receipts', 'case_state',
   ];
 
   const scored = allSections
@@ -94,9 +107,23 @@ export function rankSections(input: SectionRankingInput): CompanionSectionId[] {
       if (id === 'status' && input.mode !== 'casual') {
         score += SCORE_MODE_MATCH * 0.5;
       }
+      // Conversation structure is always relevant and gets a boost
+      if (id === 'conversation_structure') {
+        score += SCORE_MODE_MATCH;
+      }
+      // Episode timeline is mildly relevant when present
+      if (id === 'episode_timeline') {
+        score += SCORE_MODE_MATCH * 0.5;
+      }
 
       // Has content baseline
       score += SCORE_HAS_CONTENT;
+
+      // Early-turn boost: keep thinking visible in first exchanges
+      // so users see the companion is actively processing their input
+      if (id === 'thinking' && input.turnCount != null && input.turnCount <= 2) {
+        score += SCORE_EARLY_TURN_BOOST;
+      }
 
       // Stale penalty — content unchanged for a while
       if (lastUpdate && now - lastUpdate > STALE_MS) {

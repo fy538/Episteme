@@ -1,38 +1,13 @@
 """
 Common utilities
 """
-import hashlib
 import json
+import logging
+import re
 import uuid
+from typing import Any
 
-
-def generate_dedupe_key(signal_type: str, normalized_text: str, scope_hint: str = "") -> str:
-    """
-    Generate a dedupe key for signals to prevent duplicates
-    
-    Args:
-        signal_type: Type of signal (e.g., 'Assumption', 'Question')
-        normalized_text: Normalized text content
-        scope_hint: Optional scope hint (e.g., case_id, thread_id)
-    
-    Returns:
-        SHA256 hash as dedupe key
-    """
-    content = f"{signal_type}:{normalized_text}:{scope_hint}"
-    return hashlib.sha256(content.encode()).hexdigest()
-
-
-def normalize_text(text: str) -> str:
-    """
-    Normalize text for comparison and deduplication
-
-    Args:
-        text: Raw text
-
-    Returns:
-        Normalized text (lowercased, stripped, whitespace normalized)
-    """
-    return " ".join(text.lower().strip().split())
+logger = logging.getLogger(__name__)
 
 
 def is_valid_uuid(value: str) -> bool:
@@ -50,3 +25,47 @@ def is_valid_uuid(value: str) -> bool:
         return True
     except (ValueError, AttributeError, TypeError):
         return False
+
+
+def parse_json_from_response(text: str) -> Any:
+    """
+    Multi-strategy JSON extraction from LLM response text.
+
+    Tries in order:
+    1. Direct JSON parse
+    2. Extract from Markdown code fence (```json ... ```)
+    3. Find outermost array ([...]) or object ({...})
+
+    Returns the parsed JSON (dict, list, etc.) or None on failure.
+    """
+    if not text:
+        return None
+
+    text = text.strip()
+
+    # Strategy 1: Direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Extract from code fence
+    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: Find first [ to last ] (array) or { to } (object)
+    for open_char, close_char in [('[', ']'), ('{', '}')]:
+        first = text.find(open_char)
+        last = text.rfind(close_char)
+        if first != -1 and last > first:
+            try:
+                return json.loads(text[first:last + 1])
+            except json.JSONDecodeError:
+                pass
+
+    logger.warning("json_parse_failed", extra={"text_preview": text[:200]})
+    return None

@@ -17,7 +17,7 @@ import {
   SparklesIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-} from '@heroicons/react/24/outline';
+} from '@/components/ui/icons';
 import type { Case, Constraint, SuccessCriterion, Stakeholder } from '@/lib/types/case';
 
 interface DecisionFrameEditorProps {
@@ -155,9 +155,10 @@ export function DecisionFrameEditor({
     section: string;
     count?: number;
   }) => (
-    <button
+    <Button
+      variant="ghost"
       onClick={() => toggleSection(section)}
-      className="flex items-center justify-between w-full py-2 text-left text-sm font-medium text-neutral-700 hover:text-neutral-900"
+      className="flex items-center justify-between w-full py-2 h-auto text-left text-sm font-medium text-neutral-700 hover:text-neutral-900"
     >
       <span className="flex items-center gap-2">
         {title}
@@ -172,7 +173,7 @@ export function DecisionFrameEditor({
       ) : (
         <ChevronDownIcon className="w-4 h-4" />
       )}
-    </button>
+    </Button>
   );
 
   return (
@@ -213,13 +214,15 @@ export function DecisionFrameEditor({
                   className="flex-1 text-sm"
                   disabled={isLoading}
                 />
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => removeConstraint(index)}
-                  className="p-2 text-neutral-400 hover:text-error-500"
+                  className="p-2 h-auto w-auto text-neutral-400 hover:text-error-500"
                   disabled={isLoading}
                 >
                   <XMarkIcon className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             ))}
             <Button
@@ -261,13 +264,15 @@ export function DecisionFrameEditor({
                   className="flex-1 text-sm"
                   disabled={isLoading}
                 />
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => removeCriterion(index)}
-                  className="p-2 text-neutral-400 hover:text-error-500"
+                  className="p-2 h-auto w-auto text-neutral-400 hover:text-error-500"
                   disabled={isLoading}
                 >
                   <XMarkIcon className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             ))}
             <Button
@@ -317,13 +322,15 @@ export function DecisionFrameEditor({
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => removeStakeholder(index)}
-                  className="p-2 text-neutral-400 hover:text-error-500"
+                  className="p-2 h-auto w-auto text-neutral-400 hover:text-error-500"
                   disabled={isLoading}
                 >
                   <XMarkIcon className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             ))}
             <Button
@@ -395,7 +402,9 @@ export function DecisionFrameSummary({ caseData }: { caseData: Case }) {
           <div className="flex flex-wrap gap-2">
             {caseData.constraints.map((c, i) => (
               <Badge key={i} variant="outline" className="text-xs">
-                {c.type}: {c.description}
+                {typeof c === 'string'
+                  ? c
+                  : `${c.type || 'General'}: ${c.description || ''}`}
               </Badge>
             ))}
           </div>
@@ -412,10 +421,16 @@ export function DecisionFrameSummary({ caseData }: { caseData: Case }) {
               <li key={i} className="flex items-start gap-2">
                 <span className="text-success-500 mt-0.5">&#10003;</span>
                 <span>
-                  {sc.criterion}
-                  {sc.measurable && (
-                    <span className="text-neutral-500"> ({sc.measurable})</span>
-                  )}
+                  {typeof sc === 'string'
+                    ? sc
+                    : (
+                      <>
+                        {sc.criterion}
+                        {sc.measurable && (
+                          <span className="text-neutral-500"> ({sc.measurable})</span>
+                        )}
+                      </>
+                    )}
                 </span>
               </li>
             ))}

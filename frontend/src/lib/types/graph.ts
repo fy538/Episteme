@@ -74,7 +74,7 @@ export interface GraphDelta {
   id: string;
   project: string;
   trigger: DeltaTrigger;
-  patch: Record<string, any>;
+  patch: Record<string, unknown>;
   narrative: string;
   nodes_created: number;
   nodes_updated: number;
@@ -92,6 +92,8 @@ export interface GraphDelta {
 export interface ProjectGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  total_node_count: number;
+  truncated: boolean;
 }
 
 export interface BackendCluster {
@@ -100,6 +102,7 @@ export interface BackendCluster {
   edge_count: number;
   node_types: Record<string, number>;
   label?: string;
+  summary?: string;
 }
 
 export interface ClusterQuality {
@@ -182,12 +185,16 @@ export interface GraphEditSummary {
 
 // ── Project Summary ─────────────────────────────────────────────
 
-export type SummaryStatus = 'none' | 'seed' | 'generating' | 'partial' | 'full' | 'failed';
+export type SummaryStatus = 'none' | 'seed' | 'thematic' | 'generating' | 'partial' | 'full' | 'failed';
 
 export interface SummaryTheme {
   theme_label: string;
   narrative: string;
   cited_nodes: string[];
+  // Thematic tier extras (only present for thematic summaries)
+  coverage_pct?: number;
+  doc_count?: number;
+  chunk_count?: number;
 }
 
 export interface ProjectSummarySections {
@@ -196,12 +203,14 @@ export interface ProjectSummarySections {
   emerging_picture: string;
   attention_needed: string;
   what_changed: string;
+  coverage_gaps?: string;  // Thematic tier: identified gaps in coverage
 }
 
 export interface ProjectSummaryCluster {
   label: string;
   node_ids: string[];
   centroid_node_id: string;
+  summary?: string;
 }
 
 export interface ProjectSummary {
@@ -211,7 +220,7 @@ export interface ProjectSummary {
   sections: ProjectSummarySections;
   is_stale: boolean;
   stale_since?: string | null;
-  generation_metadata?: Record<string, any>;
+  generation_metadata?: Record<string, unknown>;
   version?: number;
   clusters: ProjectSummaryCluster[];
   created_at?: string;

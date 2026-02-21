@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { GROUNDING_CONFIG } from '@/lib/constants/grounding';
 import type { BriefSection } from '@/lib/types/case';
 
@@ -118,10 +119,12 @@ export function SectionGroundingGutter({
         const hasBlocking = section.annotations.some(a => a.priority === 'blocking');
 
         return (
-          <button
+          <Button
             key={sectionId}
+            variant="ghost"
+            size="icon"
             className={cn(
-              'absolute left-1/2 -translate-x-1/2 flex items-center gap-0.5',
+              'absolute left-1/2 -translate-x-1/2 flex items-center gap-0.5 h-auto w-auto p-0',
               'transition-all duration-150',
               isActive && 'scale-125',
             )}
@@ -142,16 +145,16 @@ export function SectionGroundingGutter({
             {annotationCount > 0 && (
               <span
                 className={cn(
-                  'text-[9px] font-bold leading-none min-w-[14px] h-[14px] flex items-center justify-center rounded-full',
+                  'text-xs font-bold leading-none min-w-[14px] h-[14px] flex items-center justify-center rounded-full',
                   hasBlocking
-                    ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
-                    : 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400',
+                    ? 'bg-error-100 dark:bg-error-900/40 text-error-600 dark:text-error-400'
+                    : 'bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400',
                 )}
               >
                 {annotationCount}
               </span>
             )}
-          </button>
+          </Button>
         );
       })}
     </div>

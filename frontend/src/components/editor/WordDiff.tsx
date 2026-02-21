@@ -9,6 +9,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
 
 interface WordDiffProps {
   oldText: string;
@@ -132,17 +133,19 @@ export function WordDiff({ oldText, newText, contextWords = 30 }: WordDiffProps)
       {/* Stats bar */}
       <div className="flex items-center gap-3 text-xs text-neutral-500">
         {deletedWords > 0 && (
-          <span className="text-red-600">-{deletedWords} words</span>
+          <span className="text-error-600">-{deletedWords} words</span>
         )}
         {insertedWords > 0 && (
-          <span className="text-green-600">+{insertedWords} words</span>
+          <span className="text-success-600">+{insertedWords} words</span>
         )}
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setExpanded(!expanded)}
-          className="text-accent-600 hover:underline ml-auto"
+          className="text-accent-600 hover:underline ml-auto h-auto px-1 text-xs"
         >
           {expanded ? 'Collapse context' : 'Expand all'}
-        </button>
+        </Button>
       </div>
 
       {/* Diff content */}
@@ -175,7 +178,7 @@ export function WordDiff({ oldText, newText, contextWords = 30 }: WordDiffProps)
             return (
               <span
                 key={idx}
-                className="bg-red-100 text-red-700 line-through decoration-red-400"
+                className="bg-error-100 text-error-700 line-through decoration-error-400"
               >
                 {chunk.text}
               </span>
@@ -184,7 +187,7 @@ export function WordDiff({ oldText, newText, contextWords = 30 }: WordDiffProps)
 
           if (chunk.op === 'insert') {
             return (
-              <span key={idx} className="bg-green-100 text-green-800">
+              <span key={idx} className="bg-success-100 text-success-800">
                 {chunk.text}
               </span>
             );
@@ -219,20 +222,24 @@ export function ChangeDiff({
         {(onAccept || onReject) && (
           <div className="flex items-center gap-1.5">
             {onReject && (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => onReject(change)}
-                className="text-xs px-2 py-0.5 rounded border border-neutral-300 text-neutral-600 hover:bg-red-50 hover:border-red-300 hover:text-red-600"
+                className="text-xs h-6 px-2 hover:bg-error-50 hover:border-error-300 hover:text-error-600"
               >
                 Skip
-              </button>
+              </Button>
             )}
             {onAccept && (
-              <button
+              <Button
+                variant="default"
+                size="sm"
                 onClick={() => onAccept(change)}
-                className="text-xs px-2 py-0.5 rounded border border-green-300 text-green-700 bg-green-50 hover:bg-green-100"
+                className="text-xs h-6 px-2 border border-success-300 text-success-700 bg-success-50 hover:bg-success-100"
               >
                 Accept
-              </button>
+              </Button>
             )}
           </div>
         )}

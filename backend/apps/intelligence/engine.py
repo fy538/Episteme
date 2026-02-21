@@ -8,7 +8,6 @@ Core engine for single-call unified analysis:
 Uses sectioned streaming to route content to appropriate destinations.
 """
 
-import uuid
 import json
 import logging
 from dataclasses import dataclass
@@ -32,6 +31,9 @@ class StreamEventType(Enum):
     REFLECTION_COMPLETE = "reflection_complete"
     ACTION_HINTS_COMPLETE = "action_hints_complete"
     GRAPH_EDITS_COMPLETE = "graph_edits_complete"
+    PLAN_EDITS_COMPLETE = "plan_edits_complete"
+    ORIENTATION_EDITS_COMPLETE = "orientation_edits_complete"
+    TOOL_ACTIONS_COMPLETE = "tool_actions_complete"
     ERROR = "error"
     DONE = "done"
 
@@ -57,6 +59,87 @@ class UnifiedAnalysisContext:
     def __post_init__(self):
         if self.patterns is None:
             self.patterns = {}
+
+
+# ---------------------------------------------------------------------------
+# Section configuration — table-driven section handling.
+#
+# Adding a new section type requires:
+#   1. Add to Section enum (parser.py)
+#   2. Add marker pair to SectionedStreamParser.MARKERS (parser.py)
+#   3. Add buffer + getter to SectionedStreamParser (parser.py)
+#   4. Add entry to _SECTION_CONFIGS below
+# That's it — no more copy-pasting 40 lines of handler code.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _SectionConfig:
+    """Configuration for how a section is handled in the streaming loop."""
+    # Whether content chunks are streamed (response/reflection) vs buffered (JSON sections)
+    streams: bool
+    # Default value when JSON parse fails or section is empty
+    default_value: Any
+    # Key name in event data payloads
+    data_key: str
+    # StreamEventType for chunk events (only for streaming sections)
+    chunk_event: Optional[StreamEventType] = None
+    # StreamEventType for completion events
+    complete_event: Optional[StreamEventType] = None
+    # Buffer getter method name on the parser
+    buffer_getter: Optional[str] = None
+
+
+_SECTION_CONFIGS: Dict[Section, _SectionConfig] = {
+    Section.RESPONSE: _SectionConfig(
+        streams=True,
+        default_value='',
+        data_key='response',
+        chunk_event=StreamEventType.RESPONSE_CHUNK,
+        complete_event=StreamEventType.RESPONSE_COMPLETE,
+    ),
+    Section.REFLECTION: _SectionConfig(
+        streams=True,
+        default_value='',
+        data_key='reflection',
+        chunk_event=StreamEventType.REFLECTION_CHUNK,
+        complete_event=StreamEventType.REFLECTION_COMPLETE,
+    ),
+    Section.ACTION_HINTS: _SectionConfig(
+        streams=False,
+        default_value=[],
+        data_key='action_hints',
+        complete_event=StreamEventType.ACTION_HINTS_COMPLETE,
+        buffer_getter='get_action_hints_buffer',
+    ),
+    Section.GRAPH_EDITS: _SectionConfig(
+        streams=False,
+        default_value=[],
+        data_key='graph_edits',
+        complete_event=StreamEventType.GRAPH_EDITS_COMPLETE,
+        buffer_getter='get_graph_edits_buffer',
+    ),
+    Section.PLAN_EDITS: _SectionConfig(
+        streams=False,
+        default_value={},
+        data_key='plan_edits',
+        complete_event=StreamEventType.PLAN_EDITS_COMPLETE,
+        buffer_getter='get_plan_edits_buffer',
+    ),
+    Section.ORIENTATION_EDITS: _SectionConfig(
+        streams=False,
+        default_value={},
+        data_key='orientation_edits',
+        complete_event=StreamEventType.ORIENTATION_EDITS_COMPLETE,
+        buffer_getter='get_orientation_edits_buffer',
+    ),
+    Section.TOOL_ACTIONS: _SectionConfig(
+        streams=False,
+        default_value=[],
+        data_key='tool_actions',
+        complete_event=StreamEventType.TOOL_ACTIONS_COMPLETE,
+        buffer_getter='get_tool_actions_buffer',
+    ),
+}
 
 
 class UnifiedAnalysisEngine:
@@ -96,12 +179,14 @@ class UnifiedAnalysisEngine:
     async def analyze(
         self,
         context: UnifiedAnalysisContext,
+        available_tools: Optional[List] = None,
     ) -> AsyncIterator[StreamEvent]:
         """
         Perform unified analysis with sectioned streaming.
 
         Args:
             context: Analysis context
+            available_tools: Optional list of ToolDefinition objects
 
         Yields:
             StreamEvent objects for each section
@@ -112,207 +197,22 @@ class UnifiedAnalysisEngine:
             patterns=context.patterns
         )
 
-        system_prompt = build_unified_system_prompt(prompt_config)
+        system_prompt = build_unified_system_prompt(
+            prompt_config,
+            available_tools=available_tools,
+        )
         user_prompt = build_unified_user_prompt(
             user_message=context.user_message,
             conversation_context=context.conversation_context,
             retrieval_context=context.retrieval_context,
         )
 
-        # Initialize parser
-        parser = SectionedStreamParser()
-
-        # Accumulators for full content
-        response_content = ""
-        reflection_content = ""
-
-        # Track section completion
-        response_complete = False
-        reflection_complete = False
-        action_hints_complete = False
-        graph_edits_complete = False
-
-        try:
-            # Stream from LLM
-            async for chunk in self.provider.stream_chat(
-                messages=[{"role": "user", "content": user_prompt}],
-                system_prompt=system_prompt,
-                max_tokens=2048
-            ):
-                # Parse the chunk
-                parsed_chunks = parser.parse(chunk.content)
-
-                for parsed in parsed_chunks:
-                    if parsed.section == Section.RESPONSE:
-                        if parsed.is_complete:
-                            response_complete = True
-                            yield StreamEvent(
-                                type=StreamEventType.RESPONSE_COMPLETE,
-                                data=response_content,
-                                section=Section.RESPONSE
-                            )
-                        elif parsed.content:
-                            response_content += parsed.content
-                            yield StreamEvent(
-                                type=StreamEventType.RESPONSE_CHUNK,
-                                data=parsed.content,
-                                section=Section.RESPONSE
-                            )
-
-                    elif parsed.section == Section.REFLECTION:
-                        if parsed.is_complete:
-                            reflection_complete = True
-                            yield StreamEvent(
-                                type=StreamEventType.REFLECTION_COMPLETE,
-                                data=reflection_content,
-                                section=Section.REFLECTION
-                            )
-                        elif parsed.content:
-                            reflection_content += parsed.content
-                            yield StreamEvent(
-                                type=StreamEventType.REFLECTION_CHUNK,
-                                data=parsed.content,
-                                section=Section.REFLECTION
-                            )
-
-                    elif parsed.section == Section.ACTION_HINTS:
-                        if parsed.is_complete:
-                            action_hints_complete = True
-                            # Get full action hints buffer
-                            hints_buffer = parser.get_action_hints_buffer()
-                            # Parse and emit
-                            try:
-                                hints_data = json.loads(hints_buffer) if hints_buffer.strip() else []
-                                yield StreamEvent(
-                                    type=StreamEventType.ACTION_HINTS_COMPLETE,
-                                    data={
-                                        'action_hints': hints_data,
-                                        'raw': hints_buffer
-                                    },
-                                    section=Section.ACTION_HINTS
-                                )
-                            except json.JSONDecodeError as e:
-                                logger.warning(f"Failed to parse action hints JSON: {e}")
-                                yield StreamEvent(
-                                    type=StreamEventType.ACTION_HINTS_COMPLETE,
-                                    data={
-                                        'action_hints': [],
-                                        'raw': hints_buffer,
-                                        'error': str(e)
-                                    },
-                                    section=Section.ACTION_HINTS
-                                )
-                        # Note: parser._create_chunk() already accumulates action hints content
-
-                    elif parsed.section == Section.GRAPH_EDITS:
-                        if parsed.is_complete:
-                            graph_edits_complete = True
-                            edits_buffer = parser.get_graph_edits_buffer()
-                            try:
-                                edits_data = json.loads(edits_buffer) if edits_buffer.strip() else []
-                                yield StreamEvent(
-                                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
-                                    data={
-                                        'graph_edits': edits_data,
-                                        'raw': edits_buffer
-                                    },
-                                    section=Section.GRAPH_EDITS
-                                )
-                            except json.JSONDecodeError as e:
-                                logger.warning(f"Failed to parse graph edits JSON: {e}")
-                                yield StreamEvent(
-                                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
-                                    data={
-                                        'graph_edits': [],
-                                        'raw': edits_buffer,
-                                        'error': str(e)
-                                    },
-                                    section=Section.GRAPH_EDITS
-                                )
-
-            # Flush any remaining content
-            remaining = parser.flush()
-            for parsed in remaining:
-                if parsed.section == Section.RESPONSE and parsed.content:
-                    response_content += parsed.content
-                    yield StreamEvent(
-                        type=StreamEventType.RESPONSE_CHUNK,
-                        data=parsed.content,
-                        section=Section.RESPONSE
-                    )
-                elif parsed.section == Section.REFLECTION and parsed.content:
-                    reflection_content += parsed.content
-                    yield StreamEvent(
-                        type=StreamEventType.REFLECTION_CHUNK,
-                        data=parsed.content,
-                        section=Section.REFLECTION
-                    )
-
-            # Emit completion events if not already emitted
-            if not response_complete and response_content:
-                yield StreamEvent(
-                    type=StreamEventType.RESPONSE_COMPLETE,
-                    data=response_content,
-                    section=Section.RESPONSE
-                )
-
-            if not reflection_complete and reflection_content:
-                yield StreamEvent(
-                    type=StreamEventType.REFLECTION_COMPLETE,
-                    data=reflection_content,
-                    section=Section.REFLECTION
-                )
-
-            if not action_hints_complete:
-                hints_buffer = parser.get_action_hints_buffer()
-                try:
-                    hints_data = json.loads(hints_buffer) if hints_buffer.strip() else []
-                except json.JSONDecodeError:
-                    hints_data = []
-
-                yield StreamEvent(
-                    type=StreamEventType.ACTION_HINTS_COMPLETE,
-                    data={
-                        'action_hints': hints_data,
-                        'raw': hints_buffer
-                    },
-                    section=Section.ACTION_HINTS
-                )
-
-            if not graph_edits_complete:
-                edits_buffer = parser.get_graph_edits_buffer()
-                try:
-                    edits_data = json.loads(edits_buffer) if edits_buffer.strip() else []
-                except json.JSONDecodeError:
-                    edits_data = []
-
-                yield StreamEvent(
-                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
-                    data={
-                        'graph_edits': edits_data,
-                        'raw': edits_buffer
-                    },
-                    section=Section.GRAPH_EDITS
-                )
-
-            # Final done event with all content
-            yield StreamEvent(
-                type=StreamEventType.DONE,
-                data={
-                    'response': response_content,
-                    'reflection': reflection_content,
-                    'action_hints_raw': parser.get_action_hints_buffer(),
-                    'graph_edits_raw': parser.get_graph_edits_buffer(),
-                }
-            )
-
-        except Exception as e:
-            logger.exception(f"Error in unified analysis: {e}")
-            yield StreamEvent(
-                type=StreamEventType.ERROR,
-                data={'error': str(e)}
-            )
-            raise
+        async for event in self._stream_and_parse(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=2048,
+        ):
+            yield event
 
     async def analyze_simple(
         self,
@@ -321,6 +221,7 @@ class UnifiedAnalysisEngine:
         conversation_context: str = "",
         system_prompt_override: str = None,
         retrieval_context: str = "",
+        available_tools: Optional[List] = None,
     ) -> AsyncIterator[StreamEvent]:
         """
         Simplified analyze interface.
@@ -331,6 +232,7 @@ class UnifiedAnalysisEngine:
             conversation_context: Formatted conversation history
             system_prompt_override: Optional custom system prompt (e.g. for scaffolding mode)
             retrieval_context: RAG-retrieved document chunks for grounding
+            available_tools: Optional list of ToolDefinition objects for tool actions
 
         Yields:
             StreamEvent objects
@@ -362,190 +264,150 @@ class UnifiedAnalysisEngine:
         )
 
         if system_prompt_override:
-            # Use the override directly instead of building from config
-            async for event in self._analyze_with_custom_prompt(
-                context, system_prompt_override
+            user_prompt = build_unified_user_prompt(
+                user_message=context.user_message,
+                conversation_context=context.conversation_context,
+                retrieval_context=context.retrieval_context,
+            )
+            # Use higher token limit for custom prompts (e.g. case-mode with plan_edits)
+            async for event in self._stream_and_parse(
+                system_prompt=system_prompt_override,
+                user_prompt=user_prompt,
+                max_tokens=4096,
             ):
                 yield event
         else:
-            async for event in self.analyze(context):
+            async for event in self.analyze(
+                context,
+                available_tools=available_tools,
+            ):
                 yield event
 
-    async def _analyze_with_custom_prompt(
+    # ------------------------------------------------------------------
+    # Shared streaming loop — the single source of truth for section
+    # parsing, buffering, completion, flush, and done events.
+    # ------------------------------------------------------------------
+
+    async def _stream_and_parse(
         self,
-        context: UnifiedAnalysisContext,
         system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 2048,
     ) -> AsyncIterator[StreamEvent]:
         """
-        Analyze with a custom system prompt (for scaffolding, etc.).
+        Core streaming loop shared by all analysis paths.
 
-        Same streaming logic as analyze() but bypasses prompt building.
+        Streams from the LLM provider, parses sectioned output via
+        SectionedStreamParser, and yields typed StreamEvents.
         """
-        user_prompt = build_unified_user_prompt(
-            user_message=context.user_message,
-            conversation_context=context.conversation_context,
-            retrieval_context=context.retrieval_context,
-        )
-
         parser = SectionedStreamParser()
-        response_content = ""
-        reflection_content = ""
-        response_complete = False
-        reflection_complete = False
-        action_hints_complete = False
-        graph_edits_complete = False
+
+        # Accumulators for streaming sections (response, reflection)
+        content_accum: Dict[Section, str] = {}
+        for section, cfg in _SECTION_CONFIGS.items():
+            if cfg.streams:
+                content_accum[section] = ''
+
+        # Track which sections have been completed
+        completed: Dict[Section, bool] = {s: False for s in _SECTION_CONFIGS}
 
         try:
             async for chunk in self.provider.stream_chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,
-                max_tokens=2048,
+                max_tokens=max_tokens,
             ):
                 parsed_chunks = parser.parse(chunk.content)
 
                 for parsed in parsed_chunks:
-                    if parsed.section == Section.RESPONSE:
+                    cfg = _SECTION_CONFIGS.get(parsed.section)
+                    if cfg is None:
+                        continue
+
+                    if cfg.streams:
+                        # Streaming section (response, reflection)
                         if parsed.is_complete:
-                            response_complete = True
+                            completed[parsed.section] = True
                             yield StreamEvent(
-                                type=StreamEventType.RESPONSE_COMPLETE,
-                                data=response_content,
-                                section=Section.RESPONSE,
+                                type=cfg.complete_event,
+                                data=content_accum[parsed.section],
+                                section=parsed.section,
                             )
-                        else:
-                            response_content += parsed.content
+                        elif parsed.content:
+                            content_accum[parsed.section] += parsed.content
                             yield StreamEvent(
-                                type=StreamEventType.RESPONSE_CHUNK,
+                                type=cfg.chunk_event,
                                 data=parsed.content,
-                                section=Section.RESPONSE,
+                                section=parsed.section,
                             )
-                    elif parsed.section == Section.REFLECTION:
+                    else:
+                        # Buffered JSON section (action_hints, graph_edits, plan_edits)
                         if parsed.is_complete:
-                            reflection_complete = True
-                            yield StreamEvent(
-                                type=StreamEventType.REFLECTION_COMPLETE,
-                                data=reflection_content,
-                                section=Section.REFLECTION,
-                            )
-                        else:
-                            reflection_content += parsed.content
-                            yield StreamEvent(
-                                type=StreamEventType.REFLECTION_CHUNK,
-                                data=parsed.content,
-                                section=Section.REFLECTION,
-                            )
-                    elif parsed.section == Section.ACTION_HINTS:
-                        if parsed.is_complete:
-                            action_hints_complete = True
+                            completed[parsed.section] = True
+                            buffer = getattr(parser, cfg.buffer_getter)()
                             try:
-                                import json as json_mod
-                                hints = json_mod.loads(parser.action_hints_buffer or '[]')
-                            except Exception:
-                                hints = []
+                                data = json.loads(buffer) if buffer.strip() else cfg.default_value
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse {cfg.data_key} JSON: {e}")
+                                data = cfg.default_value
                             yield StreamEvent(
-                                type=StreamEventType.ACTION_HINTS_COMPLETE,
-                                data={
-                                    'action_hints': hints,
-                                    'raw': parser.action_hints_buffer or '[]',
-                                },
-                                section=Section.ACTION_HINTS,
-                            )
-                    elif parsed.section == Section.GRAPH_EDITS:
-                        if parsed.is_complete:
-                            graph_edits_complete = True
-                            try:
-                                import json as json_mod
-                                edits = json_mod.loads(parser.graph_edits_buffer or '[]')
-                            except Exception:
-                                edits = []
-                            yield StreamEvent(
-                                type=StreamEventType.GRAPH_EDITS_COMPLETE,
-                                data={
-                                    'graph_edits': edits,
-                                    'raw': parser.graph_edits_buffer or '[]',
-                                },
-                                section=Section.GRAPH_EDITS,
+                                type=cfg.complete_event,
+                                data={cfg.data_key: data, 'raw': buffer},
+                                section=parsed.section,
                             )
 
-            # Flush any remaining content from the parser
+            # Flush remaining content from the parser
             remaining = parser.flush()
             for parsed in remaining:
-                if parsed.section == Section.RESPONSE and parsed.content:
-                    response_content += parsed.content
+                cfg = _SECTION_CONFIGS.get(parsed.section)
+                if cfg and cfg.streams and parsed.content:
+                    content_accum[parsed.section] += parsed.content
                     yield StreamEvent(
-                        type=StreamEventType.RESPONSE_CHUNK,
+                        type=cfg.chunk_event,
                         data=parsed.content,
-                        section=Section.RESPONSE,
-                    )
-                elif parsed.section == Section.REFLECTION and parsed.content:
-                    reflection_content += parsed.content
-                    yield StreamEvent(
-                        type=StreamEventType.REFLECTION_CHUNK,
-                        data=parsed.content,
-                        section=Section.REFLECTION,
+                        section=parsed.section,
                     )
 
-            # Emit completion events if not already emitted
-            if not response_complete and response_content:
-                yield StreamEvent(
-                    type=StreamEventType.RESPONSE_COMPLETE,
-                    data=response_content,
-                    section=Section.RESPONSE,
-                )
+            # Emit completion events for any sections that didn't close cleanly
+            for section, cfg in _SECTION_CONFIGS.items():
+                if completed[section]:
+                    continue
 
-            if not reflection_complete and reflection_content:
-                yield StreamEvent(
-                    type=StreamEventType.REFLECTION_COMPLETE,
-                    data=reflection_content,
-                    section=Section.REFLECTION,
-                )
+                if cfg.streams:
+                    # Streaming section: emit complete if we have content
+                    if content_accum.get(section):
+                        yield StreamEvent(
+                            type=cfg.complete_event,
+                            data=content_accum[section],
+                            section=section,
+                        )
+                else:
+                    # Buffered section: parse whatever we have
+                    buffer = getattr(parser, cfg.buffer_getter)()
+                    try:
+                        data = json.loads(buffer) if buffer.strip() else cfg.default_value
+                    except json.JSONDecodeError:
+                        data = cfg.default_value
+                    yield StreamEvent(
+                        type=cfg.complete_event,
+                        data={cfg.data_key: data, 'raw': buffer},
+                        section=section,
+                    )
 
-            if not action_hints_complete:
-                hints_buffer = parser.get_action_hints_buffer()
-                try:
-                    import json as json_mod
-                    hints_data = json_mod.loads(hints_buffer) if hints_buffer.strip() else []
-                except (json_mod.JSONDecodeError, Exception):
-                    hints_data = []
-                yield StreamEvent(
-                    type=StreamEventType.ACTION_HINTS_COMPLETE,
-                    data={
-                        'action_hints': hints_data,
-                        'raw': hints_buffer,
-                    },
-                    section=Section.ACTION_HINTS,
-                )
+            # Final done event with all accumulated content
+            done_data = {}
+            for section, cfg in _SECTION_CONFIGS.items():
+                if cfg.streams:
+                    done_data[cfg.data_key] = content_accum.get(section, '')
+                else:
+                    done_data[f'{cfg.data_key}_raw'] = getattr(parser, cfg.buffer_getter)()
 
-            if not graph_edits_complete:
-                edits_buffer = parser.get_graph_edits_buffer()
-                try:
-                    import json as json_mod
-                    edits_data = json_mod.loads(edits_buffer) if edits_buffer.strip() else []
-                except (json_mod.JSONDecodeError, Exception):
-                    edits_data = []
-                yield StreamEvent(
-                    type=StreamEventType.GRAPH_EDITS_COMPLETE,
-                    data={
-                        'graph_edits': edits_data,
-                        'raw': edits_buffer,
-                    },
-                    section=Section.GRAPH_EDITS,
-                )
-
-            # Final done event with all content
-            yield StreamEvent(
-                type=StreamEventType.DONE,
-                data={
-                    'response': response_content,
-                    'reflection': reflection_content,
-                    'action_hints_raw': parser.get_action_hints_buffer(),
-                    'graph_edits_raw': parser.get_graph_edits_buffer(),
-                },
-            )
+            yield StreamEvent(type=StreamEventType.DONE, data=done_data)
 
         except Exception as e:
-            logger.exception("custom_prompt_analysis_error")
+            logger.exception(f"Error in unified analysis: {e}")
             yield StreamEvent(
                 type=StreamEventType.ERROR,
-                data={'error': str(e)},
+                data={'error': 'An internal error occurred during analysis.'},
             )
+            raise

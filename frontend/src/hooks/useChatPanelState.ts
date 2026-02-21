@@ -13,7 +13,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStreamingChat } from './useStreamingChat';
-import type { ActionHint, InlineActionCard } from '@/lib/types/chat';
+import { chatAPI } from '@/lib/api/chat';
+import type { ActionHint, InlineActionCard, ToolExecutedData, ToolConfirmationData } from '@/lib/types/chat';
 import type { ModeContext } from '@/lib/types/companion';
 import type { StreamingCallbacks } from '@/lib/types/streaming';
 
@@ -40,15 +41,17 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
   // Track the latest assistant message ID so we can anchor cards to it
   const latestAssistantMessageIdRef = useRef<string | null>(null);
 
+  // Dedup guard: track which message IDs already have a plan_diff_proposal card
+  // to prevent duplicates from onPlanEdits (SSE) vs onActionHints (suggest_plan_diff)
+  const planDiffMessageIdsRef = useRef<Set<string>>(new Set());
+
   // --- Core streaming (delegated) ---
   // Skip initial message load for brand-new threads (hero input handoff)
   const streaming = useStreamingChat({
     threadId,
     skipInitialLoad: !!initialMessage,
-    context: mode ? {
-      mode: mode.mode,
-      caseId: mode.caseId,
-      inquiryId: mode.inquiryId,
+    context: (mode || chatSource) ? {
+      ...(mode ? { mode: mode.mode, caseId: mode.caseId, inquiryId: mode.inquiryId } : {}),
       ...(chatSource ? { source_type: chatSource.source_type, source_id: chatSource.source_id } : {}),
     } : undefined,
     streamCallbacks: {
@@ -84,25 +87,161 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
         }
 
         // Convert suggest_plan_diff hints to plan diff proposal cards
+        // (skip if onPlanEdits already created a card for this message)
         const planDiffHint = hints.find(h => h.type === 'suggest_plan_diff');
         if (planDiffHint && latestAssistantMessageIdRef.current) {
-          const hintData = planDiffHint.data as Record<string, unknown>;
+          const msgId = latestAssistantMessageIdRef.current;
+          if (!planDiffMessageIdsRef.current.has(msgId)) {
+            planDiffMessageIdsRef.current.add(msgId);
+            const hintData = planDiffHint.data as Record<string, unknown>;
+            const newCard: InlineActionCard = {
+              id: `plan-diff-${Date.now()}`,
+              type: 'plan_diff_proposal',
+              afterMessageId: msgId,
+              data: {
+                diffSummary: planDiffHint.reason,
+                proposedContent: hintData.proposed_content,
+                diffData: hintData.diff_data,
+              },
+              createdAt: new Date().toISOString(),
+            };
+            setInlineCards(prev => [...prev, newCard]);
+          }
+        }
+      },
+      // Wire plan_edits SSE event to plan diff proposal inline card
+      // (preferred source — takes priority over suggest_plan_diff action hints)
+      onPlanEdits: (planEditsData) => {
+        streamCallbacks?.onPlanEdits?.(planEditsData);
+
+        if (planEditsData?.proposedContent && latestAssistantMessageIdRef.current) {
+          const msgId = latestAssistantMessageIdRef.current;
+          // Mark this message as having a plan diff card (dedup guard)
+          planDiffMessageIdsRef.current.add(msgId);
           const newCard: InlineActionCard = {
-            id: `plan-diff-${Date.now()}`,
+            id: `plan-edits-${Date.now()}`,
             type: 'plan_diff_proposal',
-            afterMessageId: latestAssistantMessageIdRef.current,
+            afterMessageId: msgId,
             data: {
-              diffSummary: planDiffHint.reason,
-              proposedContent: hintData.proposed_content,
-              diffData: hintData.diff_data,
+              diffSummary: planEditsData.diffSummary || 'Proposed plan changes',
+              proposedContent: planEditsData.proposedContent,
+              diffData: planEditsData.diffData || {},
             },
             createdAt: new Date().toISOString(),
           };
           setInlineCards(prev => [...prev, newCard]);
         }
       },
+      // Wire orientation_edits SSE event to orientation diff proposal inline card
+      onOrientationEdits: (orientationEditsData) => {
+        streamCallbacks?.onOrientationEdits?.(orientationEditsData);
+
+        if (orientationEditsData?.proposedState && latestAssistantMessageIdRef.current) {
+          const msgId = latestAssistantMessageIdRef.current;
+          const newCard: InlineActionCard = {
+            id: `orientation-edits-${Date.now()}`,
+            type: 'orientation_diff_proposal',
+            afterMessageId: msgId,
+            data: {
+              orientationId: orientationEditsData.orientationId,
+              diffSummary: orientationEditsData.diffSummary || 'Proposed orientation changes',
+              proposedState: orientationEditsData.proposedState,
+              diffData: orientationEditsData.diffData || {},
+            },
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
+        }
+      },
+      // Wire companion case signal to inline card (companion-detected "decision shape")
+      onCaseSignal: (data) => {
+        streamCallbacks?.onCaseSignal?.(data);
+
+        if (latestAssistantMessageIdRef.current) {
+          const newCard: InlineActionCard = {
+            id: `companion-case-signal-${Date.now()}`,
+            type: 'case_creation_prompt',
+            afterMessageId: latestAssistantMessageIdRef.current,
+            data: {
+              aiReason: data.reason || 'Your conversation has a decision structure that could benefit from structured analysis.',
+              suggestedTitle: data.suggested_title || data.decision_question,
+              companionState: data.companion_state,
+              source: 'companion',
+            },
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
+        }
+      },
+      // Wire tool_executed SSE event to inline card (auto-executed tool results)
+      onToolExecuted: (data: ToolExecutedData) => {
+        streamCallbacks?.onToolExecuted?.(data);
+
+        if (latestAssistantMessageIdRef.current) {
+          const newCard: InlineActionCard = {
+            id: `tool-executed-${Date.now()}-${data.tool}`,
+            type: 'tool_executed',
+            afterMessageId: latestAssistantMessageIdRef.current,
+            data: data as unknown as Record<string, unknown>,
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
+        } else {
+          // M6: Observability — tool event arrived before onMessageComplete set the ref
+          console.warn('[useChatPanelState] tool_executed event dropped: no assistant message ID yet', data.tool);
+        }
+      },
+      // Wire position update proposals from loaded messages to inline cards
+      onLoadedPositionProposal: (messageId, proposal) => {
+        // Avoid duplicates if this message already has a card
+        setInlineCards(prev => {
+          const exists = prev.some(c =>
+            c.type === 'position_update_proposal' && c.afterMessageId === messageId
+          );
+          if (exists) return prev;
+          return [...prev, {
+            id: `position-update-${messageId}`,
+            type: 'position_update_proposal' as const,
+            afterMessageId: messageId,
+            data: {
+              proposals: proposal.proposals,
+              caseId: proposal.case_id,
+              currentPosition: proposal.current_position,
+              messageId,
+            },
+            createdAt: new Date().toISOString(),
+          }];
+        });
+      },
+      // Wire tool_confirmation SSE event to inline card (requires user approval)
+      onToolConfirmation: (data: ToolConfirmationData) => {
+        streamCallbacks?.onToolConfirmation?.(data);
+
+        if (latestAssistantMessageIdRef.current) {
+          const newCard: InlineActionCard = {
+            id: `tool-confirm-${Date.now()}-${data.tool}`,
+            type: 'tool_confirmation',
+            afterMessageId: latestAssistantMessageIdRef.current,
+            data: data as unknown as Record<string, unknown>,
+            createdAt: new Date().toISOString(),
+          };
+          setInlineCards(prev => [...prev, newCard]);
+        } else {
+          // M6: Observability — confirmation event arrived before onMessageComplete set the ref
+          console.warn('[useChatPanelState] tool_confirmation event dropped: no assistant message ID yet', data.tool);
+        }
+      },
     },
   });
+
+  // --- Clear stale cards when thread changes ---
+  // Without this, cards from a previous thread could persist if the component
+  // is reused without remounting (e.g. switching threads in the same ChatPanel).
+  useEffect(() => {
+    setInlineCards([]);
+    planDiffMessageIdsRef.current.clear();
+    latestAssistantMessageIdRef.current = null;
+  }, [threadId]);
 
   // --- UI state ---
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -119,6 +258,14 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
   const addInlineCard = useCallback((card: InlineActionCard) => {
     setInlineCards(prev => [...prev, card]);
   }, []);
+
+  // Confirm or dismiss a pending tool action
+  const confirmToolAction = useCallback(async (confirmationId: string, approved: boolean) => {
+    const result = await chatAPI.confirmToolAction(threadId, confirmationId, approved);
+    if (!result.success && !result.dismissed) {
+      throw new Error(result.error || 'Failed to execute tool action');
+    }
+  }, [threadId]);
 
   // Auto-send initial message (Home hero input → chat handoff)
   //
@@ -153,6 +300,7 @@ export function useChatPanelState({ threadId, streamCallbacks, mode, chatSource,
     inlineCards,
     addInlineCard,
     dismissCard,
+    confirmToolAction,
     creatingCase,
     setCreatingCase,
   };

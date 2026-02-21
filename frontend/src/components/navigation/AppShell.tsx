@@ -22,6 +22,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { SidebarPanel } from './SidebarPanel';
 import { useNavigation } from './NavigationProvider';
 import { useGlobalKeyboardShortcuts } from '@/hooks/useGlobalKeyboard';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface AppShellProps {
@@ -131,16 +132,18 @@ export function AppShell({ children, className }: AppShellProps) {
             />
 
             {/* Close button at the drawer edge */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={nav.closeOverlay}
-              className="absolute top-3 right-[-36px] w-7 h-7 rounded-full bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-md flex items-center justify-center text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-all opacity-0 data-[open=true]:opacity-100 delay-100"
+              className="absolute top-3 right-[-36px] w-7 h-7 rounded-full bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-md text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-all opacity-0 data-[open=true]:opacity-100 delay-100"
               data-open={nav.isOverlayOpen}
               aria-label="Close sidebar"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -149,15 +152,16 @@ export function AppShell({ children, className }: AppShellProps) {
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {/* Floating toggle button — appears when sidebar is hidden */}
         {showFloatingToggle && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={isSmallScreen ? nav.openOverlay : nav.togglePanel}
             className={cn(
               'absolute top-3 left-3 z-30',
-              'w-8 h-8 rounded-lg',
+              'w-8 h-8',
               'bg-white dark:bg-neutral-900',
               'border border-neutral-200 dark:border-neutral-700',
               'shadow-sm hover:shadow-md',
-              'flex items-center justify-center',
               'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200',
               'transition-all duration-200',
               // Subtle entrance animation
@@ -167,7 +171,7 @@ export function AppShell({ children, className }: AppShellProps) {
             title="Open sidebar (⌘B)"
           >
             <SidebarToggleIcon className="w-4 h-4" />
-          </button>
+          </Button>
         )}
 
         {children}

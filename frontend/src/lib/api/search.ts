@@ -7,9 +7,9 @@
  * - Documents
  */
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+import { apiClient } from './client';
 
-export type SearchResultType = 'inquiry' | 'case' | 'document';
+export type SearchResultType = 'inquiry' | 'case' | 'document' | 'episode';
 
 export interface SearchResult {
   id: string;
@@ -28,6 +28,7 @@ export interface SearchResult {
     chunk_preview?: string;
     priority?: string;
     document_id?: string;
+    thread_id?: string;
   };
 }
 
@@ -58,33 +59,13 @@ export async function unifiedSearch(
   context?: SearchContext,
   options?: SearchOptions
 ): Promise<UnifiedSearchResponse> {
-  const response = await fetch(`${BACKEND_URL}/api/search/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify({
-      query,
-      context: context || {},
-      types: options?.types,
-      top_k: options?.top_k || 20,
-      threshold: options?.threshold || 0.4,
-    }),
+  return apiClient.post<UnifiedSearchResponse>('/search/', {
+    query,
+    context: context || {},
+    types: options?.types,
+    top_k: options?.top_k || 20,
+    threshold: options?.threshold || 0.4,
   });
-
-  if (!response.ok) {
-    throw new Error('Search failed');
-  }
-
-  return response.json();
-}
-
-/**
- * Get recent items (for empty search state)
- */
-export async function getRecentItems(context?: SearchContext): Promise<UnifiedSearchResponse> {
-  return unifiedSearch('', context);
 }
 
 /**
@@ -98,6 +79,8 @@ export function getResultTypeIcon(type: SearchResultType): string {
       return '📁';
     case 'document':
       return '📄';
+    case 'episode':
+      return '💬';
     default:
       return '📌';
   }
@@ -114,6 +97,8 @@ export function getResultTypeLabel(type: SearchResultType): string {
       return 'Case';
     case 'document':
       return 'Document';
+    case 'episode':
+      return 'Conversation';
     default:
       return type;
   }
@@ -134,6 +119,10 @@ export function getResultPath(result: SearchResult): string {
       return result.case_id
         ? `/cases/${result.case_id}/documents/${result.id}`
         : `/`;
+    case 'episode':
+      return result.metadata?.thread_id
+        ? `/chat/${result.metadata.thread_id}`
+        : '/';
     default:
       return '/';
   }

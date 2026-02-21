@@ -4,6 +4,8 @@ Inquiry models - Elevated signals worthy of investigation (Phase 2)
 from django.db import models
 from django.contrib.auth.models import User
 
+from pgvector.django import VectorField
+
 from apps.common.models import TimestampedModel, UUIDModel
 
 
@@ -145,10 +147,11 @@ class Inquiry(UUIDModel, TimestampedModel):
     )
 
     # Pre-computed embedding for semantic search (384-dim from sentence-transformers)
-    embedding = models.JSONField(
+    embedding = VectorField(
+        dimensions=384,
         null=True,
         blank=True,
-        help_text="Pre-computed embedding vector for semantic search"
+        help_text="384-dim embedding from sentence-transformers"
     )
 
     class Meta:

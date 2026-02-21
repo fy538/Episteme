@@ -12,6 +12,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { casesAPI } from '@/lib/api/cases';
 import { cn } from '@/lib/utils';
+import { MarkdownIcon, JSONIcon } from '@/components/ui/icons';
 
 interface ExportDialogProps {
   caseId: string;
@@ -57,8 +58,8 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
       const markdown = await casesAPI.exportBriefMarkdown(caseId);
       downloadBlob(markdown, `${sanitizeFilename(caseTitle)}.md`, 'text/markdown');
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Export failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Export failed');
     } finally {
       setExporting(null);
     }
@@ -72,8 +73,8 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
       const json = JSON.stringify(data, null, 2);
       downloadBlob(json, `${sanitizeFilename(caseTitle)}_IR.json`, 'application/json');
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Export failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Export failed');
     } finally {
       setExporting(null);
     }
@@ -88,17 +89,16 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="group" aria-label="Export formats">
           {/* Markdown */}
-          <button
+          <Button
+            variant="ghost"
             onClick={handleExportMarkdown}
             disabled={!!exporting}
             aria-label="Export as Markdown"
             className={cn(
-              'flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all',
+              'flex flex-col items-start gap-2 p-4 h-auto rounded-xl border text-left',
               'border-neutral-200 dark:border-neutral-800',
               'hover:border-accent-300 dark:hover:border-accent-700',
               'hover:bg-accent-50/30 dark:hover:bg-accent-900/10',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400',
-              'disabled:opacity-50 disabled:pointer-events-none',
             )}
           >
             <div className="flex items-center gap-2">
@@ -107,26 +107,25 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
                 Markdown
               </span>
             </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed font-normal">
               Human-readable document with sections, assumptions, and criteria. Great for sharing.
             </p>
             {exporting === 'markdown' && (
-              <span className="text-[10px] text-accent-500 dark:text-accent-400" role="status">Exporting...</span>
+              <span className="text-xs text-accent-500 dark:text-accent-400" role="status">Exporting...</span>
             )}
-          </button>
+          </Button>
 
           {/* Structured JSON */}
-          <button
+          <Button
+            variant="ghost"
             onClick={handleExportJSON}
             disabled={!!exporting}
             aria-label="Export as Structured JSON"
             className={cn(
-              'flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all',
+              'flex flex-col items-start gap-2 p-4 h-auto rounded-xl border text-left',
               'border-neutral-200 dark:border-neutral-800',
               'hover:border-accent-300 dark:hover:border-accent-700',
               'hover:bg-accent-50/30 dark:hover:bg-accent-900/10',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400',
-              'disabled:opacity-50 disabled:pointer-events-none',
             )}
           >
             <div className="flex items-center gap-2">
@@ -135,17 +134,17 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
                 Structured JSON
               </span>
             </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed font-normal">
               Full reasoning graph (claims, evidence, grounding scores). For slides, memos, or integrations.
             </p>
             {exporting === 'json' && (
-              <span className="text-[10px] text-accent-500 dark:text-accent-400" role="status">Exporting...</span>
+              <span className="text-xs text-accent-500 dark:text-accent-400" role="status">Exporting...</span>
             )}
-          </button>
+          </Button>
         </div>
 
         {error && (
-          <p className="text-xs text-red-500 text-center" role="alert">{error}</p>
+          <p className="text-xs text-error-500 text-center" role="alert">{error}</p>
         )}
 
         <div className="flex justify-end">
@@ -155,26 +154,6 @@ export function ExportDialog({ caseId, caseTitle, isOpen, onClose }: ExportDialo
         </div>
       </div>
     </Dialog>
-  );
-}
-
-// -- Icons --
-
-function MarkdownIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M7 15V9l2.5 3L12 9v6M17 15v-6l-2 3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function JSONIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <path d="M8 3H6a2 2 0 00-2 2v2m0 6v2a2 2 0 002 2h2m8-14h2a2 2 0 012 2v2m0 6v2a2 2 0 01-2 2h-2" strokeLinecap="round" />
-      <path d="M9 12h1.5m3 0H15M9 9h6M9 15h6" strokeLinecap="round" />
-    </svg>
   );
 }
 

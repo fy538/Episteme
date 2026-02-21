@@ -1,7 +1,10 @@
 """
 Event service - append events to the event store
 """
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Any, Optional
 from django.utils import timezone
 from django.db import transaction
@@ -70,8 +73,8 @@ class EventService:
                     from apps.cases.models import Case
                     case_obj = Case.objects.only('title').get(id=case_id)
                     payload = {**payload, 'case_title': case_obj.title}
-                except Exception:
-                    pass  # Non-fatal — skip if case not found
+                except Exception as e:
+                    logger.debug("Case title denormalization skipped: %s", e)
 
             # Auto-assign category from event type
             category = (

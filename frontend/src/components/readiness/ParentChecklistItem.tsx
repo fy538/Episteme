@@ -4,18 +4,8 @@
 
 'use client';
 
-// Inline SVG icons to avoid lucide-react dependency
-const ChevronDown = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-  </svg>
-);
-
-const ChevronRight = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-  </svg>
-);
+import { ChevronDownIcon, ChevronRightIcon } from '@/components/ui/icons';
+import { Button } from '@/components/ui/button';
 import { ChecklistItem } from './ChecklistItem';
 import type { ReadinessChecklistItemData } from './ReadinessChecklist';
 
@@ -57,16 +47,18 @@ export function ParentChecklistItem({
       <div className="flex items-start gap-2">
         {/* Expand/collapse children */}
         {hasChildren && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onToggleParent}
-            className="mt-4 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+            className="mt-4 h-auto w-auto p-0.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
           >
             {isParentExpanded ? (
-              <ChevronDown className="w-5 h-5" />
+              <ChevronDownIcon className="w-5 h-5" />
             ) : (
-              <ChevronRight className="w-5 h-5" />
+              <ChevronRightIcon className="w-5 h-5" />
             )}
-          </button>
+          </Button>
         )}
 
         <div className={`flex-1 ${!hasChildren ? 'ml-7' : ''}`}>

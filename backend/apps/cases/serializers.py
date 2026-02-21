@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import (
     Case, CaseStatus, StakesLevel,
     InvestigationPlan, PlanVersion, CaseStage,
+    DecisionRecord, ResolutionType,
 )
 
 
@@ -60,6 +61,8 @@ class CaseSerializer(serializers.ModelSerializer):
             'became_skill_name',
             # Active skills
             'active_skills_summary',
+            # Flexible metadata (extraction status, analysis, etc.)
+            'metadata',
         ]
         read_only_fields = ['id', 'created_from_event_id', 'created_at', 'updated_at', 'user_confidence_updated_at', 'premortem_at']
 
@@ -92,15 +95,102 @@ class CaseSerializer(serializers.ModelSerializer):
         ]
 
 
+class CaseWithDecisionSerializer(CaseSerializer):
+    """Extended serializer for case list views with decision lifecycle data.
+
+    Adds plan_stage, decision_summary, and risk_indicator fields needed
+    by the project Cases page to show decision lifecycle status.
+    """
+    plan_stage = serializers.SerializerMethodField()
+    decision_summary = serializers.SerializerMethodField()
+    risk_indicator = serializers.SerializerMethodField()
+
+    class Meta(CaseSerializer.Meta):
+        fields = CaseSerializer.Meta.fields + [
+            'plan_stage',
+            'decision_summary',
+            'risk_indicator',
+        ]
+
+    def get_plan_stage(self, obj):
+        """Current investigation plan stage."""
+        try:
+            return obj.plan.stage
+        except (InvestigationPlan.DoesNotExist, AttributeError):
+            return 'exploring'
+
+    def get_decision_summary(self, obj):
+        """For decided cases: resolution type, decided_at, outcome status."""
+        try:
+            dr = obj.decision
+        except (DecisionRecord.DoesNotExist, AttributeError):
+            return None
+
+        outcome_status = 'pending'
+        if dr.outcome_check_date:
+            from datetime import date, timedelta
+            today = date.today()
+            if dr.outcome_check_date <= today:
+                # Check if there's a recent outcome note
+                has_recent_note = False
+                if dr.outcome_notes:
+                    latest = dr.outcome_notes[-1]
+                    note_date_str = latest.get('date', '')
+                    if note_date_str:
+                        try:
+                            note_date = date.fromisoformat(note_date_str[:10])
+                            has_recent_note = (today - note_date) < timedelta(days=7)
+                        except (ValueError, TypeError):
+                            pass
+
+                if has_recent_note:
+                    sentiment = dr.outcome_notes[-1].get('sentiment', 'neutral')
+                    outcome_status = sentiment
+                else:
+                    outcome_status = 'overdue'
+            else:
+                outcome_status = 'pending'
+
+        return {
+            'resolution_type': dr.resolution_type,
+            'decided_at': dr.decided_at.isoformat() if dr.decided_at else None,
+            'outcome_check_date': str(dr.outcome_check_date) if dr.outcome_check_date else None,
+            'outcome_status': outcome_status,
+        }
+
+    def get_risk_indicator(self, obj):
+        """High-risk untested assumption count from current plan version."""
+        try:
+            plan = obj.plan
+            latest_version = (
+                PlanVersion.objects
+                .filter(plan=plan)
+                .order_by('-version_number')
+                .values_list('content', flat=True)
+                .first()
+            )
+            if not latest_version:
+                return 0
+
+            assumptions = latest_version.get('assumptions', [])
+            return sum(
+                1 for a in assumptions
+                if a.get('risk_level') == 'high' and a.get('status') == 'untested'
+            )
+        except (InvestigationPlan.DoesNotExist, AttributeError):
+            return 0
+
+
 class CreateCaseSerializer(serializers.Serializer):
     """Serializer for creating a new case"""
-    
+
     title = serializers.CharField(max_length=500)
     position = serializers.CharField(required=False, allow_blank=True, default="")
     stakes = serializers.ChoiceField(
         choices=StakesLevel.choices,
         default=StakesLevel.MEDIUM
     )
+    decision_question = serializers.CharField(required=False, allow_blank=True, default="")
     thread_id = serializers.UUIDField(required=False, allow_null=True)
     project_id = serializers.UUIDField(required=False, allow_null=True)  # Phase 2
 
@@ -210,6 +300,8 @@ class PlanDiffProposalSerializer(serializers.Serializer):
     content = serializers.DictField()
     diff_summary = serializers.CharField()
     diff_data = serializers.DictField(required=False, allow_null=True)
+    trigger_type = serializers.CharField(required=False, default='ai_proposal_accepted')
+    generation_context = serializers.DictField(required=False, default=dict)
 
 
 class AssumptionStatusSerializer(serializers.Serializer):
@@ -225,3 +317,77 @@ class CriterionStatusSerializer(serializers.Serializer):
     """Serializer for updating a decision criterion"""
 
     is_met = serializers.BooleanField()
+
+
+# ===== Decision Record Serializers =====
+
+class RecordDecisionSerializer(serializers.Serializer):
+    """Input serializer for recording a decision.
+
+    All fields are optional for the new auto-resolution flow (only
+    resolution_type is needed). Legacy callers that send decision_text +
+    key_reasons + confidence_level still work through the legacy path.
+    """
+
+    resolution_type = serializers.ChoiceField(
+        choices=ResolutionType.choices,
+        default=ResolutionType.RESOLVED,
+        required=False,
+    )
+    decision_text = serializers.CharField(
+        max_length=5000, required=False, allow_blank=True
+    )
+    key_reasons = serializers.ListField(
+        child=serializers.CharField(max_length=1000),
+        required=False,
+        default=list,
+    )
+    confidence_level = serializers.IntegerField(
+        min_value=0, max_value=100, required=False
+    )
+    caveats = serializers.CharField(required=False, allow_blank=True, default="")
+    linked_assumption_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        default=list,
+    )
+    outcome_check_date = serializers.DateField(required=False, allow_null=True)
+
+
+class DecisionRecordSerializer(serializers.ModelSerializer):
+    """Output serializer for decision records."""
+
+    class Meta:
+        model = DecisionRecord
+        fields = [
+            'id', 'case', 'resolution_type', 'resolution_profile',
+            'decision_text', 'key_reasons',
+            'caveats', 'linked_assumption_ids',
+            'decided_at', 'outcome_check_date', 'outcome_notes',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class UpdateResolutionSerializer(serializers.Serializer):
+    """Input serializer for editing a resolution after creation."""
+
+    decision_text = serializers.CharField(
+        max_length=5000, required=False, allow_blank=True
+    )
+    key_reasons = serializers.ListField(
+        child=serializers.CharField(max_length=1000),
+        required=False,
+    )
+    caveats = serializers.CharField(required=False, allow_blank=True)
+    outcome_check_date = serializers.DateField(required=False, allow_null=True)
+
+
+class OutcomeNoteSerializer(serializers.Serializer):
+    """Input serializer for adding an outcome note."""
+
+    note = serializers.CharField(max_length=5000)
+    sentiment = serializers.ChoiceField(
+        choices=['positive', 'neutral', 'negative', 'mixed'],
+        default='neutral',
+    )

@@ -7,6 +7,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import {
   ActionCard,
   ActionCardHeader,
@@ -57,7 +58,7 @@ export function InquiryFocusPromptCard({
           <Button size="sm" onClick={() => onFocus(inquiryId)} disabled={isFocusing}>
             {isFocusing ? (
               <span className="inline-flex items-center gap-2">
-                <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                <Spinner size="xs" />
                 Focusing...
               </span>
             ) : (

@@ -162,7 +162,7 @@ export function ReadinessChecklist({
           </h3>
           <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
             {allRequiredComplete ? (
-              <span className="text-green-600 dark:text-green-400 font-medium">
+              <span className="text-success-600 dark:text-success-400 font-medium">
                 ✓ All critical items complete
               </span>
             ) : (

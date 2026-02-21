@@ -90,17 +90,19 @@ export function ChatModeHeader({
         {mode.mode === 'case' && (
           <>
             <span className={cn('text-lg', styles.icon)}>+</span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onViewCase}
               className={cn(
-                'text-sm font-medium truncate hover:underline',
+                'text-sm font-medium truncate hover:underline px-0',
                 styles.text,
                 onViewCase && 'cursor-pointer'
               )}
               disabled={!onViewCase}
             >
               {mode.caseName}
-            </button>
+            </Button>
           </>
         )}
 
@@ -108,33 +110,37 @@ export function ChatModeHeader({
           <>
             {/* Case breadcrumb */}
             <span className={cn('text-lg', caseStyles.icon)}>+</span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onViewCase}
               className={cn(
-                'text-sm hover:underline truncate max-w-32',
+                'text-sm hover:underline truncate max-w-32 px-0',
                 caseStyles.text
               )}
               title={mode.caseName}
             >
               {mode.caseName}
-            </button>
+            </Button>
 
             {/* Separator */}
             <span className="text-neutral-400 dark:text-neutral-600">&gt;</span>
 
             {/* Inquiry */}
             <span className={cn('text-lg', styles.icon)}>@</span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onViewInquiry}
               className={cn(
-                'text-sm font-medium truncate hover:underline',
+                'text-sm font-medium truncate hover:underline px-0',
                 styles.text,
                 onViewInquiry && 'cursor-pointer'
               )}
               disabled={!onViewInquiry}
             >
               {mode.inquiryTitle}
-            </button>
+            </Button>
           </>
         )}
       </div>

@@ -147,10 +147,10 @@ export function useBrief({
         pollStableCountRef.current = 0;
         setPollActive(true);
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load brief sections');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load brief sections');
       // Not an error if case just has no sections yet
-      if (err.status === 404) {
+      if (typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 404) {
         setSections([]);
         setError(null);
       }
@@ -221,8 +221,8 @@ export function useBrief({
       const section = await casesAPI.createBriefSection(caseId, data);
       await refresh();
       return section;
-    } catch (err: any) {
-      setError(err.message || 'Failed to add section');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add section');
       return null;
     }
   }, [caseId, refresh]);
@@ -238,8 +238,8 @@ export function useBrief({
         s.id === sectionId ? { ...s, ...section } : s
       ));
       return section;
-    } catch (err: any) {
-      setError(err.message || 'Failed to update section');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update section');
       return null;
     }
   }, [caseId]);
@@ -249,8 +249,8 @@ export function useBrief({
       await casesAPI.deleteBriefSection(caseId, sectionId);
       setSections(prev => prev.filter(s => s.id !== sectionId));
       return true;
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete section');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete section');
       return false;
     }
   }, [caseId]);
@@ -267,8 +267,8 @@ export function useBrief({
         )
       );
       await casesAPI.reorderBriefSections(caseId, order);
-    } catch (err: any) {
-      setError(err.message || 'Failed to reorder sections');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to reorder sections');
       await refresh(); // Revert on error
     }
   }, [caseId, refresh]);
@@ -284,8 +284,8 @@ export function useBrief({
       pollStableCountRef.current = 0;
       setPollActive(true);
       return section;
-    } catch (err: any) {
-      setError(err.message || 'Failed to link inquiry');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to link inquiry');
       return null;
     }
   }, [caseId, refresh]);
@@ -295,8 +295,8 @@ export function useBrief({
       const section = await casesAPI.unlinkSectionFromInquiry(caseId, sectionId);
       await refresh();
       return section;
-    } catch (err: any) {
-      setError(err.message || 'Failed to unlink inquiry');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to unlink inquiry');
       return null;
     }
   }, [caseId, refresh]);
@@ -312,13 +312,13 @@ export function useBrief({
     setSections(prev => updateCollapse(prev));
     try {
       await casesAPI.updateBriefSection(caseId, sectionId, { is_collapsed: collapsed });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Revert on error
       setSections(prev => updateCollapse(prev).map(s => ({
         ...s,
         is_collapsed: s.id === sectionId ? !collapsed : s.is_collapsed,
       })));
-      setError(err.message || 'Failed to toggle section');
+      setError(err instanceof Error ? err.message : 'Failed to toggle section');
     }
   }, [caseId]);
 
@@ -335,8 +335,8 @@ export function useBrief({
         }
         return s;
       }));
-    } catch (err: any) {
-      setError(err.message || 'Failed to dismiss annotation');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to dismiss annotation');
     }
   }, [caseId]);
 
@@ -368,8 +368,8 @@ export function useBrief({
       pollStableCountRef.current = 0;
       pollFailureCountRef.current = 0;
       setPollActive(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to evolve brief');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to evolve brief');
     } finally {
       setIsEvolving(false);
     }

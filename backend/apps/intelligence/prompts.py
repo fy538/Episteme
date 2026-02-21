@@ -6,7 +6,7 @@ Builds prompts that generate sectioned output:
 - <reflection> - Meta-cognitive reflection
 """
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 
@@ -17,12 +17,16 @@ class UnifiedPromptConfig:
     patterns: Dict = None
 
 
-def build_unified_system_prompt(config: UnifiedPromptConfig) -> str:
+def build_unified_system_prompt(
+    config: UnifiedPromptConfig,
+    available_tools: Optional[List] = None,
+) -> str:
     """
     Build the system prompt for unified analysis.
 
     Args:
         config: Configuration for prompt generation
+        available_tools: Optional list of ToolDefinition objects to inject
 
     Returns:
         System prompt string
@@ -87,6 +91,10 @@ Return [] if:
 - The conversation is purely informational with no decision at stake
 </action_hints>"""
 
+    # Add tool actions section if tools are available
+    if available_tools:
+        base += _build_tool_actions_prompt(available_tools)
+
     # Add context about current patterns if available
     if config.patterns:
         patterns_context = _format_patterns_context(config.patterns)
@@ -97,6 +105,48 @@ Context about the conversation:
 {patterns_context}"""
 
     return base
+
+
+def _build_tool_actions_prompt(available_tools: List) -> str:
+    """
+    Build the <tool_actions> section instruction for tools.
+
+    This teaches the LLM to emit executable tool calls in a structured
+    JSON section, separate from the suggestive action_hints.
+    """
+    from apps.intelligence.tools.registry import ToolRegistry
+
+    tool_descriptions = ToolRegistry.get_prompt_text(available_tools)
+
+    return f"""
+
+<tool_actions>
+If you determine an action should be taken NOW (not just suggested), emit it here as a JSON array.
+Return [] if no action is warranted.
+
+Available tools:
+{tool_descriptions}
+
+Each action must have:
+- "tool": Tool name from the list above
+- "params": Parameters matching the tool's schema
+- "reason": Brief explanation of why this action is appropriate now
+
+IMPORTANT:
+- Only emit actions when you're confident they're correct and the conversation warrants them
+- Actions marked [auto] will execute immediately — be conservative
+- Actions marked [requires confirmation] will be shown to the user for approval before executing
+- Prefer tool_actions over action_hints when the action is concrete enough to execute
+- You may emit multiple actions if warranted
+
+Example:
+[{{"tool": "create_inquiry", "params": {{"title": "What are the cost implications of Option B?", "description": "The user raised budget concerns that need focused investigation."}}, "reason": "This specific question emerged as a key uncertainty."}}]
+
+Return [] if:
+- No concrete action is warranted right now
+- The conversation is exploratory and actions would be premature
+- You're unsure about the parameters
+</tool_actions>"""
 
 
 def _format_patterns_context(patterns: Dict) -> str:
@@ -234,6 +284,309 @@ Note what's clear vs. what gaps remain for scaffolding.
     return base
 
 
+def build_case_aware_system_prompt(
+    stage: str,
+    plan_content: Optional[Dict] = None,
+    decision_question: str = '',
+    position_statement: str = '',
+    constraints: Optional[List] = None,
+    success_criteria: Optional[List] = None,
+    available_tools: Optional[List] = None,
+) -> str:
+    """
+    Build a system prompt for case-scoped chat that includes the full plan
+    state and instructions for proposing plan edits.
+
+    The AI sees the current investigation plan (assumptions, criteria, phases)
+    and can propose changes through a <plan_edits> section. The LLM emits
+    only the diff (what changed); the backend merges it with the current plan
+    state to produce the full snapshot.
+
+    Uses a composable sections pattern — each section is built independently
+    and joined at the end.
+
+    Args:
+        stage: Current investigation stage (exploring/investigating/synthesizing/ready)
+        plan_content: Current plan version content dict (assumptions, criteria, phases)
+        decision_question: The case's decision question
+        position_statement: Current position statement from the plan
+        constraints: Case constraints list
+        success_criteria: Case success criteria list
+    """
+    sections: List[str] = []
+
+    # --- Section: Persona + output format ---
+    sections.append(_build_persona_section())
+
+    # --- Section: Case context ---
+    case_section = _build_case_context_section(
+        decision_question, position_statement, constraints, success_criteria,
+    )
+    if case_section:
+        sections.append(case_section)
+
+    # --- Section: Stage guidance ---
+    sections.append(_build_stage_guidance_section(stage))
+
+    # --- Section: Plan state ---
+    sections.append(_build_plan_state_section(plan_content))
+
+    # --- Section: Plan edits instructions ---
+    sections.append(_build_plan_edits_section())
+
+    # --- Section: Tool actions (if tools available) ---
+    if available_tools:
+        sections.append(_build_tool_actions_prompt(available_tools))
+
+    return "\n\n".join(sections)
+
+
+def _build_persona_section() -> str:
+    """Base persona and output format for case-scoped chat."""
+    return """You are Episteme, a decision-support analyst guiding the user through a structured investigation.
+
+You have access to the user's investigation plan — their assumptions, decision criteria, and investigation phases. Your role is to help them investigate rigorously, challenge weak reasoning, and evolve the plan as new information emerges.
+
+Your response MUST use exactly this format with XML tags:
+
+<response>
+Your main conversational response goes here. Be concise (2-4 paragraphs max).
+- Help the user investigate their decision systematically
+- Challenge assumptions when evidence warrants it
+- Suggest concrete next steps aligned with the current investigation stage
+- Reference specific assumptions or criteria by their IDs when relevant
+- Point out when new information should update the plan
+</response>
+
+<reflection>
+Brief meta-cognitive observation (2-3 sentences max).
+Focus on ONE key insight about the investigation's progress or gaps.
+</reflection>
+
+<action_hints>
+Return a JSON array with at most one action hint. Return empty [] if no action is warranted.
+
+Available action types:
+- "suggest_inquiry": When a specific question needs focused investigation
+- "suggest_evidence": When mentioned evidence should be formally tracked
+- "suggest_resolution": When there's enough evidence to resolve an open inquiry
+
+Each hint should have:
+- "type": One of the action types above
+- "reason": A conversational sentence explaining why this action would help RIGHT NOW
+- "data": Type-specific payload
+
+Return [] if no action is warranted right now.
+</action_hints>"""
+
+
+def _build_case_context_section(
+    decision_question: str,
+    position_statement: str,
+    constraints: Optional[List],
+    success_criteria: Optional[List],
+) -> Optional[str]:
+    """Case context section — decision question, position, constraints."""
+    parts = []
+    if decision_question:
+        parts.append(f"**Decision question:** {decision_question}")
+    if position_statement:
+        parts.append(f"**Current position:** {position_statement}")
+    if constraints:
+        constraint_texts = []
+        for c in constraints:
+            if isinstance(c, dict):
+                constraint_texts.append(c.get('description', c.get('text', str(c))))
+            else:
+                constraint_texts.append(str(c))
+        parts.append("**Constraints:** " + "; ".join(constraint_texts))
+    if success_criteria:
+        criteria_texts = []
+        for sc in success_criteria:
+            if isinstance(sc, dict):
+                # Canonical key is 'criterion'; fall back to 'text'/'name' for legacy data
+                criteria_texts.append(sc.get('criterion', sc.get('text', sc.get('name', str(sc)))))
+            else:
+                criteria_texts.append(str(sc))
+        parts.append("**Success criteria:** " + "; ".join(criteria_texts))
+
+    if not parts:
+        return None
+    return "## Case Context\n" + "\n".join(parts)
+
+
+_STAGE_GUIDANCE = {
+    'exploring': (
+        "**Stage: Exploring** — The investigation is just getting started. "
+        "Help surface assumptions, identify blind spots, and map the decision space. "
+        "Ask probing questions. Suggest areas that need investigation."
+    ),
+    'investigating': (
+        "**Stage: Investigating** — The user is actively gathering evidence. "
+        "Help them evaluate evidence quality, challenge assumptions, and update "
+        "assumption statuses as new information arrives. Flag when assumptions "
+        "should move from untested → confirmed/challenged/refuted."
+    ),
+    'synthesizing': (
+        "**Stage: Synthesizing** — The user is pulling findings together. "
+        "Help them evaluate decision criteria, weigh trade-offs, assess which "
+        "criteria are met vs unmet, and refine their position. Surface any "
+        "remaining gaps before a decision."
+    ),
+    'ready': (
+        "**Stage: Ready** — The investigation is nearing completion. "
+        "Help finalize the decision, ensure all criteria are addressed, "
+        "and identify any last concerns. The plan should be stable."
+    ),
+}
+
+
+def _build_stage_guidance_section(stage: str) -> str:
+    """Stage-specific guidance section."""
+    return _STAGE_GUIDANCE.get(stage, _STAGE_GUIDANCE['exploring'])
+
+
+def _build_plan_state_section(plan_content: Optional[Dict]) -> str:
+    """Plan state section — assumptions, criteria, phases."""
+    if plan_content and isinstance(plan_content, dict):
+        return "## Investigation Plan" + _format_plan_state(plan_content)
+    return (
+        "## Investigation Plan\n"
+        "No plan has been created yet. If the conversation warrants it, "
+        "help the user think about what assumptions and criteria matter "
+        "for their decision."
+    )
+
+
+def _build_plan_edits_section() -> str:
+    """Plan edits instructions — diff-only format (no proposed_content)."""
+    return """## Plan Edits
+
+When the conversation warrants changes to the investigation plan, emit a <plan_edits> section with a JSON object describing ONLY the changes. Do NOT echo back unchanged content — the system will merge your diff with the current plan state automatically.
+
+<plan_edits>
+{
+  "diff_summary": "Human-readable summary of what changed and why",
+  "diff_data": {
+    "added_assumptions": [{"text": "...", "risk_level": "low|medium|high"}],
+    "updated_assumptions": [{"id": "existing-uuid", "status": "confirmed|challenged|refuted", "evidence_summary": "Why this status changed"}],
+    "added_criteria": [{"text": "...", "priority": "must_have|nice_to_have"}],
+    "updated_criteria": [{"id": "existing-uuid", "is_met": true}],
+    "stage_change": "investigating|synthesizing|ready" or null
+  }
+}
+</plan_edits>
+
+Only include the keys in diff_data that have actual changes. Omit empty arrays.
+
+**When to propose plan edits:**
+- User mentions a new assumption or belief → add assumption
+- Evidence changes an assumption's validity → update assumption status
+- User articulates a new success criterion → add criterion
+- Evidence satisfies a criterion → mark criterion as met
+- Investigation has progressed enough to advance the stage → propose stage change
+- User explicitly asks to modify the plan
+
+**When NOT to propose plan edits:**
+- Casual conversation or clarifying questions
+- No new information that affects assumptions or criteria
+- The user is asking about the plan (just answer their question)
+
+If no plan changes are warranted, emit an empty object:
+<plan_edits>{}</plan_edits>"""
+
+
+def _format_plan_state(plan_content: Dict) -> str:
+    """
+    Format plan content into a compact representation for the system prompt.
+
+    For plans with many assumptions, applies size management:
+    - Always includes non-default-status items (confirmed/challenged/refuted)
+    - Includes first 5 untested assumptions
+    - Shows summary counts for the rest
+    """
+    parts = []
+
+    # --- Assumptions ---
+    assumptions = plan_content.get('assumptions', [])
+    if assumptions:
+        status_symbols = {
+            'untested': '❓',
+            'confirmed': '✅',
+            'challenged': '⚠️',
+            'refuted': '❌',
+        }
+
+        # Separate by status for size management
+        non_default = [a for a in assumptions if a.get('status', 'untested') != 'untested']
+        untested = [a for a in assumptions if a.get('status', 'untested') == 'untested']
+
+        # Always show non-default status items
+        shown = list(non_default)
+
+        # Show up to 5 untested + summarize rest
+        if len(untested) <= 5:
+            shown.extend(untested)
+            remaining_untested = 0
+        else:
+            shown.extend(untested[:5])
+            remaining_untested = len(untested) - 5
+
+        parts.append(f"\n### Assumptions ({len(assumptions)} total)")
+        for a in shown:
+            status = a.get('status', 'untested')
+            symbol = status_symbols.get(status, '❓')
+            risk = a.get('risk_level', '')
+            risk_tag = f" (risk: {risk})" if risk else ""
+            a_id = a.get('id', '')
+            id_tag = f" [id: {a_id}]" if a_id else ""
+            text = a.get('text', a.get('content', ''))
+            parts.append(f"- {symbol} [{status.upper()}] \"{text}\"{risk_tag}{id_tag}")
+
+        if remaining_untested > 0:
+            parts.append(f"- ... and {remaining_untested} more untested assumptions")
+
+    # --- Decision criteria ---
+    criteria = plan_content.get('decision_criteria', [])
+    if criteria:
+        met_count = sum(1 for c in criteria if c.get('is_met'))
+        parts.append(f"\n### Decision Criteria ({len(criteria)} total, {met_count} met)")
+        for c in criteria:
+            check = "x" if c.get('is_met') else " "
+            c_id = c.get('id', '')
+            id_tag = f" [id: {c_id}]" if c_id else ""
+            priority = c.get('priority', '')
+            priority_tag = f" ({priority})" if priority else ""
+            text = c.get('text', c.get('content', ''))
+            parts.append(f"- [{check}] \"{text}\"{priority_tag}{id_tag}")
+
+    # --- Phases ---
+    phases = plan_content.get('phases', [])
+    if phases:
+        parts.append(f"\n### Investigation Phases ({len(phases)} total)")
+        for i, phase in enumerate(phases):
+            title = phase.get('title', phase.get('name', f'Phase {i+1}'))
+            status = phase.get('status', '')
+            status_tag = f" [{status}]" if status else ""
+            parts.append(f"- {title}{status_tag}")
+            # Show phase tasks briefly
+            tasks = phase.get('tasks', phase.get('steps', []))
+            if tasks and len(tasks) <= 5:
+                for task in tasks:
+                    if isinstance(task, dict):
+                        task_text = task.get('text', task.get('title', str(task)))
+                        task_done = task.get('done', task.get('completed', False))
+                        t_check = "x" if task_done else " "
+                        parts.append(f"  - [{t_check}] {task_text}")
+                    else:
+                        parts.append(f"  - {task}")
+            elif tasks:
+                done_count = sum(1 for t in tasks if isinstance(t, dict) and (t.get('done') or t.get('completed')))
+                parts.append(f"  ({len(tasks)} tasks, {done_count} done)")
+
+    return "\n".join(parts) if parts else "\nNo assumptions, criteria, or phases defined yet."
+
+
 def build_unified_user_prompt(
     user_message: str,
     conversation_context: str = "",
@@ -256,9 +609,18 @@ def build_unified_user_prompt(
     if conversation_context:
         parts.append(f"Previous conversation:\n{conversation_context}")
 
-    # Add retrieved document context for grounding
+    # Add retrieved document context for grounding with citation instructions
     if retrieval_context:
-        parts.append(f"Relevant documents (cite when using):\n{retrieval_context}")
+        parts.append(f"""The following passages are from the user's project documents. When you use information from these sources, cite them using the bracketed number (e.g. [1], [2]).
+
+{retrieval_context}
+
+Citation rules:
+- Use [N] inline when referencing a source, e.g. "PostgreSQL handles 50k writes/sec [1]"
+- Only cite when you're actually using information from that source
+- You can cite multiple sources in one statement [1][3]
+- If you're not using any source, don't cite anything
+- Don't fabricate citations — only use numbers that appear above""")
 
     # Add the current message
     parts.append(f"User's latest message:\n{user_message}")

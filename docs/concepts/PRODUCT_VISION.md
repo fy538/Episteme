@@ -2,8 +2,6 @@
 
 What we're building, why it matters, and how it works.
 
-**[V1 SCOPE NOTE]** V1 implements the core orientation lens only (graph visualization + conversational editing). The full vision includes Projects/Cases distinction and four cognitive modes, but v1 focuses on making assumptions and contradictions visible. Future versions add readiness tracking, investigation planning, and expanded modes.
-
 ---
 
 ## The Problem: AI Chat Fails High-Stakes Thinking
@@ -52,25 +50,57 @@ When you say "I think the market will grow 20%," the agent doesn't just acknowle
 
 One state. Always visible. Always updated. Every conversation, every document, every piece of evidence modifies the same underlying structure — and you can see the impact immediately.
 
-### Projects and Cases: Memory and Thinking
+### Three Levels of Thinking
 
-Episteme has two levels, matching how people actually work:
+Episteme has three levels, matching the natural cognitive progression from confusion to clarity:
 
-**Projects** are long-lived containers for a domain of concern. "Our startup's technical direction." "Go-to-market exploration." "Fundraising prep." You dump documents into a project. The system builds an orientation map — surfacing what your documents agree on, where they fight, what they assume without evidence, and what they never address. Projects accumulate knowledge over time. They never require a decision. They're where confusion is allowed to live.
+```
+PROJECT (Orientation)     "What's the landscape?"
+    │
+    ▼
+CHAT (Exploration)        "What should I be thinking about?"
+    │
+    ▼
+CASE (Investigation)      "Let me get this specific decision right."
+    │
+    ▼
+DECISION (Capture)        "Here's what I decided, and why."
+    │
+    ▼
+OUTCOME (Learning)        "How did it turn out? What did I learn?"
+```
 
-**Cases** are focused cognitive episodes within a project. "Should we pivot to B2B?" "What are the scalability risks?" "Is our pricing defensible?" Each case takes a slice of the project's knowledge, applies a specific lens, and activates the appropriate level of structure. A case about bounding risk highlights load-bearing assumptions and failure scenarios. A case about making a decision activates readiness gating — the system tracks whether you've actually tested what needs testing before you commit.
+**Projects** are long-lived containers for a domain of concern. "Our startup's technical direction." "Go-to-market exploration." "Fundraising prep." You dump documents into a project. The system builds an orientation map — a hierarchical clustering of themes and topics that reveals what your documents cover, where they agree, and what they never address. Projects accumulate knowledge over time. They never require a decision. They're where confusion is allowed to live.
 
-Projects give you continuity. Cases give you focus. The project gets smarter with every case — assumptions confirmed in one case improve the knowledge base for the next.
+**Chat** is where exploration happens. An organic companion agent helps you think through your situation — not by agreeing with everything, but by actively building structure from your conversation. The companion detects when you're making a decision vs. comparing options vs. bounding risk, and adapts its behavior accordingly. It builds decision trees, checklists, comparison frameworks — whatever structure fits your thinking mode. When your conversation reaches a natural investigation point, the companion suggests creating a case.
 
-### Cognitive Modes: Not Just Decisions
+**Cases** are focused investigation workspaces within a project. "Should we pivot to B2B?" "What are the scalability risks?" "Is our pricing defensible?" Each case takes a slice of the project's knowledge, applies a specific decision question as a lens, and activates full investigation structure: assumption tracking, evidence mapping, blind spot detection, and readiness gating. A case about bounding risk highlights load-bearing assumptions and failure scenarios. A case about making a decision tracks whether you've actually tested what needs testing before you commit.
 
-The biggest insight: **decisions are just one type of thinking episode.** Before you decide, you need to orient, frame, explore, and bound risk. Episteme serves all of these.
+Projects give you continuity. Chat gives you exploration. Cases give you rigor. The project gets smarter with every case — assumptions confirmed in one case improve the knowledge base for the next.
 
-When you dump 8 documents into a project and say "I can't see the forest for the trees," you're not deciding — you're orienting. The system shows you the landscape: claim clusters, contradictions, gaps, hidden assumptions. No decision language. No pressure to commit.
+### The Investigation Framework
 
-When you notice a tension ("our pitch deck says no competitors, but our own research lists three") and click "investigate this," you enter a case. The agent infers what mode you're in from how you talk. Ask "what should we do?" and it activates decision mode with full readiness tracking. Ask "what could go wrong?" and it activates risk bounding, highlighting the assumptions your plans depend on. Ask "what is the real problem here?" and it surfaces competing frames — different ways of understanding the situation that lead to different actions.
+Inside a case, the system uses a structured reasoning framework called CEAT — Claims, Evidence, Assumptions, and Tensions — to extract and organize the landscape of your decision:
 
-The transitions are fluid. You might orient, then frame, then decide, then bound risk, then come back to the decision. The underlying state is always the same graph — mode just changes what's emphasized, what governance is active, and how the agent challenges you.
+- **Claims**: What's being asserted, by whom, based on what
+- **Evidence**: Facts and data points that ground or challenge claims
+- **Assumptions**: Beliefs you're betting on without proof (tracked lifecycle: untested → confirmed/challenged/refuted)
+- **Tensions**: Where claims, evidence, or assumptions contradict each other
+
+This isn't a static extraction. The CEAT graph evolves as you investigate: new evidence shifts assumption status, resolved tensions change the readiness picture, blind spots get filled. The system actively detects what you haven't tested and what you might be missing.
+
+### Decision Capture: Closing the Loop
+
+When your investigation reaches the "ready" stage — assumptions tested, evidence gathered, tensions acknowledged — Episteme doesn't just let you walk away. It asks you to **record your decision**: what you decided, why, how confident you are, and what could go wrong.
+
+This creates a **DecisionRecord** — a formal artifact that captures your rationale at the moment of decision. More importantly, it lets you set an **outcome check date**: "Come back in 30/60/90 days and see how this played out."
+
+Over time, this creates a personal decision journal. You accumulate a track record:
+- "I tend to be overconfident about market timing"
+- "My assumptions about competitor response are usually wrong"
+- "When I feel 60% confident, I'm usually right"
+
+**This is the feature no competitor is building.** Most tools help you *make* decisions. Nothing helps you *learn from* them. Decision capture transforms Episteme from a one-time investigation tool into a **personal decision intelligence system**.
 
 ### Conversational Editing: Talk, Don't Click
 
@@ -78,7 +108,7 @@ You never fill out forms or drag nodes. You talk to the agent, and the agent edi
 
 "Actually, the real risk isn't regulatory — it's that our distribution partner might not renew."
 
-The agent creates a new assumption (untested, load-bearing), links it to the options it affects, and tells you what changed: "New load-bearing assumption. Options A and B now depend on partner renewal. No evidence exists yet." All four views of your state update: the graph shows a new amber node, the readiness diagnostic adds a blocker, the plan generates an investigation item, the brief flags a gap.
+The agent creates a new assumption (untested, load-bearing), links it to the options it affects, and tells you what changed. All views of your state update: the graph shows a new amber node, the readiness diagnostic adds a blocker, the plan generates an investigation item, the brief flags a gap.
 
 Upload a document, and the system doesn't just summarize it. It tells you **what the document changes**: which assumptions got confirmed, which got challenged, what new information appeared that nothing in your case addresses yet, and whether this document moved you closer to or *farther from* being ready. "This document made you less ready to decide" is uncomfortable. It's also the most valuable thing any tool can tell you.
 
@@ -88,15 +118,15 @@ Upload a document, and the system doesn't just summarize it. It tells you **what
 
 The core value is a cognitive transformation: from scattered to structured, from vague to grounded, from "I talked about it" to "I worked through it."
 
-**"I uploaded my docs and the system showed me where they fight."** You thought your research told a clear story. The evidence map shows your market sizing report and your competitor analysis contradict each other on growth rate. Your pitch deck claims no competitors; your own research lists three. Your financial projections assume continued growth — and zero documents provide evidence for it. What was invisible becomes visible.
+**"I uploaded my docs and the system showed me the landscape."** Not a summary — a hierarchical map of themes and topics. You see immediately what your documents cover deeply, where they skim the surface, and what they never address.
 
-**"I can see what I'm assuming without evidence."** You've been operating on beliefs you never tested. The graph shows them as amber nodes — dashed borders, no evidence connections, driving your reasoning anyway. Four load-bearing assumptions with zero evidence. You realize you were about to bet the company on untested beliefs.
+**"The companion noticed I was making a decision, not just exploring."** You were chatting casually, and the agent built a decision tree from your reasoning. It surfaced three options you hadn't explicitly compared. You didn't fill out a template — the structure emerged from your words.
 
-**"I know exactly what I need to resolve."** Not a vague feeling of "I should do more research." A specific list: this assumption needs evidence, this tension needs resolution, this option hasn't been stress-tested. The path from uncertain to ready is concrete.
+**"I can see what I'm assuming without evidence."** You've been operating on beliefs you never tested. The CEAT graph shows them as tracked assumptions — four load-bearing beliefs with zero evidence. You realize you were about to bet the company on untested beliefs.
 
-**"This new document changed everything — and I can see how."** You uploaded a new report. Two assumptions confirmed. One challenged. A new tension surfaced. Your readiness *decreased* — you were closer to deciding yesterday. That's the system working. You would have missed this with a summary.
+**"The case told me I wasn't ready."** You felt done. The system showed two critical assumptions still untested, one unresolved tension, and a blind spot in your analysis. You weren't ready — you were just tired of thinking about it.
 
-**"I'm ready — and I can explain why."** Not "I feel ready" but "every load-bearing assumption has evidence, tensions are resolved or accepted, and I can trace my reasoning from evidence through assumptions to the option I'm choosing." Walk into a meeting with that, and the conversation is different.
+**"I recorded my decision and checked back 60 days later."** Your assumption about competitor response was wrong. The outcome note says "Competitor moved faster than expected — need to adjust timeline." Next time you face a similar decision, you'll weight that risk differently.
 
 ---
 
@@ -112,11 +142,11 @@ The core value is a cognitive transformation: from scattered to structured, from
 
 ### You work by:
 
-- **Dumping** documents into a project — the system builds a map of what's known, contested, assumed, and missing
-- **Talking** to an agent that understands the structure of your thinking — not just your words
-- **Investigating** specific tensions and uncertainties as focused cases
+- **Dumping** documents into a project — the system builds a hierarchical theme map
+- **Chatting** with a companion that builds structure from your thinking — decision trees, checklists, comparison frameworks
+- **Investigating** specific decisions as cases with tracked assumptions, evidence, and tensions
 - **Watching** your understanding evolve — assumptions get tested, evidence accumulates, blind spots surface
-- **Deciding** when the structure supports it — or seeing exactly what's left before you can
+- **Deciding** when the structure supports it — and recording *why* so you can learn from it
 
 ### You walk away with:
 
@@ -124,6 +154,7 @@ The core value is a cognitive transformation: from scattered to structured, from
 - **Structure**: your thinking is organized, persistent, and traceable
 - **Grounded confidence**: you can trace every conclusion back to evidence
 - **Readiness**: you know you're prepared — or you know precisely what would make you ready
+- **Learning**: over time, you build a personal track record of decision quality
 
 ---
 
@@ -132,24 +163,27 @@ The core value is a cognitive transformation: from scattered to structured, from
 ```
 BEFORE                                    WITH EPISTEME
 ───────────────────────────────────       ───────────────────────────────────
-8 docs in a folder                        A map of what they agree on, where
-                                          they fight, and what they never address
+8 docs in a folder                        A hierarchical theme map showing
+                                          what they cover and what they miss
 
-"ChatGPT agreed with me"                  "I can see 4 untested assumptions
-                                          driving my reasoning"
+"ChatGPT agreed with me"                  A companion that built a decision
+                                          tree from my reasoning and surfaced
+                                          assumptions I hadn't tested
 
-"I have a lot of research"               "My research is linked to specific
-                                          assumptions — I can see what it proves
-                                          and what it doesn't"
+"I have a lot of research"               Research linked to specific
+                                          assumptions — I can see what it
+                                          proves and what it doesn't
 
-"I feel ready"                            "Every load-bearing assumption has
+"I feel ready"                            Every load-bearing assumption has
                                           evidence. Two tensions accepted. One
                                           risk bounded. I'm ready — and I can
-                                          show why."
+                                          show why.
 
-"Why did we make that choice?"            Full graph: evidence, assumptions,
-                                          tensions, what we accepted, what
-                                          changed our mind, and when
+"Why did we make that choice?"            Full decision record: rationale,
+                                          confidence, caveats, which
+                                          assumptions were validated, and
+                                          outcome notes from 30/60/90 days
+                                          later
 ```
 
 ---
@@ -170,6 +204,8 @@ BEFORE                                    WITH EPISTEME
 
 **Conversational editing.** You talk to the agent. The agent edits the state. No forms. No direct manipulation. The agent understands the graph — not just the words.
 
+**Decision accountability.** Record what you decided and why. Check back later. Learn from the results. Become a better thinker over time.
+
 ---
 
 ## The Meta-Principle
@@ -177,3 +213,24 @@ BEFORE                                    WITH EPISTEME
 **We help you think. We don't think for you.**
 
 ChatGPT thinks for you and gives you output. Episteme helps you think and gives you clarity. That's the difference — and it's the entire product.
+
+---
+
+## Implementation Status
+
+The product is built in phases. Each plan implements a layer of the architecture:
+
+### Foundation (Implemented)
+- **Plan 1**: Hierarchical document clustering — RAPTOR-style recursive clustering with LLM summaries, project landscape view
+- **Plan 2**: Organic companion — structure-aware agentic chat with decision trees, checklists, comparison frameworks, clarifying loop
+- **Plan 3**: Case extraction — CEAT graph extraction using decision question as lens, blind spot analysis, assumption tracking
+
+### Feature Polish (Designed, not yet implemented)
+- **Plan 4**: RAG citations — source-grounded responses with numbered citation markers
+- **Plan 5**: Case graph visualization — interactive CEAT graph with ReactFlow
+- **Plan 6**: Hierarchy refresh + change detection — theme evolution tracking across rebuilds
+
+### Product Completeness (Designed, not yet implemented)
+- **Plan 7**: Project discovery + onboarding — project list page, first-run experience, NewProjectModal
+- **Plan 8**: Case creation preview + companion bridge — editable CasePreviewCard, QuickCaseModal for manual creation
+- **Plan 9**: Decision capture + outcome tracking — DecisionRecord model, outcome journal, check-in reminders

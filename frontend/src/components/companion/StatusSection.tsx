@@ -10,6 +10,8 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { Spinner } from '@/components/ui/spinner';
+import { Button } from '@/components/ui/button';
 import { theme, isTerminalTheme } from '@/lib/theme/companionTheme';
 import type { BackgroundWorkItem } from '@/lib/types/companion';
 
@@ -50,11 +52,12 @@ export function StatusSection({
   return (
     <section className={cn('border-b', theme.thinking.border)}>
       {/* Header */}
-      <button
+      <Button
+        variant="ghost"
         onClick={() => setCollapsed(!collapsed)}
         aria-expanded={!collapsed}
         className={cn(
-          'w-full px-3 py-2 flex items-center justify-between transition-colors',
+          'w-full px-3 py-2 h-auto flex items-center justify-between rounded-none transition-colors',
           theme.thinking.bgHover,
           isTerminalTheme && 'font-mono'
         )}
@@ -78,7 +81,7 @@ export function StatusSection({
         <span className={cn('text-xs', theme.thinking.textMuted)} aria-hidden="true">
           {collapsed ? '[+]' : '[-]'}
         </span>
-      </button>
+      </Button>
 
       {/* Content */}
       {!collapsed && (
@@ -94,7 +97,7 @@ export function StatusSection({
               )}
             >
               <div className={cn('flex items-center gap-2 mb-1', theme.status.running.text)}>
-                <span className="animate-spin">@</span>
+                <Spinner size="xs" />
                 <span className={theme.thinking.text}>
                   {TYPE_LABELS[item.type] || item.type}:
                 </span>
@@ -142,15 +145,17 @@ export function StatusSection({
                   </span>
                 </div>
                 {onDismissCompleted && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => onDismissCompleted(item.id)}
                     className={cn(
-                      'opacity-60 hover:opacity-100 transition-opacity',
+                      'h-auto w-auto opacity-60 hover:opacity-100 transition-opacity',
                       theme.status.completed.text
                     )}
                   >
                     [x]
-                  </button>
+                  </Button>
                 )}
               </div>
               <div className={cn('mt-1 opacity-60', theme.status.completed.text)}>

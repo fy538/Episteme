@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import {
   ActionCard,
   ActionCardHeader,
@@ -19,6 +20,7 @@ import {
   ActionCardFooter,
 } from '@/components/ui/action-card';
 import { cn } from '@/lib/utils';
+import { ArrowRightIcon } from '@/components/ui/icons';
 import type { InlineActionCard, PlanDiffProposalData } from '@/lib/types/chat';
 
 interface PlanDiffProposalCardProps {
@@ -70,7 +72,7 @@ export function PlanDiffProposalCard({
         <ActionCardHeader>
           <div className="flex items-center gap-2">
             <ActionCardTitle>Plan Update Proposed</ActionCardTitle>
-            <span className="text-[10px] bg-accent-100 dark:bg-accent-900/30 text-accent-600 dark:text-accent-400 px-1.5 py-0.5 rounded-full">
+            <span className="text-xs bg-accent-100 dark:bg-accent-900/30 text-accent-600 dark:text-accent-400 px-1.5 py-0.5 rounded-full">
               {changeCount} {changeCount === 1 ? 'change' : 'changes'}
             </span>
           </div>
@@ -82,12 +84,12 @@ export function PlanDiffProposalCard({
 
           {/* Error banner */}
           {error && (
-            <div className="mt-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded text-xs text-red-700 dark:text-red-400 flex items-center gap-2">
+            <div className="mt-2 px-3 py-2 bg-error-50 dark:bg-error-900/20 border border-error-200 dark:border-error-800/50 rounded text-xs text-error-700 dark:text-error-400 flex items-center gap-2">
               <span className="shrink-0">Failed to apply:</span>
               <span className="flex-1">{error}</span>
               <button
                 onClick={() => setError(null)}
-                className="text-red-500 hover:text-red-700 dark:hover:text-red-300 shrink-0"
+                className="text-error-500 hover:text-error-700 dark:hover:text-error-300 shrink-0"
               >
                 ✕
               </button>
@@ -102,7 +104,7 @@ export function PlanDiffProposalCard({
               </span>
               <div className="flex items-center gap-1.5 text-xs">
                 <StageBadge stage={diffData.stage_change.from} />
-                <ArrowIcon className="w-3 h-3 text-neutral-400" />
+                <ArrowRightIcon className="w-3 h-3 text-neutral-400" />
                 <StageBadge stage={diffData.stage_change.to} active />
               </div>
               {diffData.stage_change.rationale && (
@@ -123,14 +125,14 @@ export function PlanDiffProposalCard({
                 {addedAssumptions.map((a, i) => (
                   <div
                     key={`added-a-${a.text.slice(0, 20)}-${i}`}
-                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-emerald-400"
+                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-success-400"
                   >
                     <span className="flex-1">{a.text}</span>
                     {a.risk_level && (
                       <span className={cn(
-                        'text-[10px] px-1.5 py-0.5 rounded-full uppercase shrink-0',
-                        a.risk_level === 'high' && 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-                        a.risk_level === 'medium' && 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',
+                        'text-xs px-1.5 py-0.5 rounded-full uppercase shrink-0',
+                        a.risk_level === 'high' && 'bg-error-100 dark:bg-error-900/30 text-error-600 dark:text-error-400',
+                        a.risk_level === 'medium' && 'bg-warning-100 dark:bg-warning-900/30 text-warning-600 dark:text-warning-400',
                         a.risk_level === 'low' && 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400',
                       )}>
                         {a.risk_level}
@@ -152,16 +154,16 @@ export function PlanDiffProposalCard({
                 {updatedAssumptions.map((a) => (
                   <div
                     key={`updated-a-${a.id}`}
-                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-amber-400"
+                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-warning-400"
                   >
                     <span className="flex-1">
                       {a.evidence_summary || `Assumption ${a.id.slice(0, 8)}`}
                       {' → '}
                       <span className={cn(
                         'font-medium',
-                        a.status === 'confirmed' && 'text-emerald-600 dark:text-emerald-400',
-                        a.status === 'challenged' && 'text-amber-600 dark:text-amber-400',
-                        a.status === 'refuted' && 'text-red-600 dark:text-red-400',
+                        a.status === 'confirmed' && 'text-success-600 dark:text-success-400',
+                        a.status === 'challenged' && 'text-warning-600 dark:text-warning-400',
+                        a.status === 'refuted' && 'text-error-600 dark:text-error-400',
                       )}>
                         {a.status}
                       </span>
@@ -182,9 +184,9 @@ export function PlanDiffProposalCard({
                 {addedCriteria.map((c, i) => (
                   <div
                     key={`added-c-${c.text.slice(0, 20)}-${i}`}
-                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-emerald-400"
+                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-success-400"
                   >
-                    <span className="text-emerald-500 shrink-0">&#x2713;</span>
+                    <span className="text-success-500 shrink-0">&#x2713;</span>
                     <span>{c.text}</span>
                   </div>
                 ))}
@@ -202,7 +204,7 @@ export function PlanDiffProposalCard({
                 {updatedCriteria.map((c) => (
                   <div
                     key={`updated-c-${c.id}`}
-                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-amber-400"
+                    className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5 pl-2 border-l-2 border-warning-400"
                   >
                     <span>{`Criterion ${c.id.slice(0, 8)} → ${c.is_met ? 'met' : 'not met'}`}</span>
                   </div>
@@ -220,7 +222,7 @@ export function PlanDiffProposalCard({
           >
             {isAccepting ? (
               <span className="inline-flex items-center gap-2">
-                <span className="w-3 h-3 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                <Spinner size="xs" />
                 Applying...
               </span>
             ) : (
@@ -241,7 +243,7 @@ export function PlanDiffProposalCard({
 function StageBadge({ stage, active }: { stage: string; active?: boolean }) {
   return (
     <span className={cn(
-      'text-[10px] px-2 py-0.5 rounded-full capitalize',
+      'text-xs px-2 py-0.5 rounded-full capitalize',
       active
         ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-600 dark:text-accent-400 font-medium'
         : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'
@@ -251,10 +253,3 @@ function StageBadge({ stage, active }: { stage: string; active?: boolean }) {
   );
 }
 
-function ArrowIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M5 12h14m-7-7l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}

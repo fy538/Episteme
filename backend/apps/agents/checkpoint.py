@@ -80,10 +80,10 @@ def save_checkpoint(checkpoint: ResearchCheckpoint) -> None:
     """Append an AGENT_CHECKPOINT event to the event store."""
     try:
         from apps.events.services import EventService
-        from apps.events.models import ActorType
+        from apps.events.models import ActorType, EventType
 
         EventService.append(
-            event_type="AgentCheckpoint",
+            event_type=EventType.AGENT_CHECKPOINT,
             payload=checkpoint.to_dict(),
             actor_type=ActorType.SYSTEM,
             correlation_id=checkpoint.correlation_id,

@@ -6,6 +6,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import type { GroundingStatus, BriefAnnotation } from '@/lib/types/case';
 
 export interface SectionContext {
@@ -107,68 +108,72 @@ export function FloatingActionMenu({
         top: `${position.y}px`,
       }}
     >
-      <button
+      <Button
+        variant="ghost"
         onClick={() => {
           onCreateInquiry();
           onClose();
         }}
-        className="w-full px-4 py-2 text-left text-sm hover:bg-accent-50 dark:hover:bg-accent-900/20 transition-colors flex items-center gap-2"
+        className="w-full px-4 py-2 h-auto justify-start rounded-none text-sm hover:bg-accent-50 dark:hover:bg-accent-900/20 flex items-center gap-2"
       >
         <svg className="w-4 h-4 text-accent-600 dark:text-accent-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <span className="font-medium text-neutral-800 dark:text-neutral-200">Create Inquiry</span>
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="ghost"
         onClick={() => {
           onMarkAssumption();
           onClose();
         }}
-        className="w-full px-4 py-2 text-left text-sm hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-colors flex items-center gap-2"
+        className="w-full px-4 py-2 h-auto justify-start rounded-none text-sm hover:bg-warning-50 dark:hover:bg-warning-900/20 flex items-center gap-2"
       >
-        <svg className="w-4 h-4 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-warning-600 dark:text-warning-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
         <span className="font-medium text-neutral-800 dark:text-neutral-200">Mark as Assumption</span>
-      </button>
+      </Button>
 
       {/* Grounding-aware contextual actions */}
       {isUngrounded && onFindEvidence && (
         <>
           <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />
-          <button
+          <Button
+            variant="ghost"
             onClick={() => {
               onFindEvidence();
               onClose();
             }}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors flex items-center gap-2"
+            className="w-full px-4 py-2 h-auto justify-start rounded-none text-sm hover:bg-success-50 dark:hover:bg-success-900/20 flex items-center gap-2"
           >
-            <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-success-600 dark:text-success-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <span className="font-medium text-neutral-800 dark:text-neutral-200">Find Evidence</span>
-          </button>
+          </Button>
         </>
       )}
 
       {hasTensions && onResolveTension && (
         <>
           {!isUngrounded && <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />}
-          <button
+          <Button
+            variant="ghost"
             onClick={() => {
               onResolveTension(tensions[0].id);
               onClose();
             }}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2"
+            className="w-full px-4 py-2 h-auto justify-start rounded-none text-sm hover:bg-error-50 dark:hover:bg-error-900/20 flex items-center gap-2"
           >
-            <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-error-600 dark:text-error-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             <span className="font-medium text-neutral-800 dark:text-neutral-200">
               Resolve Tension{tensions.length > 1 ? ` (${tensions.length})` : ''}
             </span>
-          </button>
+          </Button>
         </>
       )}
 

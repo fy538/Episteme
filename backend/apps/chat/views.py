@@ -6,13 +6,12 @@ import logging
 import asyncio
 from asgiref.sync import sync_to_async
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view, permission_classes, renderer_classes
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import BaseRenderer
 from django.conf import settings
-from django.db import transaction
 from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -28,6 +27,7 @@ from .serializers import (
 from .services import ChatService
 from tasks.workflows import assistant_response_workflow
 from apps.chat.prompts import get_assistant_response_prompt
+from apps.common.auth import authenticate_jwt
 
 logger = logging.getLogger(__name__)
 
@@ -42,25 +42,6 @@ class StreamingRenderer(BaseRenderer):
         return data
 
 
-async def _authenticate_jwt(request):
-    """Authenticate a raw Django request using JWT (for async views outside DRF)."""
-    from rest_framework_simplejwt.authentication import JWTAuthentication
-    from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed as JWTAuthFailed
-    from django.contrib.auth.models import AnonymousUser
-
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if not auth_header.startswith('Bearer '):
-        return None
-
-    jwt_auth = JWTAuthentication()
-    try:
-        validated_token = await sync_to_async(jwt_auth.get_validated_token)(
-            auth_header.split(' ', 1)[1]
-        )
-        user = await sync_to_async(jwt_auth.get_user)(validated_token)
-        return user
-    except (InvalidToken, JWTAuthFailed):
-        return None
 
 
 class ChatThreadViewSet(viewsets.ModelViewSet):
@@ -101,7 +82,15 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
 
         # Only prefetch messages for detail view (list doesn't need them)
         if self.action == 'retrieve':
-            queryset = queryset.prefetch_related('messages')
+            from django.db.models import Prefetch
+            from apps.projects.models import DocumentChunk
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    'messages__source_chunks',
+                    queryset=DocumentChunk.objects.select_related('document'),
+                ),
+                'messages',
+            )
 
         return queryset
     
@@ -266,6 +255,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         # Optional user focus to scope the analysis
         body = request.data if request.data else {}
         user_focus = body.get('user_focus', '')
+        insight_id = body.get('insight_id', '')
 
         # Get last 8 messages for context
         recent_messages = messages[max(0, len(messages)-8):]
@@ -276,6 +266,32 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             for m in recent_messages
         ])
 
+        # Enrich with orientation finding context if provided
+        finding_context = ""
+        if insight_id and thread.project_id:
+            try:
+                from apps.graph.models import ProjectInsight
+                insight = await sync_to_async(
+                    lambda: ProjectInsight.objects.select_related('orientation').get(
+                        id=insight_id,
+                        orientation__project_id=thread.project_id,
+                    )
+                )()
+                finding_context = (
+                    f"\n\nThis conversation originated from an orientation finding:\n"
+                    f"- Type: {insight.insight_type}\n"
+                    f"- Title: {insight.title}\n"
+                    f"- Content: {insight.content}\n"
+                )
+                if insight.research_result:
+                    finding_context += f"- Prior research: {insight.research_result[:500]}\n"
+                finding_context += (
+                    "Use this finding context to inform the case analysis — "
+                    "the finding's themes and tensions should shape the key questions and assumptions.\n"
+                )
+            except Exception as e:
+                logger.debug("Finding context load skipped: %s", e)
+
         # AI analysis
         provider = get_llm_provider('fast')
         system_prompt = "You analyze conversations to extract decision components."
@@ -284,7 +300,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         if user_focus:
             focus_instruction = f"The user wants to focus this case on: {user_focus}\nFrame the title, questions, and assumptions around this focus.\n\n"
 
-        user_prompt = f"""{focus_instruction}Analyze this conversation and extract decision-making components:
+        user_prompt = f"""{focus_instruction}{finding_context}Analyze this conversation and extract decision-making components:
 
 {conversation_text}
 
@@ -416,8 +432,9 @@ Return ONLY valid JSON:
             
             return Response(result, status=status.HTTP_202_ACCEPTED)
         except (ValueError, KeyError) as e:
+            logger.exception("Agent invocation validation error for thread %s", pk)
             return Response(
-                {'error': str(e)},
+                {'error': 'Invalid agent configuration. Please check parameters and try again.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
@@ -505,14 +522,22 @@ async def unified_stream(request, thread_id):
     import uuid as uuid_module
 
     # Authenticate via JWT
-    user = await _authenticate_jwt(request)
+    user = await authenticate_jwt(request)
     if user is None:
         return JsonResponse({'error': 'Authentication required'}, status=401)
 
     # Get thread and verify ownership
+    # H1: annotate with message count for tool activation depth gate
+    from django.db.models import Count
     thread = await sync_to_async(
-        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
+        lambda: ChatThread.objects.filter(
+            id=thread_id, user=user,
+        ).annotate(
+            _message_count=Count('messages'),
+        ).first()
     )()
+    if not thread:
+        return JsonResponse({'error': 'Thread not found'}, status=404)
 
     # Parse JSON body
     try:
@@ -553,315 +578,64 @@ async def unified_stream(request, thread_id):
         )
 
     async def event_stream():
-        """Generator for SSE events using UnifiedAnalysisEngine"""
-        from apps.intelligence.engine import UnifiedAnalysisEngine, StreamEventType
-        from apps.intelligence.handlers import UnifiedAnalysisHandler
-
-        correlation_id = uuid_module.uuid4()
-        engine = UnifiedAnalysisEngine()
-
-        # Build conversation context
-        messages = await sync_to_async(list)(
-            Message.objects.filter(thread=thread)
-            .order_by('-created_at')[:10]
+        """SSE generator — delegates to decomposed phase functions in stream_phases."""
+        from .stream_phases import (
+            StreamState, sse,
+            assemble_context, stream_llm_response,
+            persist_message, apply_graph_edits,
+            execute_tool_actions, kick_off_companion,
+            resolve_title, process_companion_results,
+            build_done_event,
         )
-        conversation_context = "\n\n".join([
-            f"{m.role.upper()}: {m.content}"
-            for m in reversed(messages)
-        ])
 
-        # Retrieve relevant document chunks for RAG context
-        retrieval_context = ""
-        if thread.project_id:
-            try:
-                from apps.chat.retrieval import retrieve_document_context
-                retrieval_context = await sync_to_async(retrieve_document_context)(
-                    query=content,
-                    project_id=thread.project_id,
-                    case_id=getattr(thread, 'primary_case_id', None),
-                    user=user,
-                )
-            except Exception as e:
-                logger.warning(f"RAG retrieval failed: {e}")
-
-        # Track content for post-processing
-        response_content = ""
-        reflection_content = ""
-        action_hints_json = ""
-        graph_edits_json = ""
-
-        # Check if thread is in scaffolding mode or if frontend sent mode context
-        thread_metadata = thread.metadata or {}
-        system_prompt_override = None
-        if thread_metadata.get('mode') == 'scaffolding':
-            from apps.intelligence.prompts import build_scaffolding_system_prompt
-
-            # Load skill context for domain-aware scaffolding
-            scaffolding_skill_context = None
-            try:
-                from apps.skills.injection import build_skill_context
-                # Skills can come from: (1) thread's linked case, or (2) thread metadata
-                _case = thread.primary_case
-                if _case:
-                    _skills = await sync_to_async(
-                        lambda: list(_case.active_skills.filter(status='active'))
-                    )()
-                    if _skills:
-                        scaffolding_skill_context = await sync_to_async(
-                            lambda: build_skill_context(_skills, 'brief')
-                        )()
-            except Exception as e:
-                logger.warning(f"Could not load skills for scaffolding: {e}")
-
-            system_prompt_override = build_scaffolding_system_prompt(
-                skill_context=scaffolding_skill_context
-            )
-        elif mode_context.get('mode') == 'inquiry_focus' and mode_context.get('inquiryId'):
-            # Inquiry-focused mode: emphasize investigation and evidence gathering
-            inquiry_id = mode_context.get('inquiryId')
-            try:
-                from apps.inquiries.models import Inquiry
-                inquiry = await sync_to_async(
-                    lambda: Inquiry.objects.filter(id=inquiry_id).first()
-                )()
-                if inquiry:
-                    system_prompt_override = (
-                        "You are Episteme, a thoughtful decision-support assistant. "
-                        f"The user is currently investigating a specific inquiry: \"{inquiry.title}\". "
-                        f"{('Context: ' + inquiry.description + '. ') if inquiry.description else ''}"
-                        "Focus your responses on helping them gather evidence, validate assumptions, "
-                        "and reach a well-supported conclusion for this inquiry. "
-                        "Be specific, cite reasoning, and suggest concrete next steps for investigation. "
-                        "When the user's question relates to this inquiry, frame your answer in that context."
-                    )
-            except Exception as e:
-                logger.warning(f"Could not load inquiry for mode context: {e}")
-        elif mode_context.get('mode') == 'case' and mode_context.get('caseId'):
-            # Case mode: inject stage-aware guidance
-            case_id = mode_context.get('caseId')
-            try:
-                from apps.cases.models import InvestigationPlan
-                plan_obj = await sync_to_async(
-                    lambda: InvestigationPlan.objects.filter(case_id=case_id).first()
-                )()
-                if plan_obj:
-                    stage_guidance = {
-                        'exploring': (
-                            'The user is in the exploring stage. '
-                            'Surface assumptions, identify blind spots, and suggest areas to investigate.'
-                        ),
-                        'investigating': (
-                            'The user is actively investigating. '
-                            'Help gather evidence, challenge beliefs, and update assumption statuses.'
-                        ),
-                        'synthesizing': (
-                            'The user is synthesizing findings. '
-                            'Help evaluate decision criteria, weigh trade-offs, and refine their position.'
-                        ),
-                        'ready': (
-                            'The investigation is nearing completion. '
-                            'Help finalize the decision, ensure all criteria are addressed, and prepare a summary.'
-                        ),
-                    }
-                    system_prompt_override = (
-                        "You are Episteme, a thoughtful decision-support assistant. "
-                        f"The case is currently in the '{plan_obj.stage}' stage. "
-                        f"{stage_guidance.get(plan_obj.stage, '')} "
-                        "Adapt your tone and suggestions to match this investigation phase."
-                    )
-            except Exception as e:
-                logger.warning(f"Could not load plan for stage context: {e}")
-        elif mode_context.get('mode') == 'graph' and thread.project_id:
-            # Graph mode: inject serialized graph context for orientation
-            # Case-aware: when thread is linked to a case, use case-composed graph
-            try:
-                from apps.graph.serialization import GraphSerializationService
-                from apps.graph.services import GraphService
-                from apps.intelligence.graph_prompts import build_graph_aware_system_prompt
-
-                _case_id = thread.primary_case_id
-                graph_context, _ = await sync_to_async(
-                    GraphSerializationService.serialize_for_llm
-                )(thread.project_id, case_id=_case_id)
-                if _case_id:
-                    graph_health = await sync_to_async(
-                        GraphService.compute_case_graph_health
-                    )(_case_id)
-                else:
-                    graph_health = await sync_to_async(
-                        GraphService.compute_graph_health
-                    )(thread.project_id)
-
-                system_prompt_override = build_graph_aware_system_prompt(
-                    graph_context=graph_context,
-                    graph_health=graph_health,
-                )
-            except Exception as e:
-                logger.warning(f"Could not build graph-aware prompt: {e}")
+        state = StreamState(
+            thread=thread,
+            user=user,
+            content=content,
+            mode_context=mode_context,
+            title_task=title_task,
+            correlation_id=uuid_module.uuid4(),
+        )
 
         try:
-            async for event in engine.analyze_simple(
-                thread=thread,
-                user_message=content,
-                conversation_context=conversation_context,
-                system_prompt_override=system_prompt_override,
-                retrieval_context=retrieval_context,
-            ):
-                if event.type == StreamEventType.RESPONSE_CHUNK:
-                    response_content += event.data
-                    payload = json.dumps({"delta": event.data})
-                    yield f"event: response_chunk\ndata: {payload}\n\n"
+            # Phase 1: Context assembly
+            await assemble_context(state)
 
-                elif event.type == StreamEventType.REFLECTION_CHUNK:
-                    reflection_content += event.data
-                    payload = json.dumps({"delta": event.data})
-                    yield f"event: reflection_chunk\ndata: {payload}\n\n"
+            # Phase 2: LLM streaming (main SSE event source)
+            async for event in stream_llm_response(state):
+                yield event
 
-                elif event.type == StreamEventType.RESPONSE_COMPLETE:
-                    response_content = event.data
-                    payload = json.dumps({"content": event.data})
-                    yield f"event: response_complete\ndata: {payload}\n\n"
+            # Phase 3: Persist message + emit source chunks
+            async for event in persist_message(state):
+                yield event
 
-                elif event.type == StreamEventType.REFLECTION_COMPLETE:
-                    reflection_content = event.data
-                    payload = json.dumps({"content": event.data})
-                    yield f"event: reflection_complete\ndata: {payload}\n\n"
+            # Phase 4: Apply graph edits (no SSE output)
+            await apply_graph_edits(state)
 
-                elif event.type == StreamEventType.ACTION_HINTS_COMPLETE:
-                    action_hints = event.data.get('action_hints', [])
-                    action_hints_json = event.data.get('raw', '[]')
-                    payload = json.dumps({"action_hints": action_hints})
-                    yield f"event: action_hints\ndata: {payload}\n\n"
+            # Phase 5: Execute tool actions
+            async for event in execute_tool_actions(state):
+                yield event
 
-                elif event.type == StreamEventType.GRAPH_EDITS_COMPLETE:
-                    graph_edits = event.data.get('graph_edits', [])
-                    graph_edits_json = event.data.get('raw', '[]')
-                    payload = json.dumps({"graph_edits": graph_edits})
-                    yield f"event: graph_edits\ndata: {payload}\n\n"
+            # Phase 6: Kick off companion (fire-and-forget)
+            await kick_off_companion(state)
 
-                elif event.type == StreamEventType.ERROR:
-                    error_msg = event.data.get('error', 'Unknown error')
-                    payload = json.dumps({"error": error_msg})
-                    yield f"event: error\ndata: {payload}\n\n"
+            # Phase 7: Title generation
+            async for event in resolve_title(state):
+                yield event
 
-                elif event.type == StreamEventType.DONE:
-                    # Don't yield done yet - we need to save first
-                    pass
+            # Phase 8: Companion await + streaming
+            async for event in process_companion_results(state):
+                yield event
 
-            # Post-process: save message
-            result = await UnifiedAnalysisHandler.handle_completion(
-                thread=thread,
-                user=user,
-                response_content=response_content,
-                reflection_content=reflection_content,
-                model_key='chat',
-                correlation_id=correlation_id
-            )
-
-            # Apply graph edits if present
-            graph_edit_summary = None
-            if graph_edits_json and graph_edits_json.strip() not in ('', '[]'):
-                try:
-                    from apps.graph.edit_handler import GraphEditHandler
-                    edits = json.loads(graph_edits_json)
-                    if isinstance(edits, list) and edits and thread.project_id:
-                        message_id = result.get('message_id')
-                        graph_edit_summary = await sync_to_async(
-                            GraphEditHandler.apply_edits
-                        )(
-                            project_id=thread.project_id,
-                            edits=edits,
-                            source_message_id=message_id,
-                            user=user,
-                            case_id=thread.primary_case_id,
-                        )
-                        logger.info(
-                            "graph_edits_applied_from_chat",
-                            extra={
-                                'thread_id': str(thread.id),
-                                **graph_edit_summary,
-                            },
-                        )
-                except Exception as e:
-                    logger.exception("Failed to apply graph edits from chat")
-
-            # --- Title generation: await parallel task or check for refresh ---
-            if title_task is not None:
-                try:
-                    generated_title = await title_task
-                    if generated_title:
-                        thread.title = generated_title
-                        metadata = thread.metadata or {}
-                        msg_count = await sync_to_async(
-                            lambda: Message.objects.filter(thread=thread, role='user').count()
-                        )()
-                        metadata['title_gen_at_msg_count'] = msg_count
-                        thread.metadata = metadata
-                        await sync_to_async(thread.save)(
-                            update_fields=['title', 'metadata']
-                        )
-                        title_payload = json.dumps({"title": generated_title})
-                        yield f"event: title_update\ndata: {title_payload}\n\n"
-                except Exception:
-                    logger.warning(
-                        "title_generation_failed",
-                        extra={"thread_id": str(thread.id)}
-                    )
-            else:
-                # Check if title should be refreshed (conversation drift)
-                if not thread.title_manually_edited and thread.title not in ('', 'New Chat'):
-                    try:
-                        metadata = thread.metadata or {}
-                        msg_count = await sync_to_async(
-                            lambda: Message.objects.filter(thread=thread, role='user').count()
-                        )()
-                        last_title_gen_at_msg = metadata.get('title_gen_at_msg_count', 0)
-
-                        if msg_count >= 10 and (msg_count - last_title_gen_at_msg) >= 8:
-                            recent_msgs = await sync_to_async(list)(
-                                Message.objects.filter(thread=thread)
-                                .order_by('-created_at')[:6]
-                            )
-                            # TODO: This await blocks the done event by ~300ms.
-                            # Could be parallelized with create_task if latency matters,
-                            # but refresh is rare (every 8+ msgs after 10th) so acceptable.
-                            refreshed_title = await generate_thread_title([
-                                {"role": m.role, "content": m.content}
-                                for m in reversed(recent_msgs)
-                            ])
-                            if refreshed_title and refreshed_title != thread.title:
-                                thread.title = refreshed_title
-                                metadata['title_gen_at_msg_count'] = msg_count
-                                thread.metadata = metadata
-                                await sync_to_async(thread.save)(
-                                    update_fields=['title', 'metadata']
-                                )
-                                title_payload = json.dumps({"title": refreshed_title})
-                                yield f"event: title_update\ndata: {title_payload}\n\n"
-                    except Exception:
-                        logger.warning(
-                            "title_refresh_failed",
-                            extra={"thread_id": str(thread.id)}
-                        )
-
-            # Now yield done event with IDs
-            done_data = {
-                "message_id": result.get('message_id'),
-                "reflection_id": result.get('reflection_id'),
-                "action_hints_count": len(json.loads(action_hints_json or '[]')),
-            }
-            if graph_edit_summary:
-                done_data["graph_edits_applied"] = graph_edit_summary
-            done_payload = json.dumps(done_data)
-            yield f"event: done\ndata: {done_payload}\n\n"
+            # Phase 9: Done event
+            yield build_done_event(state)
 
         except Exception as e:
             logger.exception(
                 "unified_stream_error",
                 extra={"thread_id": str(thread.id), "error": str(e)}
             )
-            error_payload = json.dumps({"error": str(e)})
-            yield f"event: error\ndata: {error_payload}\n\n"
+            yield sse("error", {"error": "An unexpected error occurred. Please try again."})
 
     # Create streaming response
     response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
@@ -880,6 +654,185 @@ async def unified_stream(request, thread_id):
 
 
 
+@csrf_exempt
+@require_GET
+async def thread_structure(request, thread_id):
+    """
+    Get the current conversation structure for a thread.
+
+    GET /api/chat/threads/{thread_id}/structure/
+    """
+    user = await authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
+    thread = await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
+    )()
+
+    from .companion_service import CompanionService
+    structure = await CompanionService.get_current_structure_async(thread.id)
+
+    if not structure:
+        return JsonResponse({'structure': None})
+
+    return JsonResponse({
+        'structure': {
+            'id': str(structure.id),
+            'thread_id': str(structure.thread_id),
+            'version': structure.version,
+            'structure_type': structure.structure_type,
+            'content': structure.content,
+            'established': structure.established,
+            'open_questions': structure.open_questions,
+            'eliminated': structure.eliminated,
+            'context_summary': structure.context_summary,
+            'updated_at': structure.updated_at.isoformat(),
+        }
+    })
+
+
+@csrf_exempt
+@require_POST
+async def confirm_tool_action(request, thread_id):
+    """
+    Confirm and execute a pending tool action.
+
+    POST /api/chat/threads/{thread_id}/confirm-tool/
+    Body: { "confirmation_id": "...", "approved": true/false }
+
+    Response contract:
+      On dismiss (approved=false):
+        { "success": true, "dismissed": true }
+      On successful execution (approved=true, tool succeeds):
+        { "success": true, "tool": "...", "display_name": "...", "output": {...}, "error": null }
+      On failed execution (approved=true, tool fails):
+        { "success": false, "tool": "...", "display_name": "...", "output": {}, "error": "..." }
+
+    Frontend check: ``!result.success && !result.dismissed`` detects execution
+    failures. A dismissed response always has ``success=true`` so it passes through.
+    """
+    user = await authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
+    # Verify thread ownership
+    await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
+    )()
+
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'error': 'Invalid JSON body'}, status=400)
+
+    confirmation_id = body.get('confirmation_id')
+    approved = body.get('approved', False)
+
+    if not confirmation_id:
+        return JsonResponse(
+            {'error': 'confirmation_id is required'}, status=400
+        )
+
+    if not approved:
+        return JsonResponse({'success': True, 'dismissed': True})
+
+    from apps.intelligence.tools.executor import ToolExecutor
+
+    result = await ToolExecutor.execute_confirmed(confirmation_id, user)
+
+    return JsonResponse({
+        'success': result.success,
+        'tool': result.tool_name,
+        'display_name': result.display_name,
+        'output': result.output,
+        'error': result.error,
+    })
+
+
+@csrf_exempt
+@require_GET
+async def thread_research(request, thread_id):
+    """
+    Get research results for a thread.
+
+    GET /api/chat/threads/{thread_id}/research/
+    """
+    user = await authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
+    thread = await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
+    )()
+
+    from .models import ResearchResult
+    results = await sync_to_async(list)(
+        ResearchResult.objects.filter(thread=thread).order_by('-created_at')[:20]
+    )
+
+    return JsonResponse({
+        'results': [
+            {
+                'id': str(r.id),
+                'question': r.question,
+                'answer': r.answer,
+                'sources': r.sources,
+                'status': r.status,
+                'surfaced': r.surfaced,
+                'created_at': r.created_at.isoformat(),
+            }
+            for r in results
+        ]
+    })
+
+
+@csrf_exempt
+@require_GET
+async def thread_episodes(request, thread_id):
+    """
+    Get conversation episodes for a thread.
+
+    GET /api/chat/threads/{thread_id}/episodes/
+    """
+    user = await authenticate_jwt(request)
+    if user is None:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+
+    thread = await sync_to_async(
+        lambda: get_object_or_404(ChatThread, id=thread_id, user=user)
+    )()
+
+    from .models import ConversationEpisode
+    episodes = await sync_to_async(list)(
+        ConversationEpisode.objects.filter(thread=thread).order_by('episode_index')
+    )
+
+    current_episode_id = None
+    if thread.current_episode_id:
+        current_episode_id = str(thread.current_episode_id)
+
+    return JsonResponse({
+        'episodes': [
+            {
+                'id': str(ep.id),
+                'episode_index': ep.episode_index,
+                'topic_label': ep.topic_label,
+                'content_summary': ep.content_summary,
+                'message_count': ep.message_count,
+                'shift_type': ep.shift_type,
+                'sealed': ep.sealed,
+                'sealed_at': ep.sealed_at.isoformat() if ep.sealed_at else None,
+                'start_message_id': str(ep.start_message_id) if ep.start_message_id else None,
+                'end_message_id': str(ep.end_message_id) if ep.end_message_id else None,
+                'created_at': ep.created_at.isoformat(),
+            }
+            for ep in episodes
+        ],
+        'current_episode_id': current_episode_id,
+    })
+
+
 class MessageViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Read-only viewset for messages
@@ -890,7 +843,16 @@ class MessageViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         # Users can only see messages in their own threads
-        queryset = Message.objects.filter(thread__user=self.request.user)
+        from django.db.models import Prefetch
+        from apps.projects.models import DocumentChunk
+        queryset = Message.objects.filter(
+            thread__user=self.request.user
+        ).prefetch_related(
+            Prefetch(
+                'source_chunks',
+                queryset=DocumentChunk.objects.select_related('document'),
+            ),
+        )
         thread_id = self.request.query_params.get('thread')
         if thread_id:
             queryset = queryset.filter(thread_id=thread_id)

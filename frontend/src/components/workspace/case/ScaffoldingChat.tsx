@@ -21,6 +21,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { CheckCircleSmall as CheckIcon, SendIcon } from '@/components/ui/icons';
 import { chatAPI } from '@/lib/api/chat';
 import { casesAPI } from '@/lib/api/cases';
 import { SkillPicker } from './SkillPicker';
@@ -34,6 +36,13 @@ interface ScaffoldingChatProps {
   /** Called when user cancels */
   onCancel?: () => void;
   className?: string;
+  /** Pre-seed scaffolding with insight context for "Investigate" flow */
+  insightContext?: {
+    id: string;
+    title: string;
+    content: string;
+    insight_type: string;
+  };
 }
 
 interface ChatMessage {
@@ -54,6 +63,7 @@ export function ScaffoldingChat({
   onCaseCreated,
   onCancel,
   className,
+  insightContext,
 }: ScaffoldingChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -108,10 +118,10 @@ export function ScaffoldingChat({
         let thread;
         try {
           thread = await chatAPI.createThread(projectId, { mode: 'scaffolding' });
-        } catch (threadErr: any) {
+        } catch (threadErr: unknown) {
           if (!mounted) return;
           // Thread creation is critical — show error and disable chat
-          setThreadError(threadErr.message || 'Failed to connect to the chat service');
+          setThreadError(threadErr instanceof Error ? threadErr.message : 'Failed to connect to the chat service');
           setPhase('chatting'); // Show UI but with error banner
           return;
         }
@@ -133,7 +143,9 @@ export function ScaffoldingChat({
         let accumulated = '';
         await chatAPI.sendUnifiedStream(
           thread.id,
-          '[User has opened the scaffolding flow. Greet them and ask your first question.]',
+          insightContext
+            ? `[User wants to investigate this finding: "${insightContext.title}" (${insightContext.insight_type}). Context: ${insightContext.content}. Begin the scaffolding interview with this context already known — acknowledge the finding and ask targeted follow-ups about the specific decision this relates to.]`
+            : '[User has opened the scaffolding flow. Greet them and ask your first question.]',
           {
             onResponseChunk: (delta) => {
               if (!mounted) return;
@@ -169,7 +181,7 @@ export function ScaffoldingChat({
             },
           }
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!mounted) return;
         // LLM stream failed but thread exists — fall back to static greeting
         if (threadId) {
@@ -181,7 +193,7 @@ export function ScaffoldingChat({
           setPhase('chatting');
         } else {
           // No thread — show error
-          setThreadError(err.message || 'Failed to initialize');
+          setThreadError(err instanceof Error ? err.message : 'Failed to initialize');
           setPhase('chatting');
         }
       }
@@ -209,8 +221,8 @@ export function ScaffoldingChat({
         content: INITIAL_GREETING,
       }]);
       setPhase('chatting');
-    } catch (err: any) {
-      setThreadError(err.message || 'Failed to connect to the chat service');
+    } catch (err: unknown) {
+      setThreadError(err instanceof Error ? err.message : 'Failed to connect to the chat service');
       setPhase('chatting');
     }
   }, [projectId]);
@@ -279,8 +291,8 @@ export function ScaffoldingChat({
         },
         controller.signal
       );
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
+    } catch (err: unknown) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
         setMessages(prev => prev.map(m =>
           m.id === assistantMsgId
             ? { ...m, content: accumulated || 'Sorry, something went wrong. Please try again.', isStreaming: false }
@@ -313,8 +325,8 @@ export function ScaffoldingChat({
         setPhase('complete');
         onCaseCreated?.(result.case.id);
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to scaffold case');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to scaffold case');
       setPhase('error');
     }
   }, [threadId, projectId, onCaseCreated]);
@@ -329,8 +341,8 @@ export function ScaffoldingChat({
       setCreatedCaseId(result.case.id);
       setPhase('complete');
       onCaseCreated?.(result.case.id);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to scaffold with pack');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to scaffold with pack');
       setPhase('error');
     }
   }, [projectId, onCaseCreated]);
@@ -343,8 +355,8 @@ export function ScaffoldingChat({
       setCreatedCaseId(result.case.id);
       setPhase('complete');
       onCaseCreated?.(result.case.id);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to scaffold with skill');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to scaffold with skill');
       setPhase('error');
     }
   }, [projectId, onCaseCreated]);
@@ -364,8 +376,8 @@ export function ScaffoldingChat({
       setCreatedCaseId(result.case.id);
       setPhase('complete');
       onCaseCreated?.(result.case.id);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to create case');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to create case');
       setPhase('error');
     }
   }, [projectId, onCaseCreated]);
@@ -413,13 +425,15 @@ export function ScaffoldingChat({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCreateBlank}
             className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
             disabled={phase !== 'chatting'}
           >
             Skip — blank case
-          </button>
+          </Button>
           {onCancel && (
             <Button variant="ghost" size="sm" onClick={onCancel} className="h-7 text-xs">
               Cancel
@@ -455,19 +469,21 @@ export function ScaffoldingChat({
 
         {/* Thread creation failure banner */}
         {threadError && (
-          <div className="mx-auto max-w-md p-3 border border-red-200 dark:border-red-900/40 rounded-xl bg-red-50/50 dark:bg-red-900/10 text-center">
-            <p className="text-xs font-medium text-red-600 dark:text-red-400">
+          <div className="mx-auto max-w-md p-3 border border-error-200 dark:border-error-900/40 rounded-xl bg-error-50/50 dark:bg-error-900/10 text-center">
+            <p className="text-xs font-medium text-error-600 dark:text-error-400">
               Couldn't connect to the chat service
             </p>
-            <p className="text-xs text-red-500 dark:text-red-400/80 mt-0.5">
+            <p className="text-xs text-error-500 dark:text-error-400/80 mt-0.5">
               {threadError}
             </p>
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={retryInit}
-              className="mt-2 px-3 py-1 text-xs font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+              className="mt-2 text-xs font-medium text-error-600 dark:text-error-400 border-error-300 dark:border-error-700 hover:bg-error-100 dark:hover:bg-error-900/30"
             >
               Retry
-            </button>
+            </Button>
           </div>
         )}
 
@@ -499,7 +515,7 @@ export function ScaffoldingChat({
         {phase === 'scaffolding' && (
           <div className="flex justify-center py-6">
             <div className="flex items-center gap-3 px-4 py-3 bg-accent-50 dark:bg-accent-900/20 border border-accent-200 dark:border-accent-800 rounded-xl">
-              <LoadingSpinner className="w-5 h-5 text-accent-500" />
+              <Spinner size="md" className="text-accent-500" />
               <div>
                 <p className="text-sm font-medium text-accent-700 dark:text-accent-300">
                   Scaffolding your case...
@@ -515,12 +531,12 @@ export function ScaffoldingChat({
         {/* Complete state */}
         {phase === 'complete' && (
           <div className="flex justify-center py-6">
-            <div className="text-center px-6 py-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl">
-              <CheckIcon className="w-8 h-8 mx-auto text-emerald-500 mb-2" />
-              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            <div className="text-center px-6 py-4 bg-success-50 dark:bg-success-900/20 border border-success-200 dark:border-success-800 rounded-xl">
+              <CheckIcon className="w-8 h-8 mx-auto text-success-500 mb-2" />
+              <p className="text-sm font-medium text-success-700 dark:text-success-300">
                 Case scaffolded successfully!
               </p>
-              <p className="text-xs text-emerald-500 dark:text-emerald-400 mt-1 mb-3">
+              <p className="text-xs text-success-500 dark:text-success-400 mt-1 mb-3">
                 Your brief, inquiries, and structure are ready
               </p>
               <Button size="sm" onClick={handleGoToCase}>
@@ -533,11 +549,11 @@ export function ScaffoldingChat({
         {/* Error state */}
         {phase === 'error' && (
           <div className="flex justify-center py-6" role="alert">
-            <div className="text-center px-6 py-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
-              <p className="text-sm font-medium text-red-700 dark:text-red-300">
+            <div className="text-center px-6 py-4 bg-error-50 dark:bg-error-900/20 border border-error-200 dark:border-error-800 rounded-xl">
+              <p className="text-sm font-medium text-error-700 dark:text-error-300">
                 Something went wrong
               </p>
-              <p className="text-xs text-red-500 dark:text-red-400 mt-1 mb-3">
+              <p className="text-xs text-error-500 dark:text-error-400 mt-1 mb-3">
                 {errorMessage}
               </p>
               <div className="flex items-center justify-center gap-2">
@@ -607,7 +623,7 @@ export function ScaffoldingChat({
                 disabled={!inputValue.trim() || isSending}
               >
                 {isSending ? (
-                  <LoadingSpinner className="w-4 h-4" />
+                  <Spinner />
                 ) : (
                   <SendIcon className="w-4 h-4" />
                 )}
@@ -647,33 +663,6 @@ function TypingIndicator() {
 }
 
 // ── Icons ────────────────────────────────────────────────────────
-
-function LoadingSpinner({ className }: { className?: string }) {
-  return (
-    <svg className={cn(className, 'animate-spin')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-      <path d="M12 2a10 10 0 019.17 6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function SendIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
 
 function SparklesIcon({ className }: { className?: string }) {
   return (

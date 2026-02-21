@@ -73,12 +73,12 @@ export const SuggestionMark = Mark.create({
     const type = HTMLAttributes['data-suggestion-type'] as SuggestionMarkType;
 
     const classMap: Record<SuggestionMarkType, string> = {
-      delete: 'suggestion-mark suggestion-delete line-through bg-red-100 text-red-700 cursor-pointer',
-      replace_old: 'suggestion-mark suggestion-replace-old line-through bg-red-100 text-red-700 cursor-pointer',
-      replace_new: 'suggestion-mark suggestion-replace-new bg-green-100 text-green-800 cursor-pointer',
-      add: 'suggestion-mark suggestion-add bg-green-100 text-green-800 cursor-pointer',
-      cite: 'suggestion-mark suggestion-cite underline decoration-blue-400 cursor-pointer',
-      clarify: 'suggestion-mark suggestion-clarify underline decoration-amber-400 cursor-pointer',
+      delete: 'suggestion-mark suggestion-delete line-through bg-error-100 text-error-700 cursor-pointer',
+      replace_old: 'suggestion-mark suggestion-replace-old line-through bg-error-100 text-error-700 cursor-pointer',
+      replace_new: 'suggestion-mark suggestion-replace-new bg-success-100 text-success-800 cursor-pointer',
+      add: 'suggestion-mark suggestion-add bg-success-100 text-success-800 cursor-pointer',
+      cite: 'suggestion-mark suggestion-cite underline decoration-info-400 cursor-pointer',
+      clarify: 'suggestion-mark suggestion-clarify underline decoration-warning-400 cursor-pointer',
     };
 
     return [

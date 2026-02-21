@@ -18,7 +18,7 @@ import {
   PencilIcon,
   LinkIcon,
   ExclamationTriangleIcon,
-} from '@heroicons/react/24/outline';
+} from '@/components/ui/icons';
 
 export interface BriefSectionSuggestion {
   id: string;
@@ -78,22 +78,26 @@ export function BriefSuggestion({
           <div className="flex-1 min-w-0">
             <p className="text-xs text-neutral-600 line-clamp-2">{suggestion.reason}</p>
             <div className="flex gap-1 mt-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={handleAccept}
                 disabled={isLoading || accepting}
-                className="p-1 text-success-600 hover:bg-success-50 rounded"
+                className="p-1 h-auto w-auto text-success-600 hover:bg-success-50"
                 title="Accept"
               >
                 <CheckIcon className="w-3 h-3" />
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => onReject(suggestion)}
                 disabled={isLoading}
-                className="p-1 text-error-600 hover:bg-error-50 rounded"
+                className="p-1 h-auto w-auto text-error-600 hover:bg-error-50"
                 title="Reject"
               >
                 <XMarkIcon className="w-3 h-3" />
-              </button>
+              </Button>
             </div>
           </div>
         </div>

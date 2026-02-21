@@ -17,3 +17,6 @@ export { CaseCreationPromptCard } from './CaseCreationPromptCard';
 export { InquiryResolutionPromptCard } from './InquiryResolutionPromptCard';
 export { ResearchResultsCard } from './ResearchResultsCard';
 export { InquiryFocusPromptCard } from './InquiryFocusPromptCard';
+export { PositionUpdateProposalCard } from './PositionUpdateProposalCard';
+export { ToolExecutedCard } from './ToolExecutedCard';
+export { ToolConfirmationCard } from './ToolConfirmationCard';

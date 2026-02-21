@@ -5,6 +5,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 import type { Editor } from '@tiptap/react';
 import { documentsAPI } from '@/lib/api/documents';
 import type { WorkingDocument } from '@/lib/types/case';
@@ -136,21 +137,24 @@ export function CitationAutocomplete({
       </div>
       <div className="max-h-64 overflow-y-auto">
         {filteredSuggestions.map((doc, index) => (
-          <button
+          <Button
             key={doc.id}
+            variant="ghost"
             onClick={() => insertCitation(doc)}
-            className={`w-full text-left px-3 py-2 border-b border-neutral-100 last:border-0 transition-colors ${
+            className={`w-full justify-start h-auto px-3 py-2 rounded-none border-b border-neutral-100 last:border-0 ${
               index === selectedIndex ? 'bg-accent-50' : 'hover:bg-neutral-50'
             }`}
           >
-            <div className="font-medium text-neutral-900 text-sm">{doc.title}</div>
-            <div className="text-xs text-neutral-500 mt-0.5 flex items-center gap-2">
-              <span>{doc.document_type.replace('_', ' ')}</span>
-              {doc.times_cited > 0 && (
-                <span>• Cited {doc.times_cited}x</span>
-              )}
+            <div className="text-left">
+              <div className="font-medium text-neutral-900 text-sm">{doc.title}</div>
+              <div className="text-xs text-neutral-500 mt-0.5 flex items-center gap-2">
+                <span>{doc.document_type.replace('_', ' ')}</span>
+                {doc.times_cited > 0 && (
+                  <span>• Cited {doc.times_cited}x</span>
+                )}
+              </div>
             </div>
-          </button>
+          </Button>
         ))}
       </div>
     </div>

@@ -1,26 +1,22 @@
 """
 Research Agent - Generate comprehensive research reports.
 
-Uses GPT-4 to research topics deeply and create structured reports.
+Uses the LLM provider abstraction to research topics deeply and
+create structured reports.
 """
-import json
-from django.conf import settings
-import openai
+from asgiref.sync import async_to_sync
+
+from apps.common.llm_providers import get_llm_provider
 
 
 class ResearchAgent:
     """
     Generate comprehensive research reports.
-    
-    Uses GPT-4o to research topics deeply, synthesize findings,
-    and create structured, professional reports.
+
+    Uses the configured LLM provider to research topics deeply,
+    synthesize findings, and create structured, professional reports.
     """
-    
-    def __init__(self):
-        self.model = "gpt-4o"  # More capable model for research
-        if hasattr(settings, 'OPENAI_API_KEY') and settings.OPENAI_API_KEY:
-            openai.api_key = settings.OPENAI_API_KEY
-    
+
     def generate_research(
         self,
         topic: str,
@@ -31,13 +27,13 @@ class ResearchAgent:
     ) -> dict:
         """
         Generate comprehensive research on a topic.
-        
+
         Args:
             topic: What to research
             case_context: Context from case
             inquiry_context: Context from inquiry (if specific)
             sources: Optional list of existing documents to reference
-        
+
         Returns:
             {
                 "content": "markdown research report",
@@ -51,24 +47,23 @@ class ResearchAgent:
             }
         """
         prompt = self._build_research_prompt(topic, case_context, inquiry_context, sources, graph_context)
-        
+
         try:
-            # Call LLM with high token limit for comprehensive research
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self._get_research_system_prompt()},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,  # Some creativity but mostly factual
-                max_tokens=4000   # Long-form research
-            )
-            
-            content = response.choices[0].message.content
-            
+            provider = get_llm_provider('chat')
+
+            async def _call():
+                return await provider.generate(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt=self._get_research_system_prompt(),
+                    temperature=0.3,  # Some creativity but mostly factual
+                    max_tokens=4000,  # Long-form research
+                )
+
+            content = async_to_sync(_call)()
+
             # Extract structure from markdown
             structure = self._extract_research_structure(content)
-            
+
             return {
                 "content": content,
                 "structure": structure

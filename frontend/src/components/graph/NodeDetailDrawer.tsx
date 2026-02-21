@@ -13,6 +13,7 @@
 
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import type { GraphNode, GraphEdge, NodeType } from '@/lib/types/graph';
 import { NODE_TYPE_CONFIG, NODE_STATUS_CONFIG, EDGE_TYPE_CONFIG } from './graph-config';
 
@@ -23,6 +24,8 @@ interface NodeDetailDrawerProps {
   projectId: string;
   onClose: () => void;
   onNavigateToNode: (nodeId: string) => void;
+  /** When provided, renders an "Ask about this" button that bridges to the chat panel */
+  onAskAboutNode?: (node: GraphNode) => void;
 }
 
 export function NodeDetailDrawer({
@@ -32,6 +35,7 @@ export function NodeDetailDrawer({
   projectId,
   onClose,
   onNavigateToNode,
+  onAskAboutNode,
 }: NodeDetailDrawerProps) {
   const typeConfig = NODE_TYPE_CONFIG[node.node_type];
   const statusConfig = NODE_STATUS_CONFIG[node.status];
@@ -54,7 +58,7 @@ export function NodeDetailDrawer({
       <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200/60 dark:border-neutral-800/60">
         <div className="flex items-center gap-2">
           <span className={cn(
-            'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider',
+            'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold uppercase tracking-wider',
             typeConfig.badgeBg, typeConfig.badgeText,
           )}>
             <NodeTypeIcon path={typeConfig.icon} className="w-3 h-3" />
@@ -62,20 +66,22 @@ export function NodeDetailDrawer({
           </span>
           <span className="flex items-center gap-1">
             <span className={cn('w-2 h-2 rounded-full', statusConfig.dotColor)} />
-            <span className={cn('text-[10px] font-medium', statusConfig.textClass)}>
+            <span className={cn('text-xs font-medium', statusConfig.textClass)}>
               {statusConfig.label}
             </span>
           </span>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onClose}
-          className="p-1 rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+          className="h-7 w-7 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
           aria-label="Close detail panel"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
           </svg>
-        </button>
+        </Button>
       </div>
 
       {/* Scrollable content */}
@@ -96,8 +102,8 @@ export function NodeDetailDrawer({
               <div
                 className={cn(
                   'h-full rounded-full transition-all',
-                  node.confidence >= 0.7 ? 'bg-emerald-500' :
-                  node.confidence >= 0.4 ? 'bg-amber-500' :
+                  node.confidence >= 0.7 ? 'bg-success-500' :
+                  node.confidence >= 0.4 ? 'bg-warning-500' :
                   'bg-rose-500'
                 )}
                 style={{ width: `${node.confidence * 100}%` }}
@@ -147,9 +153,30 @@ export function NodeDetailDrawer({
               </svg>
               <span>{node.source_document_title}</span>
             </div>
-            <div className="mt-1 text-[10px] text-neutral-400 dark:text-neutral-500">
+            <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
               {node.source_type.replace('_', ' ')} &middot; {node.scope}
             </div>
+          </section>
+        )}
+
+        {/* Ask about this — bridges graph exploration to chat */}
+        {onAskAboutNode && (
+          <section>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onAskAboutNode(node)}
+              className={cn(
+                'w-full flex items-center justify-center gap-2 text-sm font-medium',
+                'text-accent-700 dark:text-accent-300',
+                'bg-accent-50 dark:bg-accent-900/30',
+                'hover:bg-accent-100 dark:hover:bg-accent-900/50',
+                'border-accent-200/60 dark:border-accent-800/40',
+              )}
+            >
+              <ChatIcon className="w-3.5 h-3.5" />
+              Ask about this
+            </Button>
           </section>
         )}
 
@@ -194,7 +221,7 @@ export function NodeDetailDrawer({
 
         {/* Metadata */}
         <section className="pt-2 border-t border-neutral-200/60 dark:border-neutral-800/60">
-          <div className="text-[10px] text-neutral-400 dark:text-neutral-500 space-y-0.5">
+          <div className="text-xs text-neutral-400 dark:text-neutral-500 space-y-0.5">
             <div>Created: {new Date(node.created_at).toLocaleDateString()}</div>
             <div>Updated: {new Date(node.updated_at).toLocaleDateString()}</div>
             <div className="font-mono">{node.id.slice(0, 8)}...</div>
@@ -209,7 +236,7 @@ export function NodeDetailDrawer({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-[10px] uppercase tracking-wider font-semibold text-neutral-400 dark:text-neutral-500 mb-2">
+    <h3 className="text-xs uppercase tracking-wider font-semibold text-neutral-400 dark:text-neutral-500 mb-2">
       {children}
     </h3>
   );
@@ -240,14 +267,14 @@ function EdgeGroup({
   onNavigate: (nodeId: string) => void;
 }) {
   const colorClasses = {
-    emerald: 'text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50',
+    emerald: 'text-success-600 dark:text-success-400 border-success-200 dark:border-success-800/50',
     rose: 'text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/50',
     slate: 'text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700',
   };
 
   return (
     <div>
-      <span className={cn('text-[10px] font-medium uppercase tracking-wider', colorClasses[color].split(' ').slice(0, 2).join(' '))}>
+      <span className={cn('text-xs font-medium uppercase tracking-wider', colorClasses[color].split(' ').slice(0, 2).join(' '))}>
         {label} ({edges.length})
       </span>
       <div className="mt-1 space-y-1">
@@ -259,12 +286,13 @@ function EdgeGroup({
           const neighborType = NODE_TYPE_CONFIG[neighbor.node_type];
 
           return (
-            <button
+            <Button
               key={edge.id}
+              variant="outline"
+              size="sm"
               onClick={() => onNavigate(neighborId)}
               className={cn(
-                'w-full flex items-start gap-2 p-2 rounded-md text-left',
-                'border transition-colors',
+                'w-full flex items-start gap-2 p-2 h-auto justify-start',
                 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50',
                 colorClasses[color],
               )}
@@ -272,10 +300,10 @@ function EdgeGroup({
               <span className={cn('mt-0.5 shrink-0', neighborType.textClass)}>
                 <NodeTypeIcon path={neighborType.icon} className="w-3 h-3" />
               </span>
-              <span className="text-[11px] text-neutral-700 dark:text-neutral-300 line-clamp-2 leading-tight">
+              <span className="text-xs text-neutral-700 dark:text-neutral-300 line-clamp-2 leading-tight text-left">
                 {neighbor.content}
               </span>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -287,6 +315,14 @@ function NodeTypeIcon({ path, className }: { path: string; className?: string })
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d={path} />
+    </svg>
+  );
+}
+
+function ChatIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

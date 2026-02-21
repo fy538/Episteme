@@ -30,9 +30,9 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Already configured in base.py via env.db()
 
 # CORS for Vercel frontend
-CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
-    'https://your-app.vercel.app',  # Update with your Vercel domain
-])
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS')
+if not CORS_ALLOWED_ORIGINS:
+    raise ValueError("CORS_ALLOWED_ORIGINS must be set in production (e.g. 'https://your-app.vercel.app').")
 
 # Logging
 LOGGING = LOGGING.copy()

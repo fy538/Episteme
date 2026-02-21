@@ -101,11 +101,11 @@ export function SettingsCard({
   className,
 }: SettingsCardProps) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       className={cn(
-        'w-full text-left p-4 rounded-xl border-2 transition-all duration-150',
+        'w-full text-left p-4 h-auto rounded-xl border-2 transition-all duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2',
         active
           ? 'border-accent-500 bg-accent-50 dark:bg-accent-900/20 shadow-sm'
@@ -163,7 +163,7 @@ export function SettingsCard({
           </div>
         </div>
       </div>
-    </button>
+    </Button>
   );
 }
 

@@ -25,6 +25,7 @@ import { EDGE_TYPE_CONFIG, ZOOM_THRESHOLDS } from '../graph-config';
 
 interface CustomEdgeData {
   graphEdge: GraphEdgeType;
+  highlightsActive?: boolean;
 }
 
 // Stable selector reference — prevents re-subscription on every render
@@ -64,7 +65,9 @@ function GraphEdgeBase({
 }: EdgeProps) {
   const [isHovered, setIsHovered] = useState(false);
   const zoom = useStore(zoomSelector);
-  const graphEdge = (data as unknown as CustomEdgeData)?.graphEdge;
+  const edgeData = data as unknown as CustomEdgeData | undefined;
+  const graphEdge = edgeData?.graphEdge;
+  const highlightsActive = edgeData?.highlightsActive === true;
   const edgeType = graphEdge?.edge_type ?? 'supports';
   const config = EDGE_TYPE_CONFIG[edgeType];
 
@@ -103,7 +106,7 @@ function GraphEdgeBase({
           stroke: config.strokeColor,
           strokeWidth: Math.max(1.5, strength * 3),
           strokeDasharray: config.strokeDasharray,
-          opacity: isHovered || selected ? 1 : 0.6,
+          opacity: highlightsActive ? 0.15 : isHovered || selected ? 1 : 0.6,
           transition: 'opacity 0.15s, stroke-width 0.15s',
         }}
         markerEnd={`url(#${config.markerEnd})`}
@@ -117,7 +120,7 @@ function GraphEdgeBase({
               'absolute pointer-events-none',
               'px-2 py-0.5 rounded-md text-[9px] font-medium',
               'bg-white dark:bg-neutral-800 border shadow-sm',
-              edgeType === 'supports' && 'border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300',
+              edgeType === 'supports' && 'border-success-200 dark:border-success-800 text-success-700 dark:text-success-300',
               edgeType === 'contradicts' && 'border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300',
               edgeType === 'depends_on' && 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400',
             )}

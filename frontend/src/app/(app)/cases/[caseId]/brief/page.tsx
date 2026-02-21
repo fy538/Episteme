@@ -55,9 +55,10 @@ export default function BriefPage() {
       if (signal?.aborted) return;
       setBriefDoc(doc);
       setInquiries(inqs);
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || signal?.aborted) return;
-      setError(err.message || 'Failed to load brief');
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (signal?.aborted) return;
+      setError(err instanceof Error ? err.message : 'Failed to load brief');
     } finally {
       if (!signal?.aborted) {
         setLoading(false);

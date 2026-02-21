@@ -1,6 +1,7 @@
 """
 Project views
 """
+from django.db.models import Count, Q, Exists, OuterRef
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -23,7 +24,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Project.objects.filter(user=self.request.user, is_archived=False)
+        from apps.graph.models import ClusterHierarchy, HierarchyStatus
+
+        return Project.objects.filter(
+            user=self.request.user, is_archived=False
+        ).annotate(
+            _active_case_count=Count('cases', filter=Q(cases__status='active')),
+            _draft_case_count=Count('cases', filter=Q(cases__status='draft')),
+            _archived_case_count=Count('cases', filter=Q(cases__status='archived')),
+            _has_hierarchy=Exists(
+                ClusterHierarchy.objects.filter(
+                    project=OuterRef('pk'),
+                    is_current=True,
+                    status=HierarchyStatus.READY,
+                )
+            ),
+        )
 
     def destroy(self, request, *args, **kwargs):
         """Soft delete — sets is_archived=True instead of removing the row."""

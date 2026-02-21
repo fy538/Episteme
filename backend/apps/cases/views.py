@@ -3,7 +3,7 @@ Case views
 """
 import logging
 
-from django.db import models, transaction
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -12,29 +12,20 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Case, CaseStatus, WorkingDocument, WorkingDocumentVersion, InvestigationPlan, PlanVersion
-from .brief_models import BriefSection, BriefAnnotation
+from .models import Case, CaseStatus, WorkingDocument, WorkingDocumentVersion, InvestigationPlan
+from .brief_models import BriefSection
 from .serializers import (
     CaseSerializer,
+    CaseWithDecisionSerializer,
     CreateCaseSerializer,
     UpdateCaseSerializer,
     UserConfidenceSerializer,
     InvestigationPlanSerializer,
-    PlanVersionSerializer,
-    PlanStageUpdateSerializer,
-    PlanRestoreSerializer,
-    PlanDiffProposalSerializer,
-    AssumptionStatusSerializer,
-    CriterionStatusSerializer,
 )
-from .plan_service import PlanService
+from .brief_views import BriefActionsMixin
+from .plan_views import PlanActionsMixin
 from .brief_serializers import (
     BriefSectionSerializer,
-    BriefSectionCreateSerializer,
-    BriefSectionUpdateSerializer,
-    BriefSectionReorderSerializer,
-    BriefOverviewSerializer,
-    BriefAnnotationSerializer,
 )
 from .document_serializers import (
     WorkingDocumentSerializer,
@@ -45,22 +36,30 @@ from .document_serializers import (
 from .services import CaseService
 from .document_service import WorkingDocumentService
 from apps.chat.models import ChatThread
-from apps.chat.serializers import ChatThreadSerializer, ChatThreadDetailSerializer
+from apps.chat.serializers import ChatThreadDetailSerializer
 
 
-class CaseViewSet(viewsets.ModelViewSet):
-    """ViewSet for cases"""
+class CaseViewSet(BriefActionsMixin, PlanActionsMixin, viewsets.ModelViewSet):
+    """ViewSet for cases — brief and plan actions extracted to mixins."""
 
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return (
+        qs = (
             Case.objects
             .filter(user=self.request.user)
             .exclude(status=CaseStatus.ARCHIVED)
             .select_related('based_on_skill', 'became_skill')
             .prefetch_related('caseactiveskill_set__skill')
         )
+        # Filter by project when ?project=<uuid> is provided
+        project_id = self.request.query_params.get('project')
+        if project_id:
+            qs = qs.filter(project_id=project_id)
+        # For list actions with project filter, use enhanced queryset
+        if project_id and self.action == 'list':
+            qs = qs.select_related('plan', 'decision')
+        return qs
 
     def destroy(self, request, *args, **kwargs):
         """Soft delete — sets status to ARCHIVED instead of removing the row."""
@@ -68,12 +67,16 @@ class CaseViewSet(viewsets.ModelViewSet):
         case.status = CaseStatus.ARCHIVED
         case.save(update_fields=['status', 'updated_at'])
         return Response(status=status.HTTP_204_NO_CONTENT)
-    
+
     def get_serializer_class(self):
         if self.action == 'create':
             return CreateCaseSerializer
         elif self.action in ['update', 'partial_update']:
             return UpdateCaseSerializer
+        # Use enhanced serializer when project filter is active
+        project_id = self.request.query_params.get('project')
+        if self.action == 'list' and project_id:
+            return CaseWithDecisionSerializer
         return CaseSerializer
     
     def create(self, request, *args, **kwargs):
@@ -88,6 +91,7 @@ class CaseViewSet(viewsets.ModelViewSet):
             stakes=serializer.validated_data.get('stakes'),
             thread_id=serializer.validated_data.get('thread_id'),
             project_id=serializer.validated_data.get('project_id'),  # Phase 2
+            decision_question=serializer.validated_data.get('decision_question', ''),
         )
 
         return Response(
@@ -166,53 +170,6 @@ class CaseViewSet(viewsets.ModelViewSet):
         
         serializer = ChatThreadDetailSerializer(thread)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-    
-    @action(detail=True, methods=['post'], url_path='generate-brief-outline')
-    def generate_brief_outline(self, request, pk=None):
-        """
-        Generate an AI-powered brief outline for a new case
-        
-        POST /api/cases/{id}/generate-brief-outline/
-        
-        Creates an initial structure for the case brief based on:
-        - Case title and position
-        - Stakes level
-        - Any initial chat messages or context
-        """
-        case = self.get_object()
-        
-        # Simple outline template for now
-        # In production, this would use an LLM to generate contextual outline
-        outline = f"""# {case.title}
-
-## Position
-{case.position or '_Describe your current position or thesis_'}
-
-## Stakes
-This is a **{case.stakes}** stakes decision.
-
-## Background
-_Provide context about this decision_
-
-## Key Questions
-- _What are the main questions to resolve?_
-- _What assumptions are critical?_
-- _What evidence would change your mind?_
-
-## Analysis
-_Your research and thinking goes here_
-
-## Decision Criteria
-_What factors will determine the right choice?_
-
-## Next Steps
-_What actions follow from this decision?_
-"""
-        
-        return Response({
-            'outline': outline,
-            'case_id': str(case.id)
-        })
     
     @action(detail=True, methods=['post'])
     def activate_skills(self, request, pk=None):
@@ -553,8 +510,8 @@ _What actions follow from this decision?_
                     'text': node.content[:150] if node.content else '',
                     'location': 'graph',
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Unlinked claims lookup failed: %s", e)
 
         return Response({
             'evidence': evidence,
@@ -765,490 +722,6 @@ _What actions follow from this decision?_
         )
         return Response(suggestions)
 
-    # ── Brief Section Endpoints ──────────────────────────────────────
-
-    @action(detail=True, methods=['get', 'post'], url_path='brief-sections')
-    def brief_sections(self, request, pk=None):
-        """
-        List or create brief sections for this case's main brief.
-
-        GET /api/cases/{id}/brief-sections/
-        Returns all sections with annotations.
-
-        POST /api/cases/{id}/brief-sections/
-        Creates a new section and inserts markdown marker.
-        Body: {heading, section_type?, order?, parent_section?, inquiry?, after_section_id?}
-        """
-        case = self.get_object()
-
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        brief = case.main_brief
-
-        if request.method == 'GET':
-            # Return top-level sections (subsections nested via serializer)
-            sections = BriefSection.objects.filter(
-                brief=brief,
-                parent_section__isnull=True
-            ).select_related(
-                'inquiry'
-            ).prefetch_related(
-                'annotations',
-                'subsections',
-                'subsections__annotations',
-                'subsections__inquiry',
-            ).order_by('order')
-
-            serializer = BriefSectionSerializer(sections, many=True)
-            return Response({
-                'sections': serializer.data,
-                'brief_id': str(brief.id),
-            })
-
-        elif request.method == 'POST':
-            serializer = BriefSectionCreateSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            data = serializer.validated_data
-
-            # Determine order (inside transaction to prevent duplicate ordering)
-            with transaction.atomic():
-                if 'after_section_id' in data and data['after_section_id']:
-                    try:
-                        after_section = BriefSection.objects.select_for_update().get(
-                            brief=brief, section_id=data['after_section_id']
-                        )
-                        order = after_section.order + 1
-                        # Shift subsequent sections
-                        BriefSection.objects.filter(
-                            brief=brief, order__gte=order
-                        ).update(order=models.F('order') + 1)
-                    except BriefSection.DoesNotExist:
-                        order = data.get('order', 0)
-                elif 'order' in data:
-                    order = data['order']
-                else:
-                    max_order = BriefSection.objects.filter(
-                        brief=brief
-                    ).order_by('-order').values_list('order', flat=True).first() or 0
-                    order = max_order + 1
-
-            # Resolve parent section
-            parent_section = None
-            if data.get('parent_section'):
-                try:
-                    parent_section = BriefSection.objects.get(
-                        id=data['parent_section'], brief=brief
-                    )
-                except BriefSection.DoesNotExist:
-                    logger.debug("Parent section %s not found, skipping", data.get('parent_section'))
-
-            # Resolve inquiry
-            inquiry = None
-            if data.get('inquiry'):
-                from apps.inquiries.models import Inquiry
-                try:
-                    inquiry = Inquiry.objects.get(id=data['inquiry'], case=case)
-                except Inquiry.DoesNotExist:
-                    return Response(
-                        {'error': 'Inquiry not found in this case'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-            # Generate section ID and create
-            section_id = BriefSection.generate_section_id()
-            section = BriefSection.objects.create(
-                brief=brief,
-                section_id=section_id,
-                heading=data['heading'],
-                order=order,
-                section_type=data.get('section_type', 'custom'),
-                inquiry=inquiry,
-                parent_section=parent_section,
-                created_by='user',
-                is_linked=bool(inquiry),
-            )
-
-            # Insert markdown marker into brief content
-            marker = f'\n<!-- section:{section_id} -->\n## {data["heading"]}\n\n'
-            if brief.content_markdown:
-                brief.content_markdown += marker
-            else:
-                brief.content_markdown = marker
-            brief.save(update_fields=['content_markdown', 'updated_at'])
-
-            # Emit provenance event
-            from apps.events.services import EventService
-            from apps.events.models import EventType, ActorType
-            EventService.append(
-                event_type=EventType.BRIEF_SECTION_WRITTEN,
-                payload={
-                    'section_id': str(section.id),
-                    'section_title': section.heading,
-                    'section_type': section.section_type,
-                    'authored_by': 'user',
-                },
-                actor_type=ActorType.USER,
-                actor_id=request.user.id,
-                case_id=case.id,
-            )
-
-            return Response(
-                BriefSectionSerializer(section).data,
-                status=status.HTTP_201_CREATED
-            )
-
-    @action(detail=True, methods=['patch', 'delete'], url_path=r'brief-sections/(?P<section_id>[^/.]+)')
-    def brief_section_detail(self, request, pk=None, section_id=None):
-        """
-        Update or delete a specific brief section.
-
-        PATCH /api/cases/{id}/brief-sections/{section_id}/
-        Body: {heading?, order?, section_type?, inquiry?, parent_section?, is_collapsed?}
-
-        DELETE /api/cases/{id}/brief-sections/{section_id}/
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        try:
-            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
-        except BriefSection.DoesNotExist:
-            return Response(
-                {'error': 'Brief section not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if request.method == 'DELETE':
-            # Remove markdown marker
-            marker_tag = f'<!-- section:{section.section_id} -->'
-            if case.main_brief.content_markdown:
-                case.main_brief.content_markdown = case.main_brief.content_markdown.replace(
-                    marker_tag, ''
-                )
-                case.main_brief.save(update_fields=['content_markdown', 'updated_at'])
-            section.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
-        # PATCH
-        serializer = BriefSectionUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
-        if 'heading' in data:
-            # Update heading in markdown too
-            old_heading = section.heading
-            new_heading = data['heading']
-            if case.main_brief.content_markdown and old_heading:
-                case.main_brief.content_markdown = case.main_brief.content_markdown.replace(
-                    f'## {old_heading}', f'## {new_heading}', 1
-                )
-                case.main_brief.save(update_fields=['content_markdown', 'updated_at'])
-            section.heading = new_heading
-
-        if 'order' in data:
-            section.order = data['order']
-        if 'section_type' in data:
-            section.section_type = data['section_type']
-        if 'is_collapsed' in data:
-            section.is_collapsed = data['is_collapsed']
-
-        if 'parent_section' in data:
-            if data['parent_section']:
-                try:
-                    parent = BriefSection.objects.get(
-                        id=data['parent_section'], brief=case.main_brief
-                    )
-                    section.parent_section = parent
-                except BriefSection.DoesNotExist:
-                    logger.debug("Parent section %s not found, skipping", data.get('parent_section'))
-            else:
-                section.parent_section = None
-
-        if 'inquiry' in data:
-            if data['inquiry']:
-                from apps.inquiries.models import Inquiry
-                try:
-                    inquiry = Inquiry.objects.get(id=data['inquiry'], case=case)
-                    section.inquiry = inquiry
-                    section.is_linked = True
-                except Inquiry.DoesNotExist:
-                    return Response(
-                        {'error': 'Inquiry not found in this case'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            else:
-                section.inquiry = None
-                section.is_linked = False
-
-        # Track if content-related fields changed for provenance
-        content_changed = 'heading' in data or 'section_type' in data or 'inquiry' in data
-        _section_update_fields = ['updated_at']
-        for _f in ('heading', 'order', 'section_type', 'is_collapsed',
-                    'parent_section', 'inquiry', 'is_linked'):
-            if _f in data or _f == 'is_linked':
-                _section_update_fields.append(_f)
-        section.save(update_fields=_section_update_fields)
-
-        if content_changed:
-            from apps.events.services import EventService
-            from apps.events.models import EventType, ActorType
-            EventService.append(
-                event_type=EventType.BRIEF_SECTION_REVISED,
-                payload={
-                    'section_id': str(section.id),
-                    'section_title': section.heading,
-                    'revised_by': 'user',
-                },
-                actor_type=ActorType.USER,
-                actor_id=request.user.id,
-                case_id=case.id,
-            )
-
-        return Response(BriefSectionSerializer(section).data)
-
-    @action(detail=True, methods=['post'], url_path='brief-sections/reorder')
-    def brief_sections_reorder(self, request, pk=None):
-        """
-        Bulk reorder brief sections.
-
-        POST /api/cases/{id}/brief-sections/reorder/
-        Body: {sections: [{id, order}, ...]}
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        serializer = BriefSectionReorderSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        for item in serializer.validated_data['sections']:
-            BriefSection.objects.filter(
-                id=item['id'], brief=case.main_brief
-            ).update(order=item['order'])
-
-        return Response({'status': 'reordered'})
-
-    @action(detail=True, methods=['post'], url_path=r'brief-sections/(?P<section_id>[^/.]+)/link-inquiry')
-    def brief_section_link_inquiry(self, request, pk=None, section_id=None):
-        """
-        Link a brief section to an inquiry.
-
-        POST /api/cases/{id}/brief-sections/{section_id}/link-inquiry/
-        Body: {inquiry_id: UUID}
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        try:
-            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
-        except BriefSection.DoesNotExist:
-            return Response(
-                {'error': 'Brief section not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        inquiry_id = request.data.get('inquiry_id')
-        if not inquiry_id:
-            return Response(
-                {'error': 'inquiry_id is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        from apps.inquiries.models import Inquiry
-        try:
-            inquiry = Inquiry.objects.get(id=inquiry_id, case=case)
-        except Inquiry.DoesNotExist:
-            return Response(
-                {'error': 'Inquiry not found in this case'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        section.inquiry = inquiry
-        section.is_linked = True
-        section.section_type = 'inquiry_brief'
-        section.save(update_fields=['inquiry', 'is_linked', 'section_type', 'updated_at'])
-
-        return Response(BriefSectionSerializer(section).data)
-
-    @action(detail=True, methods=['post'], url_path=r'brief-sections/(?P<section_id>[^/.]+)/unlink-inquiry')
-    def brief_section_unlink_inquiry(self, request, pk=None, section_id=None):
-        """
-        Unlink a brief section from its inquiry.
-
-        POST /api/cases/{id}/brief-sections/{section_id}/unlink-inquiry/
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        try:
-            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
-        except BriefSection.DoesNotExist:
-            return Response(
-                {'error': 'Brief section not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        with transaction.atomic():
-            section.inquiry = None
-            section.is_linked = False
-            section.grounding_status = 'empty'
-            section.grounding_data = {}
-            section.save(update_fields=[
-                'inquiry', 'is_linked', 'grounding_status',
-                'grounding_data', 'updated_at',
-            ])
-
-            # Clear annotations that came from the inquiry link
-            section.annotations.filter(source_inquiry__isnull=False).delete()
-
-        return Response(BriefSectionSerializer(section).data)
-
-    @action(
-        detail=True, methods=['post'],
-        url_path=r'brief-sections/(?P<section_id>[^/.]+)/dismiss-annotation/(?P<annotation_id>[^/.]+)'
-    )
-    def brief_section_dismiss_annotation(self, request, pk=None, section_id=None, annotation_id=None):
-        """
-        Dismiss an annotation on a brief section.
-
-        POST /api/cases/{id}/brief-sections/{section_id}/dismiss-annotation/{annotation_id}/
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        try:
-            section = BriefSection.objects.get(id=section_id, brief=case.main_brief)
-            annotation = section.annotations.get(id=annotation_id)
-        except (BriefSection.DoesNotExist, BriefAnnotation.DoesNotExist):
-            return Response(
-                {'error': 'Section or annotation not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        annotation.dismissed_at = timezone.now()
-        annotation.save(update_fields=['dismissed_at', 'updated_at'])
-
-        return Response({'status': 'dismissed'})
-
-    @action(detail=True, methods=['post'], url_path='evolve-brief')
-    def evolve_brief(self, request, pk=None):
-        """
-        Trigger brief grounding recomputation.
-
-        POST /api/cases/{id}/evolve-brief/
-        Recomputes grounding status and annotations for all brief sections.
-        Uses a cache-based lock to prevent concurrent evolve operations.
-        """
-        from django.core.cache import cache as django_cache
-
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Prevent concurrent evolve requests for the same case
-        lock_key = f"evolve_brief_lock:{case.id}"
-        if not django_cache.add(lock_key, True, timeout=120):
-            return Response(
-                {'status': 'already_evolving', 'message': 'Brief evolution already in progress'},
-                status=status.HTTP_409_CONFLICT
-            )
-
-        try:
-            from apps.cases.brief_grounding import BriefGroundingEngine
-            delta = BriefGroundingEngine.evolve_brief(case.id)
-
-            # Build detailed diff for the frontend
-            section_changes = []
-            for s in delta.get('updated_sections', []):
-                section_changes.append({
-                    'id': s['id'],
-                    'heading': s['heading'],
-                    'old_status': s.get('old_status', ''),
-                    'new_status': s.get('new_status', ''),
-                })
-
-            new_anns = []
-            for a in delta.get('new_annotations', []):
-                new_anns.append({
-                    'id': a['id'],
-                    'type': a['type'],
-                    'section_heading': a.get('section_heading', ''),
-                })
-
-            resolved_anns = []
-            for a in delta.get('resolved_annotations', []):
-                resolved_anns.append({
-                    'id': a['id'],
-                    'type': a['type'],
-                    'section_heading': a.get('section_heading', ''),
-                })
-
-            return Response({
-                'status': 'evolved',
-                'updated_sections': len(section_changes),
-                'new_annotations': len(new_anns),
-                'resolved_annotations': len(resolved_anns),
-                'readiness_created': delta.get('readiness_created', 0),
-                'readiness_auto_completed': delta.get('readiness_auto_completed', 0),
-                'diff': {
-                    'section_changes': section_changes,
-                    'new_annotations': new_anns,
-                    'resolved_annotations': resolved_anns,
-                },
-            })
-        except Exception as e:
-            logger.error(f"Failed to evolve brief for case {case.id}: {e}")
-            return Response(
-                {'error': 'Failed to evolve brief', 'detail': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        finally:
-            django_cache.delete(lock_key)
-
-    @action(detail=True, methods=['get'], url_path='brief-overview')
-    def brief_overview(self, request, pk=None):
-        """
-        Get lightweight brief overview with grounding status.
-
-        GET /api/cases/{id}/brief-overview/
-        Returns sections with status + annotation counts only.
-        """
-        case = self.get_object()
-        if not case.main_brief:
-            return Response(
-                {'error': 'Case has no main brief document'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        serializer = BriefOverviewSerializer(case.main_brief)
-        return Response(serializer.data)
-
     # ── Case Scaffolding ─────────────────────────────────────────
 
     @action(detail=False, methods=['post'], url_path='scaffold')
@@ -1322,20 +795,14 @@ _What actions follow from this decision?_
                     logger.warning(f"Could not load skills for chat scaffold: {e}")
 
                 # Run async scaffold
-                import asyncio
-                loop = asyncio.new_event_loop()
-                try:
-                    result = loop.run_until_complete(
-                        CaseScaffoldService.scaffold_from_chat(
-                            transcript=transcript,
-                            user=request.user,
-                            project_id=project_id,
-                            thread_id=thread_id,
-                            skill_context=scaffold_skill_context,
-                        )
-                    )
-                finally:
-                    loop.close()
+                from asgiref.sync import async_to_sync
+                result = async_to_sync(CaseScaffoldService.scaffold_from_chat)(
+                    transcript=transcript,
+                    user=request.user,
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    skill_context=scaffold_skill_context,
+                )
 
             else:
                 # Minimal scaffold
@@ -1385,11 +852,137 @@ _What actions follow from this decision?_
             }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            logger.error(f"Scaffold failed: {e}")
+            logger.exception("Scaffold failed for project %s", request.data.get('project_id'))
             return Response(
-                {'error': 'Scaffolding failed', 'detail': str(e)},
+                {'error': 'Scaffolding failed. Please try again.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    # ═══ Case Extraction Endpoints ══════════════════════════════════
+
+    @action(detail=True, methods=['get'], url_path='extraction-status')
+    def extraction_status(self, request, pk=None):
+        """
+        GET /api/cases/{case_id}/extraction-status/
+
+        Returns current extraction pipeline status from case.metadata.
+        Polled by frontend during extraction.
+
+        Includes stale detection: if extraction has been in a running phase
+        for >15 minutes, auto-marks it as failed (covers worker OOM/SIGKILL).
+        """
+        from datetime import datetime, timedelta
+        from django.utils import timezone as tz
+
+        case = self.get_object()
+        metadata = case.metadata or {}
+
+        extraction_status_val = metadata.get('extraction_status', 'none')
+        running_phases = {'pending', 'retrieving', 'extracting', 'integrating', 'analyzing'}
+
+        # Stale detection: if stuck in a running phase for >15 minutes,
+        # the worker likely crashed. Auto-recover by marking as failed.
+        if extraction_status_val in running_phases:
+            started_at = metadata.get('extraction_started_at')
+            if started_at:
+                try:
+                    started = datetime.fromisoformat(started_at)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=tz.utc)
+                    stale_threshold = tz.now() - timedelta(minutes=15)
+                    if started < stale_threshold:
+                        logger.warning(
+                            "Stale extraction detected for case %s "
+                            "(started %s, status %s). Marking as failed.",
+                            case.id, started_at, extraction_status_val,
+                        )
+                        metadata['extraction_status'] = 'failed'
+                        metadata['extraction_error'] = (
+                            'Extraction timed out (no progress for 15+ minutes). '
+                            'The worker may have crashed. You can try re-extracting.'
+                        )
+                        case.metadata = metadata
+                        case.save(update_fields=['metadata', 'updated_at'])
+                        extraction_status_val = 'failed'
+                except (ValueError, TypeError):
+                    pass  # Malformed timestamp — skip stale check
+
+        return Response({
+            'extraction_status': extraction_status_val,
+            'extraction_started_at': metadata.get('extraction_started_at'),
+            'extraction_completed_at': metadata.get('extraction_completed_at'),
+            'extraction_error': metadata.get('extraction_error'),
+            'extraction_result': metadata.get('extraction_result'),
+            'chunks_retrieved': metadata.get('chunks_retrieved', 0),
+        })
+
+    @action(detail=True, methods=['get'], url_path='analysis')
+    def case_analysis(self, request, pk=None):
+        """
+        GET /api/cases/{case_id}/analysis/
+
+        Returns CaseAnalysis results from case.metadata['analysis'].
+        Available after extraction pipeline completes.
+        """
+        case = self.get_object()
+        metadata = case.metadata or {}
+        analysis = metadata.get('analysis')
+        if not analysis:
+            return Response(
+                {'error': 'No analysis available. Extraction may still be in progress.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(analysis)
+
+    @action(detail=True, methods=['post'], url_path='re-extract')
+    def re_extract(self, request, pk=None):
+        """
+        POST /api/cases/{case_id}/re-extract/
+
+        Re-runs the extraction pipeline with current chunks + any new documents.
+        Useful when user adds documents to the project.
+        """
+        case = self.get_object()
+        return self._schedule_extraction(case, incremental=False)
+
+    @action(detail=True, methods=['post'], url_path='extract-additional')
+    def extract_additional(self, request, pk=None):
+        """
+        POST /api/cases/{case_id}/extract-additional/
+
+        Incremental extraction — expand chunk search and extract additional nodes.
+        For when the user wants broader coverage.
+        """
+        case = self.get_object()
+        return self._schedule_extraction(case, incremental=True)
+
+    def _schedule_extraction(self, case, incremental: bool = False):
+        """Shared helper: validate, clear stale data, and dispatch extraction."""
+        if not case.decision_question:
+            return Response(
+                {'error': 'Case must have a decision question to run extraction.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        current_status = (case.metadata or {}).get('extraction_status', 'none')
+        if current_status in ('retrieving', 'extracting', 'integrating', 'analyzing'):
+            return Response(
+                {'error': 'Extraction is already in progress.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from apps.cases.tasks import run_case_extraction_pipeline
+        case.metadata = case.metadata or {}
+        case.metadata['extraction_status'] = 'pending'
+        # Clear stale data from previous runs
+        case.metadata.pop('extraction_error', None)
+        case.metadata.pop('extraction_result', None)
+        case.metadata.pop('extraction_completed_at', None)
+        case.metadata.pop('analysis', None)
+        case.save(update_fields=['metadata'])
+        run_case_extraction_pipeline.delay(str(case.id), incremental=incremental)
+
+        return Response({'status': 'scheduled'}, status=status.HTTP_202_ACCEPTED)
 
     # ═══ Export Endpoints ═════════════════════════════════════════════
 
@@ -1434,187 +1027,17 @@ _What actions follow from this decision?_
             )
             return Response(export_data)
         except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            logger.error(f"Export failed for case {case.id}: {e}", exc_info=True)
+            logger.exception("Export validation error for case %s", case.id)
             return Response(
-                {'error': 'Export failed', 'detail': str(e)},
+                {'error': 'Invalid export parameters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logger.exception("Export failed for case %s", case.id)
+            return Response(
+                {'error': 'Export failed. Please try again.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-    # ═══ Investigation Plan Endpoints ════════════════════════════════
-
-    @action(detail=True, methods=['get'])
-    def plan(self, request, pk=None):
-        """
-        Get current investigation plan with latest version content.
-
-        GET /api/cases/{id}/plan/
-        """
-        case = self.get_object()
-        try:
-            plan_obj = case.plan
-        except InvestigationPlan.DoesNotExist:
-            return Response(
-                {'detail': 'No plan exists for this case'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(InvestigationPlanSerializer(plan_obj).data)
-
-    @action(detail=True, methods=['get'], url_path='plan/versions')
-    def plan_versions(self, request, pk=None):
-        """
-        List all plan versions for history/undo UI.
-
-        GET /api/cases/{id}/plan/versions/
-        """
-        case = self.get_object()
-        versions = PlanVersion.objects.filter(
-            plan__case=case
-        ).order_by('-version_number')
-        return Response(PlanVersionSerializer(versions, many=True).data)
-
-    @action(
-        detail=True, methods=['get'],
-        url_path=r'plan/versions/(?P<version_num>[0-9]+)'
-    )
-    def plan_version_detail(self, request, pk=None, version_num=None):
-        """
-        Get a specific plan version.
-
-        GET /api/cases/{id}/plan/versions/{num}/
-        """
-        case = self.get_object()
-        try:
-            version = PlanVersion.objects.get(
-                plan__case=case,
-                version_number=int(version_num)
-            )
-        except PlanVersion.DoesNotExist:
-            return Response(
-                {'detail': 'Version not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(PlanVersionSerializer(version).data)
-
-    @action(detail=True, methods=['post'], url_path='plan/stage')
-    def plan_stage(self, request, pk=None):
-        """
-        Update investigation stage.
-
-        POST /api/cases/{id}/plan/stage/
-        Body: {"stage": "investigating", "rationale": "..."}
-        """
-        case = self.get_object()
-        serializer = PlanStageUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        PlanService.update_stage(
-            case_id=case.id,
-            new_stage=serializer.validated_data['stage'],
-            rationale=serializer.validated_data.get('rationale', ''),
-            actor_id=request.user.id,
-        )
-        # Return the updated plan
-        plan_obj = case.plan
-        return Response(InvestigationPlanSerializer(plan_obj).data)
-
-    @action(detail=True, methods=['post'], url_path='plan/restore')
-    def plan_restore(self, request, pk=None):
-        """
-        Restore plan to a previous version.
-
-        POST /api/cases/{id}/plan/restore/
-        Body: {"version_number": 1}
-        """
-        case = self.get_object()
-        serializer = PlanRestoreSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        version = PlanService.restore_version(
-            case_id=case.id,
-            target_version_number=serializer.validated_data['version_number'],
-            actor_id=request.user.id,
-        )
-        return Response(PlanVersionSerializer(version).data)
-
-    @action(detail=True, methods=['post'], url_path='plan/accept-diff')
-    def plan_accept_diff(self, request, pk=None):
-        """
-        Accept a proposed plan diff (creates new version).
-
-        POST /api/cases/{id}/plan/accept-diff/
-        Body: {"content": {...}, "diff_summary": "...", "diff_data": {...}}
-        """
-        from apps.events.models import ActorType
-        case = self.get_object()
-        serializer = PlanDiffProposalSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        version = PlanService.create_new_version(
-            case_id=case.id,
-            content=serializer.validated_data['content'],
-            created_by='ai_proposal',
-            diff_summary=serializer.validated_data['diff_summary'],
-            diff_data=serializer.validated_data.get('diff_data'),
-            actor_type=ActorType.USER,
-            actor_id=request.user.id,
-        )
-        return Response(PlanVersionSerializer(version).data)
-
-    @action(
-        detail=True, methods=['patch'],
-        url_path=r'plan/assumptions/(?P<assumption_id>[^/.]+)'
-    )
-    def plan_assumption_update(self, request, pk=None, assumption_id=None):
-        """
-        Update an assumption's status.
-
-        PATCH /api/cases/{id}/plan/assumptions/{assumption_id}/
-        Body: {"status": "confirmed", "evidence_summary": "..."}
-        """
-        case = self.get_object()
-        serializer = AssumptionStatusSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            version = PlanService.update_assumption_status(
-                case_id=case.id,
-                assumption_id=assumption_id,
-                new_status=serializer.validated_data['status'],
-                evidence_summary=serializer.validated_data.get('evidence_summary', ''),
-                actor_id=request.user.id,
-            )
-        except ValueError as e:
-            return Response(
-                {'detail': str(e)},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(PlanVersionSerializer(version).data)
-
-    @action(
-        detail=True, methods=['patch'],
-        url_path=r'plan/criteria/(?P<criterion_id>[^/.]+)'
-    )
-    def plan_criterion_update(self, request, pk=None, criterion_id=None):
-        """
-        Update a decision criterion's met status.
-
-        PATCH /api/cases/{id}/plan/criteria/{criterion_id}/
-        Body: {"is_met": true}
-        """
-        case = self.get_object()
-        serializer = CriterionStatusSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            version = PlanService.update_criterion_status(
-                case_id=case.id,
-                criterion_id=criterion_id,
-                is_met=serializer.validated_data['is_met'],
-                actor_id=request.user.id,
-            )
-        except ValueError as e:
-            return Response(
-                {'detail': str(e)},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        return Response(PlanVersionSerializer(version).data)
 
     # ═══ Case Home (Aggregated) ══════════════════════════════════════
 
@@ -1679,142 +1102,241 @@ _What actions follow from this decision?_
             },
         })
 
-    # ═══ Plan Generation ══════════════════════════════════════
+    # ===== Decision Capture =====
 
-    @action(detail=True, methods=['post'], url_path='generate-plan')
-    def generate_plan(self, request, pk=None):
+    @action(detail=True, methods=['post'], url_path='record-decision')
+    def record_decision(self, request, pk=None):
+        """Record a formal decision / resolution for this case.
+
+        Supports two flows:
+        - **Legacy**: caller sends decision_text + key_reasons + confidence_level
+          → routes to DecisionService.record_decision()
+        - **New (auto-resolution)**: caller sends resolution_type (and optional
+          overrides) → routes to ResolutionService.create_resolution()
         """
-        Generate an investigation plan for a case that doesn't have one.
+        from .serializers import RecordDecisionSerializer, DecisionRecordSerializer
 
-        POST /api/cases/{id}/generate-plan/
+        serializer = RecordDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
 
-        Uses existing case data (brief sections, inquiries) to bootstrap a plan.
-        Returns 409 if the case already has a plan.
+        # Legacy detection: if caller explicitly provides all three required
+        # fields from the old modal, use the legacy DecisionService path.
+        is_legacy = (
+            data.get('decision_text')
+            and data.get('key_reasons')
+            and data.get('confidence_level') is not None
+        )
+
+        try:
+            if is_legacy:
+                logger.info(
+                    "legacy_decision_path_used",
+                    extra={'case_id': str(pk), 'user_id': request.user.id},
+                )
+                from .decision_service import DecisionService
+                record = DecisionService.record_decision(
+                    user=request.user,
+                    case_id=pk,
+                    **data,
+                )
+            else:
+                from .resolution_service import ResolutionService
+                resolution_type = data.pop('resolution_type', 'resolved')
+                # Everything else is an optional override
+                overrides = {k: v for k, v in data.items() if v} or None
+                record = ResolutionService.create_resolution(
+                    user=request.user,
+                    case_id=pk,
+                    resolution_type=resolution_type,
+                    overrides=overrides,
+                )
+        except ValueError as e:
+            logger.warning("Failed to record decision for case %s: %s", pk, e)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(DecisionRecordSerializer(record).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='resolution-draft')
+    def resolution_draft(self, request, pk=None):
+        """Preview auto-generated resolution without creating anything.
+
+        GET /api/cases/{id}/resolution-draft/?type=decision
+        """
+        from .resolution_service import ResolutionService
+
+        self.get_object()  # ownership check
+        resolution_type = request.query_params.get('type', 'resolved')
+
+        try:
+            draft = ResolutionService.generate_resolution_draft(
+                case_id=pk,
+                resolution_type=resolution_type,
+            )
+        except Exception:
+            logger.exception("Resolution draft failed for case %s", pk)
+            return Response(
+                {'error': 'Could not generate resolution draft.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # confidence_level is internal only — don't expose to frontend
+        draft.pop('confidence_level', None)
+        return Response(draft)
+
+    @action(detail=True, methods=['patch'], url_path='update-resolution')
+    def update_resolution(self, request, pk=None):
+        """Update editable fields on an existing resolution.
+
+        PATCH /api/cases/{id}/update-resolution/
+        Body: { decision_text?, key_reasons?, caveats?, outcome_check_date? }
+        """
+        from .serializers import UpdateResolutionSerializer, DecisionRecordSerializer
+        from .models import DecisionRecord
+
+        case = self.get_object()
+        try:
+            record = case.decision
+        except DecisionRecord.DoesNotExist:
+            return Response(
+                {'error': 'No resolution recorded for this case'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = UpdateResolutionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        update_fields = []
+        for field, value in serializer.validated_data.items():
+            setattr(record, field, value)
+            update_fields.append(field)
+
+        if update_fields:
+            update_fields.append('updated_at')
+            record.save(update_fields=update_fields)
+
+        return Response(DecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=['get'], url_path='decision')
+    def get_decision(self, request, pk=None):
+        """Get the decision record for this case."""
+        from .serializers import DecisionRecordSerializer
+        from .models import DecisionRecord
+
+        case = self.get_object()
+        try:
+            record = case.decision
+        except DecisionRecord.DoesNotExist:
+            return Response({'detail': 'No decision recorded'}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(DecisionRecordSerializer(record).data)
+
+    @action(detail=True, methods=['post'], url_path='outcome-note')
+    def add_outcome_note(self, request, pk=None):
+        """Add an outcome observation note."""
+        from .serializers import OutcomeNoteSerializer, DecisionRecordSerializer
+        from .decision_service import DecisionService
+        from .models import DecisionRecord
+
+        serializer = OutcomeNoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            record = DecisionService.add_outcome_note(
+                user=request.user,
+                case_id=pk,
+                **serializer.validated_data,
+            )
+        except DecisionRecord.DoesNotExist:
+            return Response(
+                {'error': 'No decision recorded for this case'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(DecisionRecordSerializer(record).data)
+
+    # ═══ Position Update Proposals ══════════════════════════════════
+
+    @action(detail=True, methods=['post'], url_path='accept-position-update')
+    def accept_position_update(self, request, pk=None):
+        """
+        Accept a position update proposal from fact promotion.
+
+        POST /api/cases/{id}/accept-position-update/
+        Body: { "new_position": "...", "reason": "...", "message_id": "..." }
+
+        Updates Case.position and InvestigationPlan.position_statement,
+        then clears the proposal from the source message metadata.
         """
         case = self.get_object()
+        new_position = request.data.get('new_position', '').strip()
+        message_id = request.data.get('message_id')
 
-        # Check if plan already exists
-        try:
-            existing = case.plan  # noqa: F841
+        if not new_position:
             return Response(
-                {'error': 'Case already has a plan'},
-                status=status.HTTP_409_CONFLICT
+                {'error': 'new_position is required'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Update case position
+        case.position = new_position
+        case.save(update_fields=['position', 'updated_at'])
+
+        # Also update plan position_statement if plan exists
+        try:
+            plan = case.plan
+            plan.position_statement = new_position
+            plan.save(update_fields=['position_statement', 'updated_at'])
         except InvestigationPlan.DoesNotExist:
             pass
 
-        # Gather case data to build plan from
-        from apps.inquiries.models import Inquiry
-        inquiries = list(
-            Inquiry.objects.filter(case=case).order_by('sequence_index')
-        )
+        # Clear the proposal from the message metadata
+        if message_id:
+            from apps.chat.models import Message
+            try:
+                msg = Message.objects.get(id=message_id)
+                msg_meta = msg.metadata or {}
+                msg_meta.pop('position_update_proposal', None)
+                msg.metadata = msg_meta
+                msg.save(update_fields=['metadata'])
+            except Message.DoesNotExist:
+                pass
 
-        # Build analysis dict from existing case data
-        analysis = {
-            'assumptions': [],
-            'decision_criteria': [],
-            'position_draft': case.position or '',
-        }
+        return Response(CaseSerializer(case).data)
 
-        # Extract assumptions from brief sections if available
-        if case.main_brief:
-            from apps.cases.brief_models import BriefSection
-            for section in BriefSection.objects.filter(
-                brief=case.main_brief
-            ):
-                if section.section_type == 'assumptions':
-                    for line in (section.content or '').split('\n'):
-                        line = line.strip().lstrip('- •')
-                        if line:
-                            analysis['assumptions'].append(line)
-
-        plan, version = PlanService.create_initial_plan(
-            case=case,
-            analysis=analysis,
-            inquiries=inquiries,
-        )
-
-        return Response(
-            InvestigationPlanSerializer(plan).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-    @action(detail=True, methods=['get'], url_path='section-judgment-summary')
-    def section_judgment_summary(self, request, pk=None):
+    @action(detail=True, methods=['post'], url_path='dismiss-position-update')
+    def dismiss_position_update(self, request, pk=None):
         """
-        Get synthesis summary comparing user judgment vs structural grounding.
+        Dismiss a position update proposal without applying it.
 
-        GET /api/cases/{id}/section-judgment-summary/
+        POST /api/cases/{id}/dismiss-position-update/
+        Body: { "message_id": "..." }
 
-        Returns per-section comparison and highlighted mismatches.
+        Clears the proposal from the source message metadata.
         """
-        from apps.cases.brief_models import BriefSection, GroundingStatus  # noqa: F811
+        self.get_object()  # ownership check
+        message_id = request.data.get('message_id')
 
-        case = self.get_object()
-        if not case.main_brief:
-            return Response({'sections': [], 'mismatches': []})
+        if not message_id:
+            return Response(
+                {'error': 'message_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        sections = BriefSection.objects.filter(
-            brief=case.main_brief,
-        ).exclude(section_type='decision_frame').order_by('order')
+        from apps.chat.models import Message
+        try:
+            msg = Message.objects.get(id=message_id)
+            msg_meta = msg.metadata or {}
+            msg_meta.pop('position_update_proposal', None)
+            msg.metadata = msg_meta
+            msg.save(update_fields=['metadata'])
+        except Message.DoesNotExist:
+            pass
 
-        # Map grounding status to a numeric strength for comparison
-        grounding_strength = {
-            'empty': 0,
-            'weak': 1,
-            'moderate': 2,
-            'strong': 3,
-            'conflicted': 1,  # Conflicted is structurally weak
-        }
-
-        results = []
-        mismatches = []
-
-        for section in sections:
-            structural_strength = grounding_strength.get(section.grounding_status, 0)
-            user_rating = section.user_confidence  # 1-4 or None
-
-            section_data = {
-                'section_id': section.section_id,
-                'heading': section.heading,
-                'section_type': section.section_type,
-                'grounding_status': section.grounding_status,
-                'grounding_strength': structural_strength,
-                'user_confidence': user_rating,
-                'evidence_count': section.grounding_data.get('evidence_count', 0),
-                'tensions_count': section.grounding_data.get('tensions_count', 0),
-            }
-            results.append(section_data)
-
-            # Detect mismatches
-            if user_rating is not None:
-                # User says high confidence (3-4) but structure is weak (0-1)
-                if user_rating >= 3 and structural_strength <= 1:
-                    mismatches.append({
-                        'section_id': section.section_id,
-                        'heading': section.heading,
-                        'type': 'overconfident',
-                        'description': f'You rated high confidence but evidence is {section.grounding_status}',
-                        'user_confidence': user_rating,
-                        'grounding_status': section.grounding_status,
-                    })
-                # User says low confidence (1-2) but structure is strong (3)
-                elif user_rating <= 2 and structural_strength >= 3:
-                    mismatches.append({
-                        'section_id': section.section_id,
-                        'heading': section.heading,
-                        'type': 'underconfident',
-                        'description': 'You rated low confidence but evidence is strong',
-                        'user_confidence': user_rating,
-                        'grounding_status': section.grounding_status,
-                    })
-
-        return Response({
-            'sections': results,
-            'mismatches': mismatches,
-            'rated_count': sum(1 for s in results if s['user_confidence'] is not None),
-            'total_count': len(results),
-        })
+        return Response({'status': 'dismissed'})
 
 
 class WorkingDocumentViewSet(viewsets.ModelViewSet):
@@ -1910,8 +1432,9 @@ class WorkingDocumentViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
                 
             except PermissionError as e:
+                logger.exception("Permission denied updating document %s", document.id)
                 return Response(
-                    {'error': str(e)},
+                    {'error': 'You do not have permission to edit this document.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
         

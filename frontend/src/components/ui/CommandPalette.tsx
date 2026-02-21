@@ -7,6 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Fuse from 'fuse.js';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export interface Command {
   id: string;
@@ -127,14 +128,15 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
           ) : (
             <div className="py-2">
               {filteredCommands.map((cmd, idx) => (
-                <button
+                <Button
                   key={cmd.id}
+                  variant="ghost"
                   data-command-idx={idx}
                   onClick={() => {
                     cmd.action();
                     onClose();
                   }}
-                  className={`w-full px-4 py-3 flex items-center justify-between transition-colors ${
+                  className={`w-full px-4 py-3 h-auto flex items-center justify-between rounded-none transition-colors ${
                     idx === selectedIndex
                       ? 'bg-accent-50 text-accent-900'
                       : 'text-neutral-900 hover:bg-neutral-50'
@@ -152,7 +154,7 @@ export function CommandPalette({ commands, isOpen, onClose }: CommandPaletteProp
                       {cmd.shortcut}
                     </kbd>
                   )}
-                </button>
+                </Button>
               ))}
             </div>
           )}

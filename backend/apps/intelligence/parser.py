@@ -17,6 +17,9 @@ class Section(Enum):
     REFLECTION = "reflection"
     ACTION_HINTS = "action_hints"
     GRAPH_EDITS = "graph_edits"
+    PLAN_EDITS = "plan_edits"
+    ORIENTATION_EDITS = "orientation_edits"
+    TOOL_ACTIONS = "tool_actions"
 
 
 @dataclass
@@ -47,6 +50,9 @@ class SectionedStreamParser:
         '<reflection>', '</reflection>',
         '<action_hints>', '</action_hints>',
         '<graph_edits>', '</graph_edits>',
+        '<plan_edits>', '</plan_edits>',
+        '<orientation_edits>', '</orientation_edits>',
+        '<tool_actions>', '</tool_actions>',
     ]
 
     # Maximum marker length for buffer safety
@@ -57,6 +63,9 @@ class SectionedStreamParser:
         self.buffer = ""
         self.action_hints_buffer = ""
         self.graph_edits_buffer = ""
+        self.plan_edits_buffer = ""
+        self.orientation_edits_buffer = ""
+        self.tool_actions_buffer = ""
 
     def parse(self, chunk: str) -> List[ParsedChunk]:
         """
@@ -117,6 +126,12 @@ class SectionedStreamParser:
                     self.action_hints_buffer = ""
                 elif self.current_section == Section.GRAPH_EDITS:
                     self.graph_edits_buffer = ""
+                elif self.current_section == Section.PLAN_EDITS:
+                    self.plan_edits_buffer = ""
+                elif self.current_section == Section.ORIENTATION_EDITS:
+                    self.orientation_edits_buffer = ""
+                elif self.current_section == Section.TOOL_ACTIONS:
+                    self.tool_actions_buffer = ""
 
             # Remove processed portion from buffer
             self.buffer = self.buffer[end:]
@@ -191,6 +206,12 @@ class SectionedStreamParser:
             return Section.ACTION_HINTS
         elif name == 'graph_edits':
             return Section.GRAPH_EDITS
+        elif name == 'plan_edits':
+            return Section.PLAN_EDITS
+        elif name == 'orientation_edits':
+            return Section.ORIENTATION_EDITS
+        elif name == 'tool_actions':
+            return Section.TOOL_ACTIONS
         return Section.NONE
 
     def _create_chunk(self, content: str) -> ParsedChunk:
@@ -200,6 +221,12 @@ class SectionedStreamParser:
             self.action_hints_buffer += content
         elif self.current_section == Section.GRAPH_EDITS:
             self.graph_edits_buffer += content
+        elif self.current_section == Section.PLAN_EDITS:
+            self.plan_edits_buffer += content
+        elif self.current_section == Section.ORIENTATION_EDITS:
+            self.orientation_edits_buffer += content
+        elif self.current_section == Section.TOOL_ACTIONS:
+            self.tool_actions_buffer += content
 
         return ParsedChunk(
             section=self.current_section,
@@ -214,6 +241,18 @@ class SectionedStreamParser:
     def get_graph_edits_buffer(self) -> str:
         """Get accumulated graph edits content for JSON parsing"""
         return self.graph_edits_buffer
+
+    def get_plan_edits_buffer(self) -> str:
+        """Get accumulated plan edits content for JSON parsing"""
+        return self.plan_edits_buffer
+
+    def get_orientation_edits_buffer(self) -> str:
+        """Get accumulated orientation edits content for JSON parsing"""
+        return self.orientation_edits_buffer
+
+    def get_tool_actions_buffer(self) -> str:
+        """Get accumulated tool actions content for JSON parsing"""
+        return self.tool_actions_buffer
 
     def flush(self) -> List[ParsedChunk]:
         """

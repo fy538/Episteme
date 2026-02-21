@@ -14,6 +14,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { Spinner } from '@/components/ui/spinner';
+import { Button } from '@/components/ui/button';
 import {
   unifiedSearch,
   getResultTypeIcon,
@@ -31,7 +33,7 @@ interface SpotlightSearchProps {
   contextCaseName?: string;
 }
 
-const RESULT_TYPES: SearchResultType[] = ['inquiry', 'case', 'document'];
+const RESULT_TYPES: SearchResultType[] = ['inquiry', 'case', 'document', 'episode'];
 
 // Quick actions for empty state
 interface QuickAction {
@@ -262,7 +264,7 @@ export function SpotlightSearch({
               className="flex-1 outline-none text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 bg-transparent"
             />
             {isLoading && (
-              <div className="w-4 h-4 border-2 border-neutral-300 border-t-accent-500 rounded-full animate-spin" />
+              <Spinner className="text-accent-500" />
             )}
             <kbd className="hidden sm:inline-block px-2 py-1 text-xs font-medium text-neutral-500 bg-neutral-100 dark:bg-neutral-800 rounded">
               ESC
@@ -407,12 +409,14 @@ export function SpotlightSearch({
               <p className="text-error-600 dark:text-error-400">
                 {error}
               </p>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => performSearch(query)}
                 className="mt-2 text-sm text-accent-600 hover:text-accent-700 dark:text-accent-400"
               >
                 Try again
-              </button>
+              </Button>
             </div>
           ) : query.trim() && !isLoading ? (
             // No results
@@ -450,17 +454,18 @@ interface ResultRowProps {
 
 function ResultRow({ index, isSelected, onClick, children }: ResultRowProps) {
   return (
-    <button
+    <Button
+      variant="ghost"
       data-spotlight-idx={index}
       onClick={onClick}
-      className={`w-full px-4 py-2.5 flex items-center justify-between transition-colors ${
+      className={`w-full px-4 py-2.5 h-auto flex items-center justify-between rounded-none transition-colors ${
         isSelected
           ? 'bg-accent-50 dark:bg-accent-900/30'
           : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
       }`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -477,10 +482,11 @@ function SearchResultRow({ result, index, isSelected, onClick, showCase = true }
   const typeLabel = getResultTypeLabel(result.type);
 
   return (
-    <button
+    <Button
+      variant="ghost"
       data-spotlight-idx={index}
       onClick={onClick}
-      className={`w-full px-4 py-2.5 flex items-start gap-3 text-left transition-colors ${
+      className={`w-full px-4 py-2.5 h-auto flex items-start gap-3 text-left rounded-none transition-colors ${
         isSelected
           ? 'bg-accent-50 dark:bg-accent-900/30'
           : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
@@ -515,7 +521,7 @@ function SearchResultRow({ result, index, isSelected, onClick, showCase = true }
           Best match
         </span>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -545,16 +551,18 @@ interface FilterPillProps {
 
 function FilterPill({ active, onClick, children }: FilterPillProps) {
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onClick}
-      className={`px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
+      className={`px-2.5 py-1 h-auto text-xs rounded-full whitespace-nowrap transition-colors ${
         active
           ? 'bg-accent-100 dark:bg-accent-900/50 text-accent-700 dark:text-accent-300 font-medium'
           : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
       }`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

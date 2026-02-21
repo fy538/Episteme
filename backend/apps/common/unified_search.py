@@ -308,6 +308,58 @@ def _search_nodes(
     return results
 
 
+# ─── Episode search ─────────────────────────────────────────────────────────
+
+def _search_episodes(
+    query_embedding: List[float],
+    user,
+    top_k: int,
+    threshold: float,
+) -> List[SearchResult]:
+    """Search sealed conversation episodes by embedding similarity using pgvector CosineDistance."""
+    from apps.chat.models import ConversationEpisode
+
+    results: List[SearchResult] = []
+
+    queryset = ConversationEpisode.objects.filter(
+        thread__user=user,
+        sealed=True,
+    ).select_related('thread')
+
+    similar_episodes = similarity_search(
+        queryset=queryset,
+        embedding_field='embedding',
+        query_vector=query_embedding,
+        threshold=threshold,
+        top_k=top_k,
+    )
+
+    for episode in similar_episodes:
+        score = 1.0 - episode.distance
+        thread = episode.thread
+        label = episode.topic_label or f"Episode {episode.episode_index}"
+        thread_title = thread.title[:60] if thread else 'Unknown thread'
+
+        results.append(SearchResult(
+            id=str(episode.id),
+            type='episode',
+            title=label,
+            subtitle=f"From \"{thread_title}\" \u00b7 {episode.message_count} messages",
+            score=score,
+            case_id=str(thread.primary_case_id) if thread and thread.primary_case_id else None,
+            metadata={
+                'thread_id': str(thread.id) if thread else None,
+                'thread_title': thread_title,
+                'shift_type': episode.shift_type,
+                'message_count': episode.message_count,
+                'content_summary': (episode.content_summary or '')[:100],
+                'project_id': str(thread.project_id) if thread and thread.project_id else None,
+            },
+        ))
+
+    return results
+
+
 # ─── Unified search entry point ──────────────────────────────────────────────
 
 def unified_search(
@@ -315,7 +367,7 @@ def unified_search(
     user,
     context_case_id: Optional[str] = None,
     context_project_id: Optional[str] = None,
-    types: Optional[List[str]] = None,  # Filter to specific types ['inquiry', 'case', 'document']
+    types: Optional[List[str]] = None,  # Filter to specific types ['inquiry', 'case', 'document', 'node', 'episode']
     top_k: int = 20,
     threshold: float = 0.4,
 ) -> UnifiedSearchResponse:
@@ -327,7 +379,7 @@ def unified_search(
         user: Authenticated user
         context_case_id: Current case ID for grouping (optional)
         context_project_id: Current project ID for grouping (optional)
-        types: Filter to specific types ['inquiry', 'case', 'document', 'node']
+        types: Filter to specific types ['inquiry', 'case', 'document', 'node', 'episode']
         top_k: Max results per type
         threshold: Minimum similarity threshold
 
@@ -349,7 +401,7 @@ def unified_search(
         )
 
     all_results: List[SearchResult] = []
-    search_types = types or ['inquiry', 'case', 'document', 'node']
+    search_types = types or ['inquiry', 'case', 'document', 'node', 'episode']
 
     # Map of search type to function
     search_functions = {
@@ -357,6 +409,7 @@ def unified_search(
         'case': _search_cases,
         'document': _search_documents,
         'node': _search_nodes,
+        'episode': _search_episodes,
     }
 
     # Execute searches in parallel for better latency

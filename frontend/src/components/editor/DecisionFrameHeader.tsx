@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import {
   DecisionFrameEditor,
   DecisionFrameSummary,
@@ -39,9 +40,10 @@ export function DecisionFrameHeader({
       )}
     >
       {/* Collapsed view — always visible */}
-      <button
+      <Button
+        variant="ghost"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-neutral-100/50 dark:hover:bg-neutral-800/30 transition-colors"
+        className="w-full px-4 py-2 h-auto flex items-center justify-between text-left rounded-none hover:bg-neutral-100/50 dark:hover:bg-neutral-800/30"
       >
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {/* Chevron */}
@@ -59,7 +61,7 @@ export function DecisionFrameHeader({
           </svg>
 
           {/* Label */}
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 flex-shrink-0">
+          <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 flex-shrink-0">
             Decision Frame
           </span>
 
@@ -78,11 +80,11 @@ export function DecisionFrameHeader({
 
         {/* Stakes badge */}
         {caseData.stakes && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 flex-shrink-0 ml-2">
+          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 flex-shrink-0 ml-2">
             {caseData.stakes} stakes
           </span>
         )}
-      </button>
+      </Button>
 
       {/* Expanded view — shows full editor */}
       {isExpanded && (

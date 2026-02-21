@@ -25,10 +25,11 @@ class ClusteringService:
     def cluster_project_nodes(
         project_id: uuid.UUID,
         min_cluster_size: int = 2,
-        similarity_threshold: float = 0.6,
-        resolution: float = 1.0,
-        semantic_variance_threshold: float = 0.7,
-        merge_threshold: float = 0.75,
+        similarity_threshold: float | None = None,
+        resolution: float | None = None,
+        semantic_variance_threshold: float | None = None,
+        merge_threshold: float | None = None,
+        graph: Optional[Dict[str, List[Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Cluster project nodes into thematic groups.
@@ -40,6 +41,12 @@ class ClusteringService:
         3. Assign remaining orphans by embedding similarity
         4. Build result dicts with centroid, edge counts, type breakdown
 
+        Parameters fall back to SUMMARY_SETTINGS['node_clustering'] if not
+        explicitly provided. This lets operators tune via env vars without
+        code changes.
+        Callers may pass a pre-fetched `graph` ({'nodes': [...], 'edges': [...]})
+        to avoid duplicate DB reads when nodes/edges are already loaded.
+
         Returns:
             List of cluster dicts: [{
                 'node_ids': [str, ...],
@@ -48,9 +55,18 @@ class ClusteringService:
                 'node_types': {claim: N, evidence: N, ...},
             }]
         """
-        graph = GraphService.get_project_graph(project_id)
-        nodes = graph['nodes']
-        edges = graph['edges']
+        from django.conf import settings as django_settings
+
+        cfg = getattr(django_settings, 'SUMMARY_SETTINGS', {}).get('node_clustering', {})
+        resolution = resolution if resolution is not None else cfg.get('resolution', 1.0)
+        similarity_threshold = similarity_threshold if similarity_threshold is not None else cfg.get('similarity_threshold', 0.6)
+        merge_threshold = merge_threshold if merge_threshold is not None else cfg.get('merge_threshold', 0.75)
+        semantic_variance_threshold = semantic_variance_threshold if semantic_variance_threshold is not None else cfg.get('semantic_variance_threshold', 0.7)
+
+        if graph is None:
+            graph = GraphService.get_project_graph(project_id)
+        nodes = graph.get('nodes', [])
+        edges = graph.get('edges', [])
 
         if not nodes:
             return []

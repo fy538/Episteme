@@ -14,6 +14,10 @@ import { InquiryResolutionPromptCard } from './InquiryResolutionPromptCard';
 import { ResearchResultsCard } from './ResearchResultsCard';
 import { InquiryFocusPromptCard } from './InquiryFocusPromptCard';
 import { PlanDiffProposalCard } from './PlanDiffProposalCard';
+import { OrientationDiffProposalCard } from './OrientationDiffProposalCard';
+import { PositionUpdateProposalCard } from './PositionUpdateProposalCard';
+import { ToolExecutedCard } from './ToolExecutedCard';
+import { ToolConfirmationCard } from './ToolConfirmationCard';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { easingCurves, transitionDurations } from '@/lib/motion-config';
 
@@ -22,7 +26,7 @@ export interface InlineCardActions {
   onCreateCase?: (suggestedTitle?: string) => void;
 
   // Case preview (after analysis)
-  onCreateCaseFromPreview?: (analysis: Record<string, unknown>, title: string) => void;
+  onCreateCaseFromPreview?: (analysis: Record<string, unknown>, title: string, userEdits?: Record<string, unknown>) => void;
   onAdjustCasePreview?: () => void;
 
   // Inquiry resolution
@@ -37,6 +41,16 @@ export interface InlineCardActions {
 
   // Plan diff
   onAcceptPlanDiff?: (proposedContent: Record<string, unknown>, diffSummary: string, diffData: Record<string, unknown>) => Promise<void> | void;
+
+  // Orientation diff
+  onAcceptOrientationDiff?: (orientationId: string, proposedState: Record<string, unknown>, diffSummary: string, diffData: Record<string, unknown>) => Promise<void> | void;
+
+  // Position update
+  onAcceptPositionUpdate?: (caseId: string, newPosition: string, reason: string, messageId?: string) => Promise<void> | void;
+  onDismissPositionUpdate?: (caseId: string, messageId?: string) => Promise<void> | void;
+
+  // Tool actions
+  onConfirmToolAction?: (confirmationId: string, approved: boolean) => Promise<void>;
 
   // Loading states
   isCreatingCase?: boolean;
@@ -123,6 +137,55 @@ export function InlineActionCardRenderer({
         <PlanDiffProposalCard
           card={card}
           onAccept={actions.onAcceptPlanDiff || (() => {})}
+          onDismiss={handleDismiss}
+        />
+      );
+      break;
+
+    case 'orientation_diff_proposal':
+      cardContent = (
+        <OrientationDiffProposalCard
+          card={card}
+          onAccept={actions.onAcceptOrientationDiff || (() => {})}
+          onDismiss={handleDismiss}
+        />
+      );
+      break;
+
+    case 'position_update_proposal':
+      cardContent = (
+        <PositionUpdateProposalCard
+          card={card}
+          onAccept={async (caseId, newPosition, reason, messageId) => {
+            await actions.onAcceptPositionUpdate?.(caseId, newPosition, reason, messageId);
+            handleDismiss();
+          }}
+          onDismiss={async (caseId, messageId) => {
+            // Always dismiss visually — dismiss failures are non-critical
+            try {
+              await actions.onDismissPositionUpdate?.(caseId, messageId);
+            } finally {
+              handleDismiss();
+            }
+          }}
+        />
+      );
+      break;
+
+    case 'tool_executed':
+      cardContent = (
+        <ToolExecutedCard
+          card={card}
+          onDismiss={handleDismiss}
+        />
+      );
+      break;
+
+    case 'tool_confirmation':
+      cardContent = (
+        <ToolConfirmationCard
+          card={card}
+          onConfirm={actions.onConfirmToolAction || (async () => {})}
           onDismiss={handleDismiss}
         />
       );

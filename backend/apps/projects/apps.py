@@ -1,4 +1,8 @@
+import logging
+
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectsConfig(AppConfig):
@@ -18,7 +22,7 @@ class ProjectsConfig(AppConfig):
             try:
                 from apps.common.embeddings import _get_service
                 _get_service()
-            except Exception:
-                pass  # Non-critical — model loads lazily on first use
+            except Exception as e:
+                logger.warning("Embedding service warm-up skipped: %s", e)
 
         threading.Thread(target=_prewarm, daemon=True).start()

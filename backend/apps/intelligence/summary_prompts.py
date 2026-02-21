@@ -72,6 +72,7 @@ def build_summary_user_prompt(
     recent_deltas: List[Dict[str, Any]],
     previous_summary: Optional[Dict[str, Any]],
     attention_patterns: Dict[str, Any],
+    thematic_labels: Optional[List[str]] = None,
 ) -> str:
     """
     Build the user prompt with all context for summary generation.
@@ -85,6 +86,8 @@ def build_summary_user_prompt(
         recent_deltas: From GraphDeltaService.get_project_deltas()
         previous_summary: Previous sections JSON for "what changed" comparison
         attention_patterns: Tensions, gaps, untested assumptions
+        thematic_labels: Theme labels from a prior thematic summary,
+                         to maintain naming continuity across tiers
     """
     parts = []
 
@@ -120,6 +123,13 @@ def build_summary_user_prompt(
                 source_tag = f" (from: {source})" if source else ""
                 parts.append(f"  [nodeId:{nid}] [{ntype}][{status}] {content}{source_tag}")
     parts.append("")
+
+    # ── Thematic labels (for continuity from thematic tier) ──
+    if thematic_labels:
+        parts.append("## Thematic Labels (from initial analysis, maintain where appropriate)")
+        for tl in thematic_labels:
+            parts.append(f"  - {tl}")
+        parts.append("")
 
     # ── Case summaries ──
     if case_summaries:
